@@ -1,3 +1,1179 @@
+//! `vellum`: every Vellum document operation from the command line.
+//!
+//! Page numbers are 1-based and accept range expressions such as
+//! `1-3,5,end`, `odd`, `even` or `all,!2`.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+use clap::{Args, Parser, Subcommand};
+use vellum_core::annotations::{comments_summary, list_annotations, remove_annotations};
+use vellum_core::bookmarks::{BookmarkEntry, flatten_bookmarks, read_bookmarks, set_bookmarks};
+use vellum_core::create::{ImagePageSettings, TextPageSettings, blank_document, images_to_pdf, markdown_to_pdf, text_to_pdf};
+use vellum_core::document::merge_documents;
+use vellum_core::engine::{self, RenderOptions};
+use vellum_core::fonts::StandardFont;
+use vellum_core::forms;
+use vellum_core::metadata::{self, DocumentInfo, PageLabelRange};
+use vellum_core::pages::{self, Margins, NUpLayout, SplitRule, paper_size};
+use vellum_core::ranges::parse_page_ranges;
+use vellum_core::redact::{self, RedactionSettings};
+use vellum_core::security::{self, AllowedActions, Cipher, ProtectionSettings};
+use vellum_core::stamp::{self, Anchor, HeaderFooter, ImageStamp, TextStamp};
+use vellum_core::{Pdf, SaveSettings};
+
+#[derive(Parser)]
+#[command(name = "vellum", version, about = "Read, edit, secure and convert PDF files.")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+/// The input file plus its password, shared by most commands.
+#[derive(Args, Clone)]
+struct Input {
+    /// The PDF to read.
+    input: PathBuf,
+    /// Password for an encrypted input.
+    #[arg(long)]
+    password: Option<String>,
+}
+
+/// Where to write the result.
+#[derive(Args, Clone)]
+struct Output {
+    /// The file to write; defaults to overwriting the input.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    /// Pack objects into compressed streams for a smaller file.
+    #[arg(long)]
+    compact: bool,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Show page count, sizes, properties, security and structure.
+    Info {
+        #[command(flatten)]
+        input: Input,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Combine files in order, with a bookmark for each.
+    Merge {
+        /// Files to merge, in order.
+        #[arg(required = true, num_args = 2..)]
+        inputs: Vec<PathBuf>,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Skip the per-file bookmarks.
+        #[arg(long)]
+        no_bookmarks: bool,
+    },
+    /// Divide a file into several.
+    Split {
+        #[command(flatten)]
+        input: Input,
+        /// A new file every N pages.
+        #[arg(long, conflicts_with_all = ["ranges", "bookmarks", "max_size"])]
+        every: Option<u32>,
+        /// One file per range, e.g. --ranges 1-3 --ranges 4-end.
+        #[arg(long)]
+        ranges: Vec<String>,
+        /// One file per top-level bookmark.
+        #[arg(long)]
+        bookmarks: bool,
+        /// Parts no bigger than this many megabytes.
+        #[arg(long)]
+        max_size: Option<f64>,
+        /// Folder for the parts; defaults to the input's folder.
+        #[arg(short, long)]
+        output_folder: Option<PathBuf>,
+    },
+    /// Copy pages into a new file.
+    Extract {
+        #[command(flatten)]
+        input: Input,
+        pages: String,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Remove pages.
+    Delete {
+        #[command(flatten)]
+        input: Input,
+        pages: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Rotate pages clockwise by 90, 180 or 270 degrees.
+    Rotate {
+        #[command(flatten)]
+        input: Input,
+        #[arg(allow_negative_numbers = true)]
+        degrees: i64,
+        #[arg(default_value = "all")]
+        pages: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Put pages in a new order, e.g. "3,1,2,4-end"; pages left out are dropped.
+    Reorder {
+        #[command(flatten)]
+        input: Input,
+        order: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Reverse the page order.
+    Reverse {
+        #[command(flatten)]
+        input: Input,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Insert blank pages, or pages from another file, after a page (0 = front).
+    Insert {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long, default_value_t = 0)]
+        after: u32,
+        /// Pages come from this file instead of being blank.
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Which pages of --from to insert.
+        #[arg(long, default_value = "all")]
+        from_pages: String,
+        /// Number of blank pages.
+        #[arg(long, default_value_t = 1)]
+        count: u32,
+        /// Paper size for blank pages (letter, a4, ...); defaults to the neighbor's size.
+        #[arg(long)]
+        size: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Duplicate pages in place.
+    Duplicate {
+        #[command(flatten)]
+        input: Input,
+        pages: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Trim margins (points) from pages.
+    Crop {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        #[arg(long, default_value_t = 0.0)]
+        left: f32,
+        #[arg(long, default_value_t = 0.0)]
+        right: f32,
+        #[arg(long, default_value_t = 0.0)]
+        top: f32,
+        #[arg(long, default_value_t = 0.0)]
+        bottom: f32,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Scale pages onto a paper size (letter, legal, a4, a3, ...).
+    Resize {
+        #[command(flatten)]
+        input: Input,
+        size: String,
+        #[arg(long)]
+        landscape: bool,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Print several pages per sheet.
+    Nup {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long, default_value_t = 2)]
+        columns: u32,
+        #[arg(long, default_value_t = 1)]
+        rows: u32,
+        #[arg(long, default_value = "letter")]
+        sheet: String,
+        /// Lay the sheet sideways; the default for two pages side by side.
+        #[arg(long)]
+        landscape: Option<bool>,
+        #[arg(long)]
+        frames: bool,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Merge front sides and back sides scanned separately.
+    Interleave {
+        fronts: PathBuf,
+        backs: PathBuf,
+        /// The backs were scanned last page first.
+        #[arg(long)]
+        backs_reversed: bool,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Remove pages that draw nothing.
+    RemoveBlank {
+        #[command(flatten)]
+        input: Input,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// List bookmarks, or replace them from a JSON file.
+    Bookmarks {
+        #[command(flatten)]
+        input: Input,
+        /// JSON list of {"title", "page", "children"} to write.
+        #[arg(long)]
+        set: Option<PathBuf>,
+        /// Remove all bookmarks.
+        #[arg(long)]
+        clear: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Show or change document properties.
+    Meta {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        author: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        keywords: Option<String>,
+        #[arg(long)]
+        creator: Option<String>,
+        /// Remove all properties and XMP metadata.
+        #[arg(long)]
+        strip: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Set page labels, e.g. --range 1:roman --range 5:decimal:1 --range 20:decimal::A-
+    Labels {
+        #[command(flatten)]
+        input: Input,
+        /// first_page:style[:start[:prefix]]
+        #[arg(long = "range", required = true)]
+        ranges: Vec<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Encrypt with a password and permissions.
+    Protect {
+        #[command(flatten)]
+        input: Input,
+        /// Password needed to open; omit to restrict permissions only.
+        #[arg(long, default_value = "")]
+        user_password: String,
+        /// Password that lifts all restrictions; random when omitted.
+        #[arg(long, default_value = "")]
+        owner_password: String,
+        /// Use AES-128 for older readers.
+        #[arg(long)]
+        aes128: bool,
+        #[arg(long)]
+        no_print: bool,
+        #[arg(long)]
+        no_copy: bool,
+        #[arg(long)]
+        no_edit: bool,
+        #[arg(long)]
+        no_comments: bool,
+        #[arg(long)]
+        no_forms: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Remove encryption (needs the password).
+    Unprotect {
+        #[command(flatten)]
+        input: Input,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Stamp text across pages.
+    Watermark {
+        #[command(flatten)]
+        input: Input,
+        text: String,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        /// Font size; 0 fits the page.
+        #[arg(long, default_value_t = 0.0)]
+        size: f32,
+        #[arg(long, default_value = "helvetica-bold")]
+        font: String,
+        /// Color as a hex code such as d91a1a.
+        #[arg(long, default_value = "d91a1a")]
+        color: String,
+        #[arg(long, default_value_t = 0.25)]
+        opacity: f32,
+        #[arg(long, default_value_t = 45.0, allow_negative_numbers = true)]
+        rotation: f32,
+        /// center, top, bottom-right, ...
+        #[arg(long, default_value = "center")]
+        position: String,
+        #[arg(long)]
+        behind: bool,
+        #[arg(long)]
+        outline: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Add headers and footers. Tokens: {page} {pages} {label} {date} {time} {file} {title} {bates}.
+    HeaderFooter {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long, default_value = "")]
+        header_left: String,
+        #[arg(long, default_value = "")]
+        header_center: String,
+        #[arg(long, default_value = "")]
+        header_right: String,
+        #[arg(long, default_value = "")]
+        footer_left: String,
+        #[arg(long, default_value = "")]
+        footer_center: String,
+        #[arg(long, default_value = "")]
+        footer_right: String,
+        #[arg(long, default_value_t = 9.0)]
+        size: f32,
+        #[arg(long, default_value_t = 24.0)]
+        margin: f32,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Bates-number pages; numbering continues across the files given.
+    Bates {
+        #[arg(required = true)]
+        inputs: Vec<PathBuf>,
+        #[arg(long, default_value = "")]
+        prefix: String,
+        #[arg(long, default_value = "")]
+        suffix: String,
+        #[arg(long, default_value_t = 1)]
+        start: u64,
+        #[arg(long, default_value_t = 6)]
+        digits: usize,
+        /// bottom-right, bottom-left, top-right, ...
+        #[arg(long, default_value = "bottom-right")]
+        position: String,
+        /// Folder for the numbered copies; defaults to overwriting.
+        #[arg(short, long)]
+        output_folder: Option<PathBuf>,
+    },
+    /// Place an image (logo, signature, seal) on pages.
+    StampImage {
+        #[command(flatten)]
+        input: Input,
+        image: PathBuf,
+        #[arg(long, default_value_t = 120.0)]
+        width: f32,
+        #[arg(long, default_value = "bottom-right")]
+        position: String,
+        #[arg(long, default_value_t = 1.0)]
+        opacity: f32,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Fill page backgrounds with a color.
+    Background {
+        #[command(flatten)]
+        input: Input,
+        color: String,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Make a new PDF from images, text, Markdown, or nothing.
+    Create {
+        #[command(subcommand)]
+        source: CreateSource,
+    },
+    /// List, summarize or remove comments.
+    Comments {
+        #[command(flatten)]
+        input: Input,
+        /// Print a readable summary grouped by page.
+        #[arg(long)]
+        summary: bool,
+        /// Remove comments of these types (Highlight, Text, Ink, ...), or all with "all".
+        #[arg(long)]
+        remove: Vec<String>,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Work with form fields.
+    Form {
+        #[command(subcommand)]
+        action: FormAction,
+    },
+    /// Permanently remove text matching patterns, sensitive data, or marked areas.
+    Redact {
+        #[command(flatten)]
+        input: Input,
+        /// A regular expression to redact; repeat for several.
+        #[arg(long)]
+        pattern: Vec<String>,
+        /// Plain words or phrases to redact (case-insensitive).
+        #[arg(long)]
+        text: Vec<String>,
+        /// Redact emails, phone numbers, SSNs, card numbers, dates, IP addresses, ZIP codes and URLs.
+        #[arg(long)]
+        sensitive: bool,
+        /// Apply redaction marks already placed in the document.
+        #[arg(long)]
+        marked: bool,
+        /// Text written in each box, e.g. "REDACTED".
+        #[arg(long, default_value = "")]
+        label: String,
+        /// Also remove document properties and XMP metadata.
+        #[arg(long)]
+        strip_metadata: bool,
+        /// List what would be redacted without changing anything.
+        #[arg(long)]
+        dry_run: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Find text, printing each match with its page.
+    Search {
+        #[command(flatten)]
+        input: Input,
+        query: String,
+        #[arg(long)]
+        regex: bool,
+        #[arg(long)]
+        match_case: bool,
+        #[arg(long)]
+        whole_words: bool,
+    },
+    /// Extract the text of the document.
+    Text {
+        #[command(flatten)]
+        input: Input,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Render pages to PNG or JPEG images.
+    Render {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        #[arg(long, default_value_t = 150.0)]
+        dpi: f32,
+        /// png or jpg.
+        #[arg(long, default_value = "png")]
+        format: String,
+        #[arg(long)]
+        grayscale: bool,
+        #[arg(short, long)]
+        output_folder: Option<PathBuf>,
+    },
+    /// Save every embedded image as a PNG.
+    Images {
+        #[command(flatten)]
+        input: Input,
+        /// Skip images smaller than this many pixels on their short side.
+        #[arg(long, default_value_t = 16)]
+        min_size: u32,
+        #[arg(short, long)]
+        output_folder: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CreateSource {
+    /// One page per image.
+    Images {
+        #[arg(required = true)]
+        images: Vec<PathBuf>,
+        /// A fixed paper size; otherwise pages match the images.
+        #[arg(long)]
+        size: Option<String>,
+        #[arg(long, default_value_t = 0.0)]
+        margin: f32,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Typeset a plain text file.
+    Text {
+        file: PathBuf,
+        #[arg(long, default_value = "letter")]
+        size: String,
+        #[arg(long, default_value = "helvetica")]
+        font: String,
+        #[arg(long, default_value_t = 11.0)]
+        font_size: f32,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Typeset a Markdown file.
+    Markdown {
+        file: PathBuf,
+        #[arg(long, default_value = "letter")]
+        size: String,
+        #[arg(long, default_value = "helvetica")]
+        font: String,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Blank pages.
+    Blank {
+        #[arg(long, default_value_t = 1)]
+        pages: u32,
+        #[arg(long, default_value = "letter")]
+        size: String,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum FormAction {
+    /// List fields with their types and values.
+    List {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fill fields from a JSON object, an XFDF file, or name=value pairs.
+    Fill {
+        #[command(flatten)]
+        input: Input,
+        /// JSON ({"name": "value"}) or XFDF file.
+        #[arg(long)]
+        data: Option<PathBuf>,
+        /// name=value; repeat for several.
+        #[arg(long = "set")]
+        values: Vec<String>,
+        /// Flatten after filling so the values can't be changed.
+        #[arg(long)]
+        flatten: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Export field values as JSON, XFDF or CSV.
+    Export {
+        #[command(flatten)]
+        input: Input,
+        /// json, xfdf or csv.
+        #[arg(long, default_value = "json")]
+        format: String,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Find blanks (____) and boxes and turn them into fields.
+    Detect {
+        #[command(flatten)]
+        input: Input,
+        /// Only list what would be added.
+        #[arg(long)]
+        dry_run: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Clear every field.
+    Reset {
+        #[command(flatten)]
+        input: Input,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Burn fields (and with --all, every comment) into the page.
+    Flatten {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long)]
+        all: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
 fn main() {
-    println!("Hello, world!");
+    // Windows gives the main thread only 1 MB of stack, which the argument
+    // parser for this many commands can exhaust in debug builds.
+    let worker = std::thread::Builder::new().stack_size(16 * 1024 * 1024).spawn(|| run(Cli::parse())).expect("could not start the worker thread");
+    match worker.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("error: {error:#}");
+            std::process::exit(1);
+        }
+        Err(_) => std::process::exit(101),
+    }
+}
+
+fn open(input: &Input) -> Result<Pdf> {
+    Pdf::open(&input.input, input.password.as_deref())
+}
+
+fn save(pdf: &mut Pdf, input: &Path, output: &Output) -> Result<PathBuf> {
+    let target = output.output.clone().unwrap_or_else(|| input.to_path_buf());
+    pdf.save(&target, &SaveSettings { use_object_streams: output.compact, ..Default::default() })?;
+    println!("wrote {}", target.display());
+    Ok(target)
+}
+
+fn save_to(pdf: &mut Pdf, target: &Path) -> Result<()> {
+    pdf.save(target, &SaveSettings::default())?;
+    println!("wrote {}", target.display());
+    Ok(())
+}
+
+fn pages_of(pdf: &Pdf, expression: &str) -> Result<Vec<u32>> {
+    parse_page_ranges(expression, pdf.page_count())
+}
+
+fn paper(name: &str, landscape: bool) -> Result<(f32, f32)> {
+    let (width, height) = paper_size(name).with_context(|| format!("unknown paper size \"{name}\" (try letter, legal, tabloid, a3, a4, a5)"))?;
+    Ok(if landscape { (height, width) } else { (width, height) })
+}
+
+fn font(name: &str) -> Result<StandardFont> {
+    StandardFont::from_name(name).with_context(|| format!("unknown font \"{name}\" (try helvetica, helvetica-bold, times, courier)"))
+}
+
+fn anchor(name: &str) -> Result<Anchor> {
+    Anchor::from_name(name).with_context(|| format!("unknown position \"{name}\" (try center, top, bottom-right)"))
+}
+
+/// Reads `d91a1a` or `#d91a1a` as a color.
+fn hex_color(text: &str) -> Result<[f32; 3]> {
+    let digits = text.trim_start_matches('#');
+    if digits.len() != 6 {
+        bail!("colors are six hex digits, like d91a1a");
+    }
+    let channel = |i: usize| u8::from_str_radix(&digits[i..i + 2], 16).map(|v| v as f32 / 255.0);
+    Ok([channel(0)?, channel(2)?, channel(4)?])
+}
+
+fn stem(path: &Path) -> String {
+    path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into())
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+fn folder_or_parent(folder: &Option<PathBuf>, input: &Path) -> Result<PathBuf> {
+    let folder = folder.clone().unwrap_or_else(|| input.parent().map(Path::to_path_buf).unwrap_or_default());
+    std::fs::create_dir_all(&folder)?;
+    Ok(folder)
+}
+
+fn write_or_print(text: &str, output: &Option<PathBuf>) -> Result<()> {
+    match output {
+        Some(path) => {
+            std::fs::write(path, text)?;
+            println!("wrote {}", path.display());
+        }
+        None => println!("{text}"),
+    }
+    Ok(())
+}
+
+fn run(cli: Cli) -> Result<()> {
+    match cli.command {
+        Command::Info { input, json } => info(&input, json)?,
+        Command::Merge { inputs, output, no_bookmarks } => {
+            let sources = inputs.iter().map(|path| Ok((stem(path), Pdf::open(path, None)?))).collect::<Result<Vec<_>>>()?;
+            let mut merged = merge_documents(&sources, !no_bookmarks)?;
+            save_to(&mut merged, &output)?;
+        }
+        Command::Split { input, every, ranges, bookmarks, max_size, output_folder } => {
+            let pdf = open(&input)?;
+            let rule = if let Some(n) = every {
+                SplitRule::EveryNPages(n)
+            } else if !ranges.is_empty() {
+                SplitRule::Ranges(ranges)
+            } else if bookmarks {
+                SplitRule::TopLevelBookmarks
+            } else if let Some(megabytes) = max_size {
+                SplitRule::MaxBytes((megabytes * 1_048_576.0) as u64)
+            } else {
+                SplitRule::EveryNPages(1)
+            };
+            let folder = folder_or_parent(&output_folder, &input.input)?;
+            for (suffix, mut part) in pages::split(&pdf, &rule)? {
+                save_to(&mut part, &folder.join(format!("{}-{suffix}.pdf", stem(&input.input))))?;
+            }
+        }
+        Command::Extract { input, pages, output } => {
+            let pdf = open(&input)?;
+            let mut part = pdf.extract_pages(&pages_of(&pdf, &pages)?)?;
+            save_to(&mut part, &output)?;
+        }
+        Command::Delete { input, pages, output } => {
+            let mut pdf = open(&input)?;
+            let doomed = pages_of(&pdf, &pages)?;
+            pages::delete_pages(&mut pdf, &doomed)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Rotate { input, degrees, pages, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            pages::rotate_pages(&mut pdf, &chosen, degrees)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Reorder { input, order, output } => {
+            let mut pdf = open(&input)?;
+            let new_order = pages_of(&pdf, &order)?;
+            pages::reorder_pages(&mut pdf, &new_order)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Reverse { input, output } => {
+            let mut pdf = open(&input)?;
+            pages::reverse_pages(&mut pdf)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Insert { input, after, from, from_pages, count, size, output } => {
+            let mut pdf = open(&input)?;
+            match from {
+                Some(path) => {
+                    let source = Pdf::open(&path, None)?;
+                    let chosen = pages_of(&source, &from_pages)?;
+                    pages::insert_pages_from(&mut pdf, &source, &chosen, after)?;
+                }
+                None => {
+                    let size = size.map(|name| paper(&name, false)).transpose()?;
+                    pages::insert_blank_pages(&mut pdf, after, count, size)?;
+                }
+            }
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Duplicate { input, pages, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            pages::duplicate_pages(&mut pdf, &chosen)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Crop { input, pages, left, right, top, bottom, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            pages::crop_pages(&mut pdf, &chosen, Margins { left, bottom, right, top })?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Resize { input, size, landscape, pages, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            pages::resize_pages(&mut pdf, &chosen, paper(&size, landscape)?)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Nup { input, columns, rows, sheet, landscape, frames, output } => {
+            let pdf = open(&input)?;
+            let landscape = landscape.unwrap_or(columns > rows);
+            let (sheet_width, sheet_height) = paper(&sheet, landscape)?;
+            let mut result = pages::n_up(&pdf, &NUpLayout { columns, rows, sheet_width, sheet_height, gutter: 18.0, draw_frames: frames })?;
+            save_to(&mut result, &output)?;
+        }
+        Command::Interleave { fronts, backs, backs_reversed, output } => {
+            let mut result = pages::interleave(&Pdf::open(&fronts, None)?, &Pdf::open(&backs, None)?, backs_reversed)?;
+            save_to(&mut result, &output)?;
+        }
+        Command::RemoveBlank { input, output } => {
+            let mut pdf = open(&input)?;
+            let removed = pages::remove_blank_pages(&mut pdf)?;
+            println!("blank pages: {removed:?}");
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Bookmarks { input, set, clear, output } => {
+            let mut pdf = open(&input)?;
+            if clear || set.is_some() {
+                let entries: Vec<BookmarkEntry> = match set {
+                    Some(path) => serde_json::from_str(&std::fs::read_to_string(&path)?).context("bookmarks JSON must be a list of {\"title\", \"page\", \"children\"}")?,
+                    None => Vec::new(),
+                };
+                set_bookmarks(&mut pdf, &entries)?;
+                save(&mut pdf, &input.input, &output)?;
+            } else {
+                for (depth, entry) in flatten_bookmarks(&read_bookmarks(&pdf)?) {
+                    println!("{}{}  (page {})", "  ".repeat(depth), entry.title, entry.page);
+                }
+            }
+        }
+        Command::Meta { input, title, author, subject, keywords, creator, strip, output } => {
+            let mut pdf = open(&input)?;
+            if strip {
+                metadata::strip_metadata(&mut pdf)?;
+                save(&mut pdf, &input.input, &output)?;
+            } else if title.is_some() || author.is_some() || subject.is_some() || keywords.is_some() || creator.is_some() {
+                metadata::write_info(&mut pdf, &DocumentInfo { title, author, subject, keywords, creator, ..Default::default() })?;
+                save(&mut pdf, &input.input, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&metadata::read_info(&pdf))?);
+            }
+        }
+        Command::Labels { input, ranges, output } => {
+            let mut pdf = open(&input)?;
+            let parsed = ranges
+                .iter()
+                .map(|text| {
+                    let parts: Vec<&str> = text.split(':').collect();
+                    Ok(PageLabelRange {
+                        first_page: parts.first().context("empty range")?.parse().context("the first part is the starting page")?,
+                        style: parts.get(1).copied().unwrap_or("decimal").to_string(),
+                        start: parts.get(2).filter(|s| !s.is_empty()).map(|s| s.parse()).transpose()?.unwrap_or(1),
+                        prefix: parts.get(3).copied().unwrap_or("").to_string(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            metadata::write_page_labels(&mut pdf, &parsed)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Protect { input, user_password, owner_password, aes128, no_print, no_copy, no_edit, no_comments, no_forms, output } => {
+            let mut pdf = open(&input)?;
+            let allowed = AllowedActions {
+                print: !no_print,
+                print_high_quality: !no_print,
+                copy_text_and_images: !no_copy,
+                edit_content: !no_edit,
+                add_comments: !no_comments,
+                fill_forms: !no_forms,
+                assemble_pages: !no_edit,
+            };
+            let owner_given = !owner_password.is_empty();
+            let owner = security::protect(&mut pdf, &ProtectionSettings { user_password, owner_password, cipher: if aes128 { Cipher::Aes128 } else { Cipher::Aes256 }, allowed, leave_metadata_unencrypted: false })?;
+            let target = output.output.clone().unwrap_or_else(|| input.input.clone());
+            // Encrypted objects must not be recompressed or pruned after encryption.
+            pdf.save(&target, &SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?;
+            println!("wrote {}", target.display());
+            if !owner_given {
+                println!("owner password (keep it safe): {owner}");
+            }
+        }
+        Command::Unprotect { input, output } => {
+            let mut pdf = open(&input)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Watermark { input, text, pages, size, font: font_name, color, opacity, rotation, position, behind, outline, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            let stamp_settings = TextStamp { text: text.replace("\\n", "\n"), font: font(&font_name)?, size, color: hex_color(&color)?, opacity, rotation, anchor: anchor(&position)?, margin: 36.0, behind_content: behind, outline_only: outline };
+            stamp::stamp_text(&mut pdf, &chosen, &stamp_settings, &file_name(&input.input))?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::HeaderFooter { input, header_left, header_center, header_right, footer_left, footer_center, footer_right, size, margin, pages, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            let settings = HeaderFooter { header_left, header_center, header_right, footer_left, footer_center, footer_right, size, margin, ..Default::default() };
+            stamp::add_header_footer(&mut pdf, &chosen, &settings, &file_name(&input.input))?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Bates { inputs, prefix, suffix, start, digits, position, output_folder } => {
+            let mut next = start;
+            let slot = anchor(&position)?;
+            for path in &inputs {
+                let mut pdf = Pdf::open(path, None)?;
+                let all = pages_of(&pdf, "all")?;
+                let mut settings = HeaderFooter { footer_center: String::new(), bates_start: next, bates_digits: digits, bates_prefix: prefix.clone(), bates_suffix: suffix.clone(), size: 10.0, ..Default::default() };
+                match slot {
+                    Anchor::TopLeft => settings.header_left = "{bates}".into(),
+                    Anchor::TopCenter => settings.header_center = "{bates}".into(),
+                    Anchor::TopRight => settings.header_right = "{bates}".into(),
+                    Anchor::BottomLeft => settings.footer_left = "{bates}".into(),
+                    Anchor::BottomCenter => settings.footer_center = "{bates}".into(),
+                    _ => settings.footer_right = "{bates}".into(),
+                }
+                let first = next;
+                next = stamp::add_header_footer(&mut pdf, &all, &settings, &file_name(path))?;
+                let target = match &output_folder {
+                    Some(folder) => {
+                        std::fs::create_dir_all(folder)?;
+                        folder.join(file_name(path))
+                    }
+                    None => path.clone(),
+                };
+                save_to(&mut pdf, &target)?;
+                println!("  {}{first:0digits$}{suffix} to {}{:0digits$}{suffix}", prefix, prefix, next - 1);
+            }
+        }
+        Command::StampImage { input, image, width, position, opacity, pages, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            stamp::stamp_image(&mut pdf, &chosen, &image, &ImageStamp { width, anchor: anchor(&position)?, margin: 36.0, opacity, behind_content: false })?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Background { input, color, pages, output } => {
+            let mut pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            stamp::set_background_color(&mut pdf, &chosen, hex_color(&color)?)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Create { source } => create(source)?,
+        Command::Comments { input, summary, remove, json, output } => {
+            let mut pdf = open(&input)?;
+            if !remove.is_empty() {
+                let kinds: Vec<&str> = if remove.iter().any(|r| r.eq_ignore_ascii_case("all")) { Vec::new() } else { remove.iter().map(String::as_str).collect() };
+                let count = remove_annotations(&mut pdf, &kinds)?;
+                println!("removed {count} annotations");
+                save(&mut pdf, &input.input, &output)?;
+            } else if summary {
+                println!("{}", comments_summary(&pdf));
+            } else if json {
+                println!("{}", serde_json::to_string_pretty(&list_annotations(&pdf))?);
+            } else {
+                for comment in list_annotations(&pdf) {
+                    println!("page {:>3}  {:<10} {:<16} {}", comment.page, comment.subtype, comment.author, comment.contents.replace('\n', " "));
+                }
+            }
+        }
+        Command::Form { action } => form(action)?,
+        Command::Redact { input, pattern, text, sensitive, marked, label, strip_metadata, dry_run, output } => {
+            let mut patterns: Vec<regex::Regex> = pattern.iter().map(|p| regex::Regex::new(p)).collect::<Result<_, _>>()?;
+            for phrase in &text {
+                patterns.push(engine::search_pattern(phrase, false, false, false)?);
+            }
+            if sensitive {
+                patterns.extend(redact::sensitive_data_patterns().into_iter().map(|(_, p)| p));
+            }
+            let bytes = std::fs::read(&input.input)?;
+            let mut areas = if patterns.is_empty() {
+                Vec::new()
+            } else {
+                let document = engine::open_document(bytes.clone(), input.password.as_deref())?;
+                redact::find_areas(&document, &patterns)?
+            };
+            let mut pdf = open(&input)?;
+            if marked {
+                areas.extend(redact::marked_areas(&pdf));
+            }
+            if areas.is_empty() {
+                bail!("nothing to redact: give --pattern, --text, --sensitive or --marked");
+            }
+            if dry_run {
+                for area in &areas {
+                    println!("page {:>3}  [{:.0}, {:.0}, {:.0}, {:.0}]", area.page, area.rect[0], area.rect[1], area.rect[2], area.rect[3]);
+                }
+                println!("{} areas", areas.len());
+                return Ok(());
+            }
+            let report = redact::apply_redactions(&mut pdf, &areas, &RedactionSettings { overlay_text: label, remove_metadata: strip_metadata, ..Default::default() })?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            save(&mut pdf, &input.input, &output)?;
+        }
+        Command::Search { input, query, regex, match_case, whole_words } => {
+            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let pattern = engine::search_pattern(&query, regex, match_case, whole_words)?;
+            let matches = engine::search_document(&document, &pattern)?;
+            for found in &matches {
+                println!("page {:>3}  {}", found.page_index + 1, found.text.replace(['\n', '\r'], " "));
+            }
+            println!("{} matches", matches.len());
+        }
+        Command::Text { input, output } => {
+            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            write_or_print(&engine::extract_text(&document)?, &output)?;
+        }
+        Command::Render { input, pages, dpi, format, grayscale, output_folder } => {
+            let pdf = open(&input)?;
+            let chosen = pages_of(&pdf, &pages)?;
+            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let folder = folder_or_parent(&output_folder, &input.input)?;
+            let extension = if format.eq_ignore_ascii_case("jpg") || format.eq_ignore_ascii_case("jpeg") { "jpg" } else { "png" };
+            for page in chosen {
+                let image = engine::render_page(&document, page as usize - 1, &RenderOptions { dpi, grayscale, ..Default::default() })?;
+                let target = folder.join(format!("{}-page-{page:03}.{extension}", stem(&input.input)));
+                if extension == "jpg" {
+                    image::DynamicImage::ImageRgba8(image).to_rgb8().save(&target)?;
+                } else {
+                    image.save(&target)?;
+                }
+                println!("wrote {}", target.display());
+            }
+        }
+        Command::Images { input, min_size, output_folder } => {
+            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let folder = folder_or_parent(&output_folder, &input.input)?;
+            let images = vellum_core::images::extract_images(&document, min_size)?;
+            for found in &images {
+                let target = folder.join(format!("{}-p{:03}-{}.png", stem(&input.input), found.page_number, found.index_on_page));
+                found.image.save(&target)?;
+                println!("wrote {} ({}x{})", target.display(), found.image.width(), found.image.height());
+            }
+            println!("{} images", images.len());
+        }
+    }
+    Ok(())
+}
+
+fn info(input: &Input, json: bool) -> Result<()> {
+    let bytes = std::fs::read(&input.input)?;
+    let security_report = security::inspect_security(&bytes);
+    let pdf = open(input)?;
+    let sizes = pages::page_sizes(&pdf)?;
+    let document_info = metadata::read_info(&pdf);
+    let bookmarks = read_bookmarks(&pdf).map(|b| flatten_bookmarks(&b).len()).unwrap_or(0);
+    let fields = forms::list_fields(&pdf).len();
+    let comments = list_annotations(&pdf).iter().filter(|a| a.subtype != "Link" && a.subtype != "Widget").count();
+    if json {
+        let summary = serde_json::json!({
+            "file": input.input,
+            "bytes": bytes.len(),
+            "version": pdf.doc.version,
+            "pages": pdf.page_count(),
+            "page_sizes_points": sizes,
+            "properties": document_info,
+            "security": security_report,
+            "bookmarks": bookmarks,
+            "form_fields": fields,
+            "comments": comments,
+            "page_labels": metadata::page_labels(&pdf),
+        });
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+        return Ok(());
+    }
+    println!("File        {} ({:.1} KB, PDF {})", input.input.display(), bytes.len() as f64 / 1024.0, pdf.doc.version);
+    println!("Pages       {}", pdf.page_count());
+    if let Some((width, height)) = sizes.first() {
+        let same = sizes.iter().all(|s| (s.0 - width).abs() < 1.0 && (s.1 - height).abs() < 1.0);
+        println!("Page size   {:.1} x {:.1} in ({:.0} x {:.0} pt){}", width / 72.0, height / 72.0, width, height, if same { "" } else { ", mixed sizes" });
+    }
+    let show = |label: &str, value: &Option<String>| {
+        if let Some(value) = value.as_deref().filter(|v| !v.is_empty()) {
+            println!("{label:<11} {value}");
+        }
+    };
+    show("Title", &document_info.title);
+    show("Author", &document_info.author);
+    show("Subject", &document_info.subject);
+    show("Keywords", &document_info.keywords);
+    show("Creator", &document_info.creator);
+    show("Producer", &document_info.producer);
+    show("Created", &document_info.creation_date);
+    show("Modified", &document_info.modification_date);
+    println!("Security    {}", if security_report.encrypted { format!("{}{}", security_report.cipher, if security_report.needs_password_to_open { ", password to open" } else { ", permissions only" }) } else { "none".into() });
+    println!("Bookmarks   {bookmarks}");
+    println!("Form fields {fields}");
+    println!("Comments    {comments}");
+    Ok(())
+}
+
+fn create(source: CreateSource) -> Result<()> {
+    match source {
+        CreateSource::Images { images, size, margin, output } => {
+            let settings = ImagePageSettings { page_size: size.map(|s| paper(&s, false)).transpose()?, margin, ..Default::default() };
+            save_to(&mut images_to_pdf(&images, &settings)?, &output)?;
+        }
+        CreateSource::Text { file, size, font: font_name, font_size, output } => {
+            let settings = TextPageSettings { page_size: paper(&size, false)?, font: font(&font_name)?, size: font_size, ..Default::default() };
+            save_to(&mut text_to_pdf(&std::fs::read_to_string(&file)?, &settings)?, &output)?;
+        }
+        CreateSource::Markdown { file, size, font: font_name, output } => {
+            let settings = TextPageSettings { page_size: paper(&size, false)?, font: font(&font_name)?, ..Default::default() };
+            save_to(&mut markdown_to_pdf(&std::fs::read_to_string(&file)?, &settings)?, &output)?;
+        }
+        CreateSource::Blank { pages, size, output } => {
+            save_to(&mut blank_document(pages, paper(&size, false)?)?, &output)?;
+        }
+    }
+    Ok(())
+}
+
+fn form(action: FormAction) -> Result<()> {
+    match action {
+        FormAction::List { input, json } => {
+            let pdf = open(&input)?;
+            let fields = forms::list_fields(&pdf);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&fields)?);
+            } else {
+                for field in &fields {
+                    let page = field.widgets.first().map(|w| w.0).unwrap_or(0);
+                    let options = if field.options.is_empty() { String::new() } else { format!("  [{}]", field.options.join(" | ")) };
+                    println!("{:<30} {:<11} page {:<3} = {:?}{}{}", field.name, format!("{:?}", field.field_type), page, field.value, options, if field.required { "  (required)" } else { "" });
+                }
+                println!("{} fields", fields.len());
+            }
+        }
+        FormAction::Fill { input, data, values, flatten, output } => {
+            let mut pdf = open(&input)?;
+            let mut map: BTreeMap<String, String> = BTreeMap::new();
+            if let Some(path) = data {
+                let text = std::fs::read_to_string(&path)?;
+                if text.trim_start().starts_with('<') {
+                    map.extend(forms::parse_xfdf(&text));
+                } else {
+                    let parsed: BTreeMap<String, serde_json::Value> = serde_json::from_str(&text).context("form data must be a JSON object of name: value")?;
+                    for (name, value) in parsed {
+                        map.insert(name, match value {
+                            serde_json::Value::String(s) => s,
+                            other => other.to_string(),
+                        });
+                    }
+                }
+            }
+            for pair in values {
+                let (name, value) = pair.split_once('=').context("--set takes name=value")?;
+                map.insert(name.to_string(), value.to_string());
+            }
+            let unmatched = forms::fill_fields(&mut pdf, &map)?;
+            if !unmatched.is_empty() {
+                eprintln!("no field named: {}", unmatched.join(", "));
+            }
+            if flatten {
+                forms::flatten(&mut pdf, true)?;
+            }
+            save(&mut pdf, &input.input, &output)?;
+        }
+        FormAction::Export { input, format, output } => {
+            let pdf = open(&input)?;
+            let text = match format.to_ascii_lowercase().as_str() {
+                "xfdf" => forms::export_xfdf(&pdf, &file_name(&input.input)),
+                "csv" => forms::export_csv(&pdf),
+                _ => serde_json::to_string_pretty(&forms::export_values(&pdf))?,
+            };
+            write_or_print(&text, &output)?;
+        }
+        FormAction::Detect { input, dry_run, output } => {
+            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let proposals = forms::detect_fields(&document)?;
+            drop(document);
+            for proposal in &proposals {
+                println!("page {:>3}  {:<24} {:?}", proposal.page, proposal.name, proposal.kind);
+            }
+            println!("{} fields found", proposals.len());
+            if !dry_run && !proposals.is_empty() {
+                let mut pdf = open(&input)?;
+                for proposal in &proposals {
+                    forms::add_field(&mut pdf, proposal)?;
+                }
+                save(&mut pdf, &input.input, &output)?;
+            }
+        }
+        FormAction::Reset { input, output } => {
+            let mut pdf = open(&input)?;
+            forms::reset_form(&mut pdf)?;
+            save(&mut pdf, &input.input, &output)?;
+        }
+        FormAction::Flatten { input, all, output } => {
+            let mut pdf = open(&input)?;
+            let count = forms::flatten(&mut pdf, !all)?;
+            println!("flattened {count} items");
+            save(&mut pdf, &input.input, &output)?;
+        }
+    }
+    Ok(())
 }

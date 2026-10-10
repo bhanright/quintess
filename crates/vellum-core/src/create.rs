@@ -191,7 +191,22 @@ pub fn markdown_to_pdf(markdown: &str, settings: &TextPageSettings) -> Result<Pd
 fn strip_inline_markup(text: &str) -> String {
     let links = regex::Regex::new(r"!?\[([^\]]*)\]\(([^)]*)\)").expect("valid pattern");
     let text = links.replace_all(text, "$1");
-    text.replace("**", "").replace("__", "").replace('`', "").replace(" *", " ").replace("* ", " ")
+    // Only paired markers around words count, so fill-in blanks like "____" survive.
+    let paired = regex::Regex::new(r"\*\*([^*\s][^*]*?)\*\*|__([^_\s][^_]*?)__|\*([^*\s][^*]*?)\*|`([^`]+)`").expect("valid pattern");
+    paired
+        .replace_all(&text, |captures: &regex::Captures| (1..=4).find_map(|group| captures.get(group)).map(|m| m.as_str().to_string()).unwrap_or_default())
+        .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_inline_markup;
+
+    #[test]
+    fn strips_emphasis_but_keeps_blanks() {
+        assert_eq!(strip_inline_markup("**bold**, *it*, `code` and [a link](x)"), "bold, it, code and a link");
+        assert_eq!(strip_inline_markup("Signed: ________"), "Signed: ________");
+    }
 }
 
 /// Lays blocks out top to bottom, starting new pages as they fill.
