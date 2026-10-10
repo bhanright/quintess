@@ -46,6 +46,7 @@ fn annotations_round_trip_and_render() {
     reply_to_annotation(&mut pdf, highlight_id, "Agreed", "Reviewer").unwrap();
 
     let (mut reopened, saved) = reload(&mut pdf);
+    std::fs::write(output_folder().join("annotated.pdf"), &saved).unwrap();
     let comments = list_annotations(&reopened);
     let kinds: Vec<&str> = comments.iter().map(|c| c.subtype.as_str()).collect();
     for expected in ["Highlight", "Underline", "StrikeOut", "Text", "FreeText", "Square", "Circle", "Line", "Ink", "Stamp", "Link"] {

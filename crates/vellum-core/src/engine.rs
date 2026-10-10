@@ -195,7 +195,7 @@ impl PageText {
                 let first = byte_to_char(found.start());
                 let last = byte_to_char(found.end());
                 let indices: Vec<usize> = (first..last).filter_map(|i| offsets.get(i).copied()).collect();
-                TextMatch { page_index: self.page_index, text: found.as_str().to_string(), rects: self.line_rects(&indices) }
+                TextMatch { page_index: self.page_index, text: found.as_str().to_string(), rects: self.line_rects(&indices), byte_offset: found.start() }
             })
             .collect()
     }
@@ -312,6 +312,8 @@ pub struct TextMatch {
     pub page_index: usize,
     pub text: String,
     pub rects: Vec<[f32; 4]>,
+    /// Where the match starts in the page string from [`PageText::as_string`].
+    pub byte_offset: usize,
 }
 
 /// Builds the regular expression for a search box query.

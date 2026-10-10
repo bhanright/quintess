@@ -21,3 +21,6 @@ pub mod security;
 pub mod strings;
 
 pub use document::{Pdf, SaveSettings};
+
+/// Re-exported so front ends use the same PDFium types as the engine.
+pub use pdfium_render;

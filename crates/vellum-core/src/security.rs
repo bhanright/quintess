@@ -158,7 +158,8 @@ fn ensure_document_id(pdf: &mut Pdf) {
     pdf.doc.trailer.set("ID", vec![id.clone(), id]);
 }
 
-fn random_password() -> String {
+/// A random 48-character hex password, used when no owner password is given.
+pub fn random_password() -> String {
     let mut bytes = [0u8; 24];
     let _ = getrandom::fill(&mut bytes);
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
