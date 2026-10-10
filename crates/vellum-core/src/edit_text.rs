@@ -935,6 +935,49 @@ fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], 
     lines
 }
 
+fn word_is_right_to_left(word: &Word) -> bool {
+    word.segments.iter().flat_map(|(text, _)| text.chars()).find(|c| c.is_alphabetic()).is_some_and(crate::unicode_text::is_right_to_left)
+}
+
+/// The order to draw a line's words in, left to right: Unicode's bidi
+/// levels for the line, with each run of right-to-left words reversed, so
+/// Arabic or Hebrew reads correctly, also inside Latin text.
+fn visual_word_order(words: &[Word]) -> Vec<usize> {
+    let texts: Vec<String> = words.iter().map(|w| w.segments.iter().map(|(t, _)| t.as_str()).collect()).collect();
+    let line = texts.join(" ");
+    let bidi = unicode_bidi::BidiInfo::new(&line, None);
+    let mut offset = 0;
+    let levels: Vec<u8> = texts
+        .iter()
+        .map(|text| {
+            let level = bidi.levels.get(offset).map(|l| l.number()).unwrap_or(0);
+            offset += text.len() + 1;
+            level
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..words.len()).collect();
+    let highest = levels.iter().copied().max().unwrap_or(0);
+    let lowest_odd = levels.iter().copied().filter(|l| l % 2 == 1).min().unwrap_or(highest + 1);
+    // From the highest level down, reverse every run at that level or above.
+    let mut level = highest;
+    while level >= lowest_odd && level > 0 {
+        let mut index = 0;
+        while index < order.len() {
+            if levels[order[index]] >= level {
+                let start = index;
+                while index < order.len() && levels[order[index]] >= level {
+                    index += 1;
+                }
+                order[start..index].reverse();
+            } else {
+                index += 1;
+            }
+        }
+        level -= 1;
+    }
+    order
+}
+
 /// Fonts for each style in use: the original program when it can draw all
 /// of that style's characters, otherwise the closest system or standard font.
 /// Returns the setters (by palette index) and the fonts standing in for
@@ -1108,8 +1151,12 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
             _ => left + line.indent,
         };
         let mut line_rules: Vec<TextRule> = Vec::new();
-        for (word_index, word) in line.words.iter().enumerate() {
-            for (text, style_index) in &word.segments {
+        let order = visual_word_order(&line.words);
+        for (position, &word_index) in order.iter().enumerate() {
+            let word = &line.words[word_index];
+            // A right-to-left word's styled pieces go right to left too.
+            let segments: Vec<&(String, usize)> = if word_is_right_to_left(word) { word.segments.iter().rev().collect() } else { word.segments.iter().collect() };
+            for (text, style_index) in segments {
                 let span = &rich.palette[*style_index];
                 let segment_start = x;
                 if current_color != Some(span.color) {
@@ -1124,8 +1171,11 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
                     line_rules.push(TextRule { start: segment_start, end: x, baseline, size: sizes[*style_index], color: span.color, underline: span.underline, strikethrough: span.strikethrough });
                 }
             }
-            if let Some(gap) = line.gaps.get(word_index) {
-                x += gap + extra;
+            // The space between two words that sit side by side.
+            if let Some(&next) = order.get(position + 1) {
+                let between = if next.abs_diff(word_index) == 1 { line.gaps.get(word_index.min(next)).copied() } else { None };
+                let average = line.gaps.iter().sum::<f32>() / line.gaps.len().max(1) as f32;
+                x += between.unwrap_or(average) + extra;
             }
         }
         rules.extend(join_rules(line_rules, largest_size));

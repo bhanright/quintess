@@ -178,10 +178,90 @@ pub struct UnicodeFonts {
 /// A stretch of text drawn with one font.
 pub struct GlyphRun {
     pub font_id: ObjectId,
-    /// The glyph ids as a hexadecimal string operand.
-    pub hex: String,
+    pub glyphs: Vec<PlacedGlyph>,
     /// Width at a font size of 1 point.
     pub width: f32,
+}
+
+/// A glyph of an embedded subset, placed as the shaper decided; sizes are
+/// in thousandths of an em.
+pub struct PlacedGlyph {
+    /// The glyph's id in the subset.
+    pub id: u16,
+    /// Its own advance, as written in the font's width table.
+    pub default_width: f32,
+    /// How far the shaper moves on after it (kerning, marks, joining).
+    pub advance: f32,
+    /// Where the shaper moves the glyph itself, as for an accent over a letter.
+    pub x_offset: f32,
+    pub y_offset: f32,
+}
+
+impl GlyphRun {
+    /// Operators showing the run at `size` after `/Font size Tf`: glyphs in a
+    /// `TJ` array whose numbers carry the shaper's spacing, and a text rise
+    /// (`Ts`) for glyphs it raises or lowers.
+    pub fn operators(&self, size: f32) -> String {
+        let mut output = String::new();
+        let mut parts: Vec<String> = Vec::new();
+        let mut glyph_bytes: Vec<u8> = Vec::new();
+        let mut rise = 0.0f32;
+        fn flush_glyphs(parts: &mut Vec<String>, glyph_bytes: &mut Vec<u8>) {
+            if !glyph_bytes.is_empty() {
+                parts.push(hex_string(glyph_bytes));
+                glyph_bytes.clear();
+            }
+        }
+        fn flush_array(output: &mut String, parts: &mut Vec<String>) {
+            if !parts.is_empty() {
+                output.push_str(&format!("[{}] TJ ", parts.join(" ")));
+                parts.clear();
+            }
+        }
+        // A TJ number moves the next glyph left by that many thousandths of an em.
+        let adjustment = |value: f32| format!("{}", (value * 100.0).round() / 100.0);
+        for glyph in &self.glyphs {
+            if (glyph.y_offset - rise).abs() > 0.5 {
+                flush_glyphs(&mut parts, &mut glyph_bytes);
+                flush_array(&mut output, &mut parts);
+                output.push_str(&format!("{} Ts ", crate::pages::number(glyph.y_offset * size / 1000.0)));
+                rise = glyph.y_offset;
+            }
+            if glyph.x_offset.abs() > 0.5 {
+                flush_glyphs(&mut parts, &mut glyph_bytes);
+                parts.push(adjustment(-glyph.x_offset));
+            }
+            glyph_bytes.extend_from_slice(&glyph.id.to_be_bytes());
+            let after = glyph.x_offset + glyph.default_width - glyph.advance;
+            if after.abs() > 0.5 {
+                flush_glyphs(&mut parts, &mut glyph_bytes);
+                parts.push(adjustment(after));
+            }
+        }
+        flush_glyphs(&mut parts, &mut glyph_bytes);
+        flush_array(&mut output, &mut parts);
+        if rise != 0.0 {
+            output.push_str("0 Ts ");
+        }
+        output
+    }
+}
+
+/// A glyph as the shaper placed it, in the font's own numbering; sizes in
+/// thousandths of an em.
+struct ShapedGlyph {
+    glyph: u16,
+    advance: f32,
+    x_offset: f32,
+    y_offset: f32,
+    /// The text this glyph stands for (empty for the later glyphs of a cluster).
+    text: String,
+}
+
+/// Shaped glyphs drawn from one font, in visual order.
+struct ShapedRun {
+    face_index: usize,
+    glyphs: Vec<ShapedGlyph>,
 }
 
 impl UnicodeFonts {
@@ -203,65 +283,101 @@ impl UnicodeFonts {
         face.face().glyph_hor_advance(ttf_parser::GlyphId(glyph)).unwrap_or(0) as f32 * 1000.0 / face.units_per_em
     }
 
-    /// Width of `text` at a font size of 1 point.
+    /// Width of `text` at a font size of 1 point, as shaped.
     pub fn measure(&self, text: &str) -> f32 {
-        let preferred = self.preferred.clone();
-        let all = combined(&preferred, faces(self.style));
-        text.chars()
-            .map(|character| match self.pick(character) {
-                Some((index, glyph)) => Self::advance(all[index], glyph),
-                None => 500.0,
-            })
-            .sum::<f32>()
-            / 1000.0
+        self.shape(text).iter().flat_map(|run| run.glyphs.iter()).map(|glyph| glyph.advance).sum::<f32>() / 1000.0
     }
 
-    /// Splits text into runs per font and records the glyphs it uses.
+    /// Which font draws each stretch of `text`: the first in the chain that
+    /// has the character, keeping to the current font within a word so
+    /// marks and joined letters stay with their base, and choosing afresh
+    /// after a space so a Latin word after Hindi returns to the Latin font.
+    fn font_runs(&self, text: &str, all: &[&FaceData]) -> Vec<(usize, std::ops::Range<usize>)> {
+        let mut runs: Vec<(usize, std::ops::Range<usize>)> = Vec::new();
+        let mut current: Option<usize> = None;
+        let mut after_space = true;
+        for (offset, character) in text.char_indices() {
+            let covers = |face: usize| all[face].face().glyph_index(character).is_some();
+            let face = if character.is_whitespace() {
+                current.filter(|&f| covers(f)).or_else(|| self.pick(character).map(|(f, _)| f))
+            } else if !after_space && current.is_some_and(covers) {
+                current
+            } else {
+                self.pick(character).map(|(f, _)| f)
+            };
+            // Characters no font has use the current font's missing-glyph box.
+            let face = face.or(current).unwrap_or(0);
+            after_space = character.is_whitespace();
+            let end = offset + character.len_utf8();
+            match runs.last_mut() {
+                Some((last_face, range)) if *last_face == face => range.end = end,
+                _ => runs.push((face, offset..end)),
+            }
+            current = Some(face);
+        }
+        runs
+    }
+
+    /// Shapes text: stretches of each direction in visual order (right to
+    /// left ones reversed, as for Arabic and Hebrew), each split by font and
+    /// shaped, so conjuncts form, letters join and marks sit where the font
+    /// puts them.
+    fn shape(&self, text: &str) -> Vec<ShapedRun> {
+        let preferred = self.preferred.clone();
+        let all = combined(&preferred, faces(self.style));
+        if all.is_empty() {
+            return Vec::new();
+        }
+        let text: String = text.chars().filter(|c| !c.is_control()).collect();
+        let mut shaped = Vec::new();
+        let bidi = unicode_bidi::BidiInfo::new(&text, None);
+        for paragraph in &bidi.paragraphs {
+            let (levels, visual_runs) = bidi.visual_runs(paragraph, paragraph.range.clone());
+            for range in visual_runs {
+                let right_to_left = levels[range.start].is_rtl();
+                let piece = &text[range.clone()];
+                let mut runs: Vec<ShapedRun> = self.font_runs(piece, &all).into_iter().map(|(face_index, sub)| shape_with(all[face_index], face_index, &piece[sub], right_to_left)).collect();
+                if right_to_left {
+                    runs.reverse();
+                }
+                shaped.extend(runs);
+            }
+        }
+        shaped
+    }
+
+    /// Shapes text into runs per font and records the glyphs it uses.
     pub fn layout(&mut self, doc: &mut Document, text: &str) -> Vec<GlyphRun> {
         let preferred = self.preferred.clone();
         let all = combined(&preferred, faces(self.style));
         let mut runs: Vec<GlyphRun> = Vec::new();
-        let mut current_face: Option<usize> = None;
-        let mut glyph_bytes: Vec<u8> = Vec::new();
-        let mut width = 0.0;
-        let flush = |runs: &mut Vec<GlyphRun>, used: &Vec<UsedFace>, face: Option<usize>, bytes: &mut Vec<u8>, width: &mut f32| {
-            if let Some(face_index) = face {
-                if !bytes.is_empty() {
-                    let font_id = used.iter().find(|u| u.face_index == face_index).expect("registered").font_id;
-                    runs.push(GlyphRun { font_id, hex: hex_string(bytes), width: *width / 1000.0 });
-                }
-            }
-            bytes.clear();
-            *width = 0.0;
-        };
-        for character in text.chars() {
-            if character.is_control() {
-                continue;
-            }
-            // Characters no font has fall back to the first font's missing-glyph box.
-            let (face_index, glyph) = self.pick(character).unwrap_or((0, 0));
-            if all.is_empty() {
-                break;
-            }
-            if current_face != Some(face_index) {
-                flush(&mut runs, &self.used, current_face, &mut glyph_bytes, &mut width);
-                current_face = Some(face_index);
-            }
-            if !self.used.iter().any(|u| u.face_index == face_index) {
+        for run in self.shape(text) {
+            if !self.used.iter().any(|u| u.face_index == run.face_index) {
                 let font_id = doc.new_object_id();
                 let mut remapper = subsetter::GlyphRemapper::new();
                 remapper.remap(0);
-                self.used.push(UsedFace { face_index, font_id, remapper, widths: BTreeMap::new(), unicode: BTreeMap::new() });
+                self.used.push(UsedFace { face_index: run.face_index, font_id, remapper, widths: BTreeMap::new(), unicode: BTreeMap::new() });
             }
-            let used = self.used.iter_mut().find(|u| u.face_index == face_index).expect("just added");
-            let new_glyph = used.remapper.remap(glyph);
-            let advance = Self::advance(all[face_index], glyph);
-            used.widths.insert(new_glyph, advance);
-            used.unicode.entry(new_glyph).or_insert_with(|| character.to_string());
-            glyph_bytes.extend_from_slice(&new_glyph.to_be_bytes());
-            width += advance;
+            let used = self.used.iter_mut().find(|u| u.face_index == run.face_index).expect("just added");
+            let mut glyphs = Vec::new();
+            for shaped in run.glyphs {
+                let id = used.remapper.remap(shaped.glyph);
+                let default_width = Self::advance(all[run.face_index], shaped.glyph);
+                used.widths.insert(id, default_width);
+                if !shaped.text.is_empty() {
+                    used.unicode.entry(id).or_insert(shaped.text);
+                }
+                glyphs.push(PlacedGlyph { id, default_width, advance: shaped.advance, x_offset: shaped.x_offset, y_offset: shaped.y_offset });
+            }
+            let width = glyphs.iter().map(|g| g.advance).sum::<f32>() / 1000.0;
+            match runs.last_mut() {
+                Some(last) if last.font_id == used.font_id => {
+                    last.glyphs.extend(glyphs);
+                    last.width += width;
+                }
+                _ => runs.push(GlyphRun { font_id: used.font_id, glyphs, width }),
+            }
         }
-        flush(&mut runs, &self.used, current_face, &mut glyph_bytes, &mut width);
         runs
     }
 
@@ -335,6 +451,51 @@ impl UnicodeFonts {
     }
 }
 
+/// Shapes one stretch of text in one font and direction.
+fn shape_with(face_data: &FaceData, face_index: usize, text: &str, right_to_left: bool) -> ShapedRun {
+    let Some(face) = rustybuzz::Face::from_slice(&face_data.data, face_data.index) else {
+        return ShapedRun { face_index, glyphs: Vec::new() };
+    };
+    let mut buffer = rustybuzz::UnicodeBuffer::new();
+    buffer.push_str(text);
+    buffer.set_direction(if right_to_left { rustybuzz::Direction::RightToLeft } else { rustybuzz::Direction::LeftToRight });
+    let output = rustybuzz::shape(&face, &[], buffer);
+    let scale = 1000.0 / face_data.units_per_em;
+    // Each cluster's text runs to the start of the next cluster in the string.
+    let mut starts: Vec<usize> = output.glyph_infos().iter().map(|info| info.cluster as usize).collect();
+    starts.sort_unstable();
+    starts.dedup();
+    let text_of = |start: usize| {
+        let end = starts.iter().copied().find(|&s| s > start).unwrap_or(text.len());
+        text.get(start..end).unwrap_or("").to_string()
+    };
+    let mut seen = std::collections::HashSet::new();
+    let glyphs = output
+        .glyph_infos()
+        .iter()
+        .zip(output.glyph_positions())
+        .map(|(info, position)| {
+            let cluster = info.cluster as usize;
+            ShapedGlyph {
+                glyph: info.glyph_id as u16,
+                advance: position.x_advance as f32 * scale,
+                x_offset: position.x_offset as f32 * scale,
+                y_offset: position.y_offset as f32 * scale,
+                // Readers reverse right-to-left text character by character to
+                // read it, so a ligature's text is stored reversed to come out right.
+                text: if !seen.insert(cluster) {
+                    String::new()
+                } else if right_to_left {
+                    text_of(cluster).chars().rev().collect()
+                } else {
+                    text_of(cluster)
+                },
+            }
+        })
+        .collect();
+    ShapedRun { face_index, glyphs }
+}
+
 /// A CMap telling readers which text each glyph stands for.
 fn to_unicode_cmap(unicode: &BTreeMap<u16, String>) -> String {
     let mut cmap = String::from(
@@ -351,6 +512,18 @@ fn to_unicode_cmap(unicode: &BTreeMap<u16, String>) -> String {
     }
     cmap.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
     cmap
+}
+
+/// Whether text uses a script whose glyphs shaping reorders, joins or
+/// combines: Arabic, Hebrew, the Indic scripts, Thai, Lao, Tibetan,
+/// Myanmar and Khmer.
+pub fn needs_shaping(text: &str) -> bool {
+    text.chars().any(|c| matches!(c as u32, 0x0590..=0x08FF | 0x0900..=0x0DFF | 0x0E00..=0x0EFF | 0x0F00..=0x0FFF | 0x1000..=0x109F | 0x1780..=0x17FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF))
+}
+
+/// Hebrew and Arabic letters, which read right to left.
+pub fn is_right_to_left(c: char) -> bool {
+    matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
 }
 
 /// True when every character can be written with a standard font.
@@ -464,7 +637,18 @@ impl TextSetter {
                 for run in unicode.layout(doc, text) {
                     let name = format!("VlU{}", run.font_id.0);
                     self.fonts.set(name.as_bytes(), run.font_id);
-                    operators.push_str(&format!("/{name} {} Tf {} Tj ", number(size), run.hex));
+                    operators.push_str(&format!("/{name} {} Tf {}", number(size), run.operators(size)));
+                }
+                // Shaping reorders and combines glyphs in these scripts, so the
+                // real text goes alongside for copying and searching. Readers
+                // put right-to-left text back in order themselves from the
+                // glyphs, so it gets none (it would be reversed twice).
+                if needs_shaping(text) && !text.chars().any(is_right_to_left) {
+                    let mut utf16 = vec![0xFE, 0xFF];
+                    for unit in text.encode_utf16() {
+                        utf16.extend_from_slice(&unit.to_be_bytes());
+                    }
+                    operators = format!("/Span <</ActualText {}>> BDC {operators}EMC ", hex_string(&utf16));
                 }
                 operators
             }

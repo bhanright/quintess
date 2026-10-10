@@ -29,6 +29,8 @@ sha2 = "0.11.0"
 ring = "0.17"
 csv = "1.4.0"
 calamine = { version = "0.36.1", features = ["chrono"] }
+rustybuzz = "0.20.1"
+unicode-bidi = "0.3.18"
 
 [dev-dependencies]
 image = "0.25"
