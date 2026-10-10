@@ -9,7 +9,7 @@ use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use vellum_core::annotations::{AnnotationKind, LinkTarget, NewAnnotation};
 use vellum_core::forms::{FieldInfo, FieldType, NewField, NewFieldKind};
 
-use vellum_core::edit_text::{EditableLine, LineStyle};
+use vellum_core::edit_text::{Alignment, EditableLine, EditableParagraph, LineStyle, Overflow, ParagraphStyle};
 use vellum_core::fonts::StandardFont;
 
 use crate::render::{RenderRequest, RenderWorker};
@@ -115,7 +115,10 @@ pub enum ViewerAction {
     Sign { page: u32, rect: [f32; 4] },
     ReplaceText { line: EditableLine, text: String, style: LineStyle },
     DeleteText(EditableLine),
-    MoveText { line: EditableLine, offset: (f32, f32) },
+    /// Move existing text (a line or paragraph) by an offset, unchanged in look.
+    MoveText { page_index: usize, bounds: [f32; 4], offset: (f32, f32) },
+    ReplaceParagraph { paragraph: EditableParagraph, text: String, style: ParagraphStyle },
+    DeleteParagraph(EditableParagraph),
     AddPageText { page: u32, x: f32, y: f32, text: String, style: LineStyle },
 }
 
@@ -154,15 +157,21 @@ pub struct ViewerState {
     ink_page: Option<usize>,
     editing_field: Option<FieldEdit>,
     editing_text: Option<TextEditing>,
-    /// The line being dragged to a new position with the Edit text tool.
-    moving_line: Option<EditableLine>,
+    /// The text block being dragged to a new position with the Edit text tool.
+    moving_bounds: Option<[f32; 4]>,
     last_viewport_width: f32,
     last_viewport_height: f32,
 }
 
 /// An existing line of page text open for editing.
 struct TextEditing {
+    /// The line that was clicked; edited alone in line mode.
     line: EditableLine,
+    /// The paragraph around it, edited as a block unless `line_only`.
+    paragraph: Option<EditableParagraph>,
+    line_only: bool,
+    alignment: Alignment,
+    overflow: Overflow,
     text: String,
     family: FontFamilyChoice,
     bold: bool,
@@ -196,7 +205,63 @@ fn compose_font(family: FontFamilyChoice, bold: bool, italic: bool) -> StandardF
 impl TextEditing {
     fn start(line: EditableLine) -> Self {
         let family = if line.monospace { FontFamilyChoice::Monospace } else if line.serif { FontFamilyChoice::Serif } else { FontFamilyChoice::Sans };
-        Self { text: line.text.clone(), family, bold: line.bold, italic: line.italic, size: line.apparent_size, color: line.color, line, focus_requested: false }
+        Self {
+            text: line.text.clone(),
+            family,
+            bold: line.bold,
+            italic: line.italic,
+            size: line.apparent_size,
+            color: line.color,
+            line,
+            paragraph: None,
+            line_only: true,
+            alignment: Alignment::Left,
+            overflow: Overflow::PushDown,
+            focus_requested: false,
+        }
+    }
+
+    /// Opens a whole paragraph; `line` is the line that was clicked.
+    fn start_paragraph(paragraph: EditableParagraph, line: EditableLine) -> Self {
+        let mut editing = Self::start(paragraph.first().clone());
+        editing.text = paragraph.text.clone();
+        editing.alignment = paragraph.alignment;
+        editing.line = line;
+        editing.paragraph = Some(paragraph);
+        editing.line_only = false;
+        editing
+    }
+
+    fn editing_paragraph(&self) -> Option<&EditableParagraph> {
+        self.paragraph.as_ref().filter(|_| !self.line_only)
+    }
+
+    /// The box on the page being edited.
+    fn bounds(&self) -> [f32; 4] {
+        self.editing_paragraph().map(|p| p.bounds).unwrap_or(self.line.bounds)
+    }
+
+    /// Switches between editing the paragraph and only the clicked line.
+    fn set_line_only(&mut self, line_only: bool) {
+        if line_only == self.line_only {
+            return;
+        }
+        self.line_only = line_only;
+        self.text = if line_only { self.line.text.clone() } else { self.paragraph.as_ref().map(|p| p.text.clone()).unwrap_or_default() };
+        self.focus_requested = false;
+    }
+
+    fn paragraph_style(&self, paragraph: &EditableParagraph) -> ParagraphStyle {
+        ParagraphStyle {
+            font: compose_font(self.family, self.bold, self.italic),
+            apparent_size: self.size,
+            color: self.color,
+            alignment: self.alignment,
+            overflow: self.overflow,
+            // Keep the original rhythm when the size changes.
+            leading: paragraph.leading * self.size / paragraph.first().apparent_size.max(0.1),
+            ..ParagraphStyle::of(paragraph)
+        }
     }
 
     fn style(&self) -> LineStyle {
@@ -204,7 +269,13 @@ impl TextEditing {
     }
 
     fn changed(&self) -> bool {
-        let original = TextEditing::start(self.line.clone());
+        let original = match self.editing_paragraph() {
+            Some(paragraph) => TextEditing::start_paragraph(paragraph.clone(), self.line.clone()),
+            None => TextEditing::start(self.line.clone()),
+        };
+        if self.alignment != original.alignment {
+            return true;
+        }
         self.text != original.text || self.family != original.family || self.bold != original.bold || self.italic != original.italic || (self.size - original.size).abs() > 0.05 || self.color != original.color
     }
 }
@@ -382,19 +453,19 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
     }
     if tool == Tool::EditText {
         let hover = ui.input(|i| i.pointer.hover_pos());
-        for line in tab.editable_lines(page_index).iter() {
-            let rect = screen_rect_of(geometry, page_rect, zoom, line.bounds).expand(1.5);
+        for paragraph in tab.editable_paragraphs(page_index).iter() {
+            let rect = screen_rect_of(geometry, page_rect, zoom, paragraph.bounds).expand(1.5);
             let hovered = hover.is_some_and(|p| rect.contains(p));
-            let editing = state.editing_text.as_ref().is_some_and(|e| e.line == *line);
+            let editing = state.editing_text.as_ref().is_some_and(|e| e.paragraph.as_ref() == Some(paragraph) || paragraph.lines.len() == 1 && e.line == paragraph.lines[0]);
             if editing {
                 continue;
             }
             let color = if hovered { Color32::from_rgb(40, 110, 255) } else { Color32::from_rgba_unmultiplied(40, 110, 255, 90) };
             painter.rect_stroke(rect, 2.0, Stroke::new(if hovered { 1.5 } else { 0.75 }, color), StrokeKind::Outside);
         }
-        if let (Some(line), Some((drag_page, start)), Some(now)) = (&state.moving_line, state.drag_start, state.drag_now) {
+        if let (Some(bounds), Some((drag_page, start)), Some(now)) = (state.moving_bounds, state.drag_start, state.drag_now) {
             if drag_page == page_index {
-                let moved = [line.bounds[0] + now.0 - start.0, line.bounds[1] + now.1 - start.1, line.bounds[2] + now.0 - start.0, line.bounds[3] + now.1 - start.1];
+                let moved = [bounds[0] + now.0 - start.0, bounds[1] + now.1 - start.1, bounds[2] + now.0 - start.0, bounds[3] + now.1 - start.1];
                 painter.rect_stroke(screen_rect_of(geometry, page_rect, zoom, moved), 2.0, Stroke::new(1.5, Color32::from_rgb(255, 140, 0)), StrokeKind::Outside);
             }
         }
@@ -431,19 +502,33 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
     }
 
     if let Some(editing) = state.editing_text.as_mut().filter(|e| e.line.page_index == page_index) {
-        let rect = screen_rect_of(geometry, page_rect, zoom, editing.line.bounds);
-        let editor_rect = egui::Rect::from_min_size(rect.min - vec2(2.0, 2.0), vec2((rect.width() + 80.0).max(160.0), rect.height().max(14.0) + 4.0));
+        let rect = screen_rect_of(geometry, page_rect, zoom, editing.bounds());
         let font_size = (editing.size * zoom).clamp(8.0, 64.0);
-        let response = ui.put(editor_rect, egui::TextEdit::singleline(&mut editing.text).font(egui::FontId::proportional(font_size)).margin(vec2(2.0, 0.0)));
+        let is_paragraph = editing.editing_paragraph().is_some();
+        let editor_rect = if is_paragraph {
+            // One spare line of room, so the text below stays visible while typing.
+            egui::Rect::from_min_size(rect.min - vec2(2.0, 2.0), vec2(rect.width() + 4.0, rect.height() + font_size * 1.4))
+        } else {
+            egui::Rect::from_min_size(rect.min - vec2(2.0, 2.0), vec2((rect.width() + 80.0).max(160.0), rect.height().max(14.0) + 4.0))
+        };
+        let editor = if is_paragraph {
+            egui::TextEdit::multiline(&mut editing.text).desired_width(editor_rect.width()).desired_rows(2)
+        } else {
+            egui::TextEdit::singleline(&mut editing.text)
+        };
+        let response = ui.put(editor_rect, editor.font(egui::FontId::proportional(font_size)).margin(vec2(2.0, 0.0)));
         if !editing.focus_requested {
             response.request_focus();
             editing.focus_requested = true;
         }
-        let mut apply = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        // Enter applies a line; in a paragraph it starts a new line and Ctrl+Enter applies.
+        let mut apply = ui.input(|i| i.key_pressed(egui::Key::Enter) && (!is_paragraph || i.modifiers.command));
         let mut cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
         let mut delete = false;
-        // A small style bar just below the line, clear of the text being edited.
-        egui::Area::new(ui.id().with(("text style", page_index))).order(egui::Order::Foreground).fixed_pos(editor_rect.left_bottom() + vec2(0.0, 6.0)).show(ui.ctx(), |ui| {
+        // Above the text when there is room, so what follows stays readable.
+        let bar_height = 52.0;
+        let bar_position = if editor_rect.top() - bar_height > ui.clip_rect().top() { editor_rect.left_top() - vec2(0.0, bar_height) } else { editor_rect.left_bottom() + vec2(0.0, 6.0) };
+        egui::Area::new(ui.id().with(("text style", page_index))).order(egui::Order::Foreground).fixed_pos(bar_position).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).inner_margin(4.0).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_salt("edit text family")
@@ -462,10 +547,37 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                     ui.toggle_value(&mut editing.italic, egui::RichText::new("I").italics()).on_hover_text("Italic");
                     ui.add(egui::DragValue::new(&mut editing.size).range(2.0..=144.0).speed(0.1).suffix(" pt")).on_hover_text("Size");
                     ui.color_edit_button_rgb(&mut editing.color).on_hover_text("Color");
-                    if ui.button("✔").on_hover_text("Apply (Enter)").clicked() {
+                    if is_paragraph {
+                        ui.separator();
+                        for (alignment, icon, hint) in [(Alignment::Left, "⫷", "Align left"), (Alignment::Center, "≡", "Center"), (Alignment::Right, "⫸", "Align right"), (Alignment::Justified, "☰", "Justify")] {
+                            ui.selectable_value(&mut editing.alignment, alignment, icon).on_hover_text(hint);
+                        }
+                        egui::ComboBox::from_id_salt("edit text overflow")
+                            .width(110.0)
+                            .selected_text(match editing.overflow {
+                                Overflow::PushDown => "Push text down",
+                                Overflow::ShrinkToFit => "Shrink to fit",
+                                Overflow::Overlap => "Allow overlap",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut editing.overflow, Overflow::PushDown, "Push text below down").on_hover_text("If the paragraph grows, move what follows in its column down");
+                                ui.selectable_value(&mut editing.overflow, Overflow::ShrinkToFit, "Shrink to fit").on_hover_text("Make the text a little smaller to fit the old space");
+                                ui.selectable_value(&mut editing.overflow, Overflow::Overlap, "Allow overlap");
+                            })
+                            .response
+                            .on_hover_text("What happens when the paragraph grows");
+                    }
+                    ui.separator();
+                    if editing.paragraph.as_ref().is_some_and(|p| p.lines.len() > 1) {
+                        let mut line_only = editing.line_only;
+                        if ui.toggle_value(&mut line_only, "Line only").on_hover_text("Edit just the clicked line, for tables and lists").changed() {
+                            editing.set_line_only(line_only);
+                        }
+                    }
+                    if ui.button("✔").on_hover_text(if is_paragraph { "Apply (Ctrl+Enter)" } else { "Apply (Enter)" }).clicked() {
                         apply = true;
                     }
-                    if ui.button("🗑").on_hover_text("Delete this line").clicked() {
+                    if ui.button("🗑").on_hover_text(if is_paragraph { "Delete this paragraph" } else { "Delete this line" }).clicked() {
                         delete = true;
                     }
                     if ui.button("✖").on_hover_text("Cancel (Esc)").clicked() {
@@ -477,10 +589,20 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         });
         if delete {
             let editing = state.editing_text.take().expect("open");
-            actions.push(ViewerAction::DeleteText(editing.line));
+            match editing.editing_paragraph().cloned() {
+                Some(paragraph) => actions.push(ViewerAction::DeleteParagraph(paragraph)),
+                None => actions.push(ViewerAction::DeleteText(editing.line)),
+            }
         } else if apply {
             let editing = state.editing_text.take().expect("open");
-            if editing.text.trim().is_empty() {
+            if let Some(paragraph) = editing.editing_paragraph().cloned() {
+                if editing.text.trim().is_empty() {
+                    actions.push(ViewerAction::DeleteParagraph(paragraph));
+                } else if editing.changed() {
+                    let style = editing.paragraph_style(&paragraph);
+                    actions.push(ViewerAction::ReplaceParagraph { paragraph, text: editing.text, style });
+                }
+            } else if editing.text.trim().is_empty() {
                 actions.push(ViewerAction::DeleteText(editing.line));
             } else if editing.changed() {
                 let style = editing.style();
@@ -529,7 +651,8 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                 state.ink_page = Some(page_index);
             }
             if tool == Tool::EditText {
-                state.moving_line = tab.editable_lines(page_index).iter().find(|l| l.contains(point.0, point.1)).cloned();
+                // Dragging moves the whole paragraph under the pointer.
+                state.moving_bounds = tab.editable_paragraphs(page_index).iter().find(|p| p.contains(point.0, point.1)).map(|p| p.bounds);
             }
             if tool.selects_text() {
                 let text = tab.page_text(page_index);
@@ -559,10 +682,10 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         if let Some((drag_page, start)) = state.drag_start.take() {
             let end = state.drag_now.take().unwrap_or(start);
             if drag_page == page_index {
-                if let Some(line) = state.moving_line.take() {
+                if let Some(bounds) = state.moving_bounds.take() {
                     let offset = (end.0 - start.0, end.1 - start.1);
                     if offset.0.hypot(offset.1) > 1.0 {
-                        actions.push(ViewerAction::MoveText { line, offset });
+                        actions.push(ViewerAction::MoveText { page_index, bounds, offset });
                     }
                 } else {
                     finish_drag(tab, state, tool, settings, page_index, start, end, actions);
@@ -607,7 +730,13 @@ fn click(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &
         }
         Tool::EditText => {
             match tab.editable_lines(page_index).iter().find(|l| l.contains(point.0, point.1)).cloned() {
-                Some(line) => state.editing_text = Some(TextEditing::start(line)),
+                Some(line) => {
+                    let paragraph = tab.editable_paragraphs(page_index).iter().find(|p| p.lines.iter().any(|l| l.object_indices == line.object_indices)).cloned();
+                    state.editing_text = Some(match paragraph {
+                        Some(paragraph) if paragraph.lines.len() > 1 => TextEditing::start_paragraph(paragraph, line),
+                        _ => TextEditing::start(line),
+                    });
+                }
                 None => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::PageText, rect: [point.0, point.1, point.0, point.1], text: String::new() })),
             }
         }
@@ -771,6 +900,12 @@ pub fn complete_pending_text(pending: &PendingText, settings: &ToolSettings) -> 
 /// Opens the line editor on a line, as clicking it with the Edit text tool does.
 pub fn begin_text_edit(state: &mut ViewerState, line: EditableLine) {
     state.editing_text = Some(TextEditing::start(line));
+}
+
+/// Opens the paragraph editor, as clicking a paragraph with Edit text does.
+pub fn begin_paragraph_edit(state: &mut ViewerState, paragraph: EditableParagraph) {
+    let first = paragraph.first().clone();
+    state.editing_text = Some(if paragraph.lines.len() > 1 { TextEditing::start_paragraph(paragraph, first) } else { TextEditing::start(first) });
 }
 
 /// Zoom steps used by the zoom buttons.

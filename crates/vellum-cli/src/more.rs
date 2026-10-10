@@ -194,9 +194,20 @@ pub enum MoreCommand {
         regex: bool,
         #[arg(long)]
         ignore_case: bool,
-        /// Page whose lines to list.
+        /// Page whose lines (or paragraphs) to list or edit.
         #[arg(long, default_value_t = 1)]
         page: u32,
+        /// List paragraphs instead of lines.
+        #[arg(long)]
+        paragraphs: bool,
+        /// Replace paragraph N (from --paragraphs) with --text.
+        #[arg(long)]
+        paragraph: Option<usize>,
+        #[arg(long)]
+        text: Option<String>,
+        /// When a paragraph grows: push (move what follows down), shrink, or overlap.
+        #[arg(long, default_value = "push")]
+        overflow: String,
         #[command(flatten)]
         output: Output,
     },
@@ -449,8 +460,43 @@ pub fn run(command: MoreCommand) -> Result<()> {
             eprintln!();
             println!("sent to {printer}");
         }
-        MoreCommand::EditText { input, find, replace, regex, ignore_case, page, output } => {
+        MoreCommand::EditText { input, find, replace, regex, ignore_case, page, paragraphs, paragraph, text, overflow, output } => {
             let bytes = std::fs::read(&input.input)?;
+            if let Some(number) = paragraph {
+                let new_text = text.context("--paragraph needs --text")?;
+                let document = document(&input)?;
+                let found = vellum_core::edit_text::editable_paragraphs(&document, page as usize - 1)?;
+                drop(document);
+                let target = found.get(number.saturating_sub(1)).with_context(|| format!("page {page} has {} paragraphs", found.len()))?;
+                let mut style = vellum_core::edit_text::ParagraphStyle::of(target);
+                style.overflow = match overflow.as_str() {
+                    "push" => vellum_core::edit_text::Overflow::PushDown,
+                    "shrink" => vellum_core::edit_text::Overflow::ShrinkToFit,
+                    "overlap" => vellum_core::edit_text::Overflow::Overlap,
+                    other => bail!("--overflow takes push, shrink or overlap, not {other}"),
+                };
+                let (edited, report) = vellum_core::edit_text::replace_paragraph(&bytes, input.password.as_deref(), target, &new_text, &style)?;
+                println!(
+                    "{} lines → {} lines; {}{}{}",
+                    report.lines_before,
+                    report.lines_after,
+                    if report.reused_font { "original font reused" } else { "matching font substituted" },
+                    if report.moved_below > 0 { format!("; moved {} items below", report.moved_below) } else { String::new() },
+                    if report.would_leave_page { format!("; the text below had no room to move, so the paragraph was set at {:.0}% size{}", report.scale * 100.0, if report.overlaps { " and still overlaps what follows" } else { "" }) } else if report.overlaps { "; overlaps what follows".to_string() } else { String::new() }
+                );
+                let target_path = output.output.clone().unwrap_or_else(|| input.input.clone());
+                std::fs::write(&target_path, edited)?;
+                println!("wrote {}", target_path.display());
+                return Ok(());
+            }
+            if paragraphs {
+                let document = document(&input)?;
+                for (index, paragraph) in vellum_core::edit_text::editable_paragraphs(&document, page as usize - 1)?.iter().enumerate() {
+                    let preview: String = paragraph.text.chars().take(90).collect();
+                    println!("{:>3}  {} lines  {:<10} {}{}", index + 1, paragraph.lines.len(), format!("{:?}", paragraph.alignment), preview, if paragraph.text.chars().count() > 90 { "…" } else { "" });
+                }
+                return Ok(());
+            }
             match find {
                 Some(find) => {
                     let source = if regex { find } else { regex::escape(&find) };

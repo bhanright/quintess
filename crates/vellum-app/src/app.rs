@@ -105,6 +105,14 @@ impl VellumApp {
             match key {
                 "organizer" => self.organizer = true,
                 "tool" if value == "edit-text" => self.tool = Tool::EditText,
+                "edit-paragraph" => {
+                    self.tool = Tool::EditText;
+                    if let (Some(tab), Ok(number)) = (self.tabs.get(self.active), value.parse::<usize>()) {
+                        if let Some(paragraph) = tab.editable_paragraphs(0).get(number.saturating_sub(1)).cloned() {
+                            viewer::begin_paragraph_edit(self.viewer_states.entry(tab.id).or_default(), paragraph);
+                        }
+                    }
+                }
                 "edit-line" => {
                     self.tool = Tool::EditText;
                     if let (Some(tab), Ok(number)) = (self.tabs.get(self.active), value.parse::<usize>()) {
@@ -1396,10 +1404,43 @@ impl VellumApp {
                 ViewerAction::Sign { page, rect } => self.sign_here(page, rect),
                 ViewerAction::ReplaceText { line, text, style } => self.edit_page_text("Edit text", |bytes, password| vellum_core::edit_text::replace_line(bytes, password, &line, &text, &style)),
                 ViewerAction::DeleteText(line) => self.edit_page_text("Delete text", |bytes, password| vellum_core::edit_text::delete_line(bytes, password, &line)),
-                ViewerAction::MoveText { line, offset } => self.edit_page_text("Move text", |bytes, password| {
-                    let style = vellum_core::edit_text::LineStyle { offset, ..vellum_core::edit_text::LineStyle::of(&line) };
-                    vellum_core::edit_text::replace_line(bytes, password, &line, &line.text, &style)
-                }),
+                ViewerAction::MoveText { page_index, bounds, offset } => self.edit_page_text("Move text", |bytes, password| vellum_core::edit_text::move_text(bytes, password, page_index, bounds, offset)),
+                ViewerAction::ReplaceParagraph { paragraph, text, style } => {
+                    let Some(tab) = self.tabs.get_mut(self.active) else { continue };
+                    let was_signed = tab.signed;
+                    let result = vellum_core::edit_text::replace_paragraph(&tab.bytes, tab.password.as_deref(), &paragraph, &text, &style).and_then(|(bytes, report)| {
+                        tab.replace_bytes("Edit paragraph", bytes)?;
+                        Ok(report)
+                    });
+                    if let Some(report) = self.report(result) {
+                        let mut message = format!("Edited the paragraph ({} lines → {}).", report.lines_before, report.lines_after);
+                        if report.moved_below > 0 {
+                            message.push_str(" The text below moved down to make room.");
+                        }
+                        if report.would_leave_page {
+                            message.push_str(&format!(" There was no room below, so it was set at {:.0}% size.", report.scale * 100.0));
+                        } else if report.scale < 0.999 {
+                            message.push_str(&format!(" Shrunk to {:.0}% to fit.", report.scale * 100.0));
+                        }
+                        if report.overlaps {
+                            message.push_str(" It still overlaps what follows; Ctrl+Z undoes it.");
+                        } else {
+                            message.push_str(" Ctrl+Z undoes it.");
+                        }
+                        if !report.reused_font {
+                            message.push_str(" (The original font could not be reused, so a matching one stands in.)");
+                        }
+                        if was_signed {
+                            message.push_str(" This invalidated the document's signatures.");
+                        }
+                        if report.overlaps || was_signed {
+                            self.error(message);
+                        } else {
+                            self.info(message);
+                        }
+                    }
+                }
+                ViewerAction::DeleteParagraph(paragraph) => self.edit_page_text("Delete paragraph", |bytes, password| vellum_core::edit_text::delete_paragraph(bytes, password, &paragraph)),
                 ViewerAction::AddPageText { page, x, y, text, style } => self.edit("Add text", |pdf| vellum_core::edit_text::add_text(pdf, page as usize - 1, x, y, &text, &style)),
                 ViewerAction::GoToPage(index) => {
                     if let Some(tab) = self.tab() {

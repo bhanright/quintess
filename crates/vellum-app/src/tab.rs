@@ -95,6 +95,7 @@ pub struct DocumentTab {
     text_cache: RefCell<HashMap<usize, Rc<PageText>>>,
     /// Editable lines of existing text, per page, read on demand.
     line_cache: RefCell<HashMap<usize, Rc<Vec<vellum_core::edit_text::EditableLine>>>>,
+    paragraph_cache: RefCell<HashMap<usize, Rc<Vec<vellum_core::edit_text::EditableParagraph>>>>,
     /// Rendered pages: (page, resolution key) → texture.
     pub textures: HashMap<(usize, u32), egui::TextureHandle>,
     pub pending: HashSet<(usize, u32)>,
@@ -145,6 +146,7 @@ impl DocumentTab {
             document: None,
             text_cache: RefCell::new(HashMap::new()),
             line_cache: RefCell::new(HashMap::new()),
+            paragraph_cache: RefCell::new(HashMap::new()),
             textures: HashMap::new(),
             pending: HashSet::new(),
             texture_night_mode: false,
@@ -192,6 +194,7 @@ impl DocumentTab {
         self.document = Some(engine::open_document(self.bytes.as_ref().clone(), self.password.as_deref())?);
         self.text_cache.borrow_mut().clear();
         self.line_cache.borrow_mut().clear();
+        self.paragraph_cache.borrow_mut().clear();
         self.textures.clear();
         self.pending.clear();
         self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
@@ -275,6 +278,16 @@ impl DocumentTab {
         let lines = Rc::new(self.document.as_ref().and_then(|d| vellum_core::edit_text::editable_lines(d, page_index).ok()).unwrap_or_default());
         self.line_cache.borrow_mut().insert(page_index, lines.clone());
         lines
+    }
+
+    /// The page's existing text grouped into paragraphs, read once and cached.
+    pub fn editable_paragraphs(&self, page_index: usize) -> Rc<Vec<vellum_core::edit_text::EditableParagraph>> {
+        if let Some(paragraphs) = self.paragraph_cache.borrow().get(&page_index) {
+            return paragraphs.clone();
+        }
+        let paragraphs = Rc::new(self.document.as_ref().and_then(|d| vellum_core::edit_text::editable_paragraphs(d, page_index).ok()).unwrap_or_default());
+        self.paragraph_cache.borrow_mut().insert(page_index, paragraphs.clone());
+        paragraphs
     }
 
     pub fn pdfium_document(&self) -> Option<&PdfDocument<'static>> {

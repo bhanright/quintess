@@ -181,7 +181,7 @@ pub fn remove_text(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]]) -> Resul
     let content = pdf.doc.get_page_content(page_id);
     let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
     let mut report = RedactionReport::default();
-    let mut remover = Redactor { pdf, areas: areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true };
+    let mut remover = Redactor { pdf, areas: areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
     let resources = remover.page_resources();
     let (new_operations, changed) = remover.process(operations, &resources, IDENTITY)?;
     let added = std::mem::take(&mut remover.pending_resources);
@@ -201,6 +201,39 @@ pub fn remove_text(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]]) -> Resul
     page.set("Contents", content_id);
     page.set("Resources", resources);
     Ok(report.glyphs_removed)
+}
+
+/// Moves everything drawn wholly inside `region` on one page by `offset`
+/// (page space, positive y is up), without re-encoding it: text keeps its
+/// fonts and spacing. Returns how many items moved and the lowest point
+/// among them before moving (or `f32::MAX` when nothing moved).
+pub fn shift_content(pdf: &mut Pdf, page_number: u32, region: [f32; 4], offset: (f32, f32)) -> Result<(usize, f32)> {
+    let page_id = pdf.page_id(page_number)?;
+    pdf.materialize_inherited_attributes(page_id)?;
+    let content = pdf.doc.get_page_content(page_id);
+    let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
+    let mut report = RedactionReport::default();
+    let mut mover = Redactor {
+        pdf,
+        areas: Vec::new(),
+        page_id,
+        report: &mut report,
+        font_cache: HashMap::new(),
+        depth: 0,
+        pending_resources: Vec::new(),
+        text_only: true,
+        shift: Some(ShiftRegion { region, offset }),
+        shifted_items: 0,
+        lowest_shifted: f32::MAX,
+    };
+    let resources = mover.page_resources();
+    let (new_operations, changed) = mover.process(operations, &resources, IDENTITY)?;
+    let (moved, lowest) = (mover.shifted_items, mover.lowest_shifted);
+    if changed {
+        let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), encode_operations(&new_operations)));
+        pdf.doc.get_dictionary_mut(page_id)?.set("Contents", content_id);
+    }
+    Ok((moved, lowest))
 }
 
 fn glyph_is_covered(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
@@ -355,6 +388,39 @@ struct Redactor<'a> {
     /// Remove only glyphs whose centers fall in an area, leaving images and
     /// shapes alone (used to take a line of text out for editing).
     text_only: bool,
+    /// Instead of removing anything, move what lies inside a region.
+    shift: Option<ShiftRegion>,
+    /// Items moved by a shift, and the lowest point among them.
+    shifted_items: usize,
+    lowest_shifted: f32,
+}
+
+/// Content wholly inside `region` (page space) moves by `offset`.
+#[derive(Clone, Copy, Debug)]
+struct ShiftRegion {
+    region: [f32; 4],
+    offset: (f32, f32),
+}
+
+fn inside(rect: [f32; 4], region: [f32; 4]) -> bool {
+    rect[0] >= region[0] && rect[1] >= region[1] && rect[2] <= region[2] && rect[3] <= region[3]
+}
+
+fn invert(m: Matrix) -> Matrix {
+    let determinant = m[0] * m[3] - m[1] * m[2];
+    if determinant.abs() < 1e-9 {
+        return IDENTITY;
+    }
+    let (a, b, c, d) = (m[3] / determinant, -m[1] / determinant, -m[2] / determinant, m[0] / determinant);
+    [a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)]
+}
+
+/// The `cm` operands that move drawing by `offset` in page space, given the
+/// current transformation matrix.
+fn page_space_move(ctm: Matrix, offset: (f32, f32)) -> Operation {
+    // New CTM = CTM × T, and `cm` applies M × CTM, so M = CTM × T × CTM⁻¹.
+    let m = multiply(multiply(ctm, [1.0, 0.0, 0.0, 1.0, offset.0, offset.1]), invert(ctm));
+    Operation::new("cm", m.iter().map(|v| Object::Real(*v)).collect())
 }
 
 fn operand_number(operation: &Operation, index: usize) -> f32 {
@@ -459,7 +525,46 @@ impl Redactor<'_> {
                         _ => operation.operands.first().cloned().into_iter().collect(),
                     };
                     let metrics = self.font_metrics(&resources, &state.text.font_name.clone());
-                    let (new_elements, removed) = self.redact_text(&elements, &metrics, &state, &mut text_matrix);
+                    let matrix_before = text_matrix;
+                    let mut boxes = Vec::new();
+                    let (new_elements, removed) = self.redact_text(&elements, &metrics, &state, &mut text_matrix, &mut boxes);
+                    if let Some(shift) = self.shift {
+                        let all_inside = !boxes.is_empty() && boxes.iter().all(|b| center_is_inside(*b, &[shift.region]));
+                        if all_inside {
+                            changed = true;
+                            self.shifted_items += 1;
+                            self.lowest_shifted = boxes.iter().map(|b| b[1]).fold(self.lowest_shifted, f32::min);
+                            // `cm` is not allowed inside a text object, so close it, draw
+                            // this run moved, and reopen it where the text left off.
+                            output.extend(prefix);
+                            output.push(Operation::new("ET", vec![]));
+                            output.push(Operation::new("q", vec![]));
+                            output.push(page_space_move(state.ctm, shift.offset));
+                            output.push(Operation::new("BT", vec![]));
+                            output.push(Operation::new("Tm", matrix_before.iter().map(|v| Object::Real(*v)).collect()));
+                            output.push(Operation::new("TJ", vec![Object::Array(elements)]));
+                            output.push(Operation::new("ET", vec![]));
+                            output.push(Operation::new("Q", vec![]));
+                            output.push(Operation::new("BT", vec![]));
+                            // Restore both the line start and the position after the text:
+                            // set the line matrix, then advance along it with a TJ offset.
+                            output.push(Operation::new("Tm", line_matrix.iter().map(|v| Object::Real(*v)).collect()));
+                            let advance = if line_matrix[0].abs() >= line_matrix[1].abs() && line_matrix[0].abs() > 1e-6 {
+                                (text_matrix[4] - line_matrix[4]) / line_matrix[0]
+                            } else if line_matrix[1].abs() > 1e-6 {
+                                (text_matrix[5] - line_matrix[5]) / line_matrix[1]
+                            } else {
+                                0.0
+                            };
+                            let scale = state.text.size * state.text.horizontal_scale;
+                            if advance.abs() > 1e-4 && scale.abs() > 1e-6 {
+                                output.push(Operation::new("TJ", vec![Object::Array(vec![Object::Real(-advance * 1000.0 / scale)])]));
+                            }
+                            continue;
+                        }
+                        output.push(operation);
+                        continue;
+                    }
                     if removed > 0 {
                         changed = true;
                         self.report.glyphs_removed += removed;
@@ -485,7 +590,22 @@ impl Redactor<'_> {
                     continue;
                 }
                 "S" | "s" | "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "n" => {
-                    let fully_inside = !self.text_only && path_box.is_some_and(|b| self.areas.iter().any(|a| b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]));
+                    if let (Some(shift), Some(path)) = (self.shift, path_box) {
+                        let clips = path_operations.iter().any(|o| o.operator == "W" || o.operator == "W*");
+                        if inside(path, shift.region) && !clips && operation.operator != "n" {
+                            changed = true;
+                            self.shifted_items += 1;
+                            self.lowest_shifted = self.lowest_shifted.min(path[1]);
+                            output.push(Operation::new("q", vec![]));
+                            output.push(page_space_move(state.ctm, shift.offset));
+                            output.append(&mut path_operations);
+                            output.push(operation);
+                            output.push(Operation::new("Q", vec![]));
+                            path_box = None;
+                            continue;
+                        }
+                    }
+                    let fully_inside = self.shift.is_none() && !self.text_only && path_box.is_some_and(|b| self.areas.iter().any(|a| b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]));
                     if fully_inside && operation.operator != "n" {
                         // Keep the path (it may be a clip) but paint nothing.
                         output.append(&mut path_operations);
@@ -505,6 +625,20 @@ impl Redactor<'_> {
                 }
                 "BI" => {
                     let image_box = transformed_box(state.ctm, [0.0, 0.0, 1.0, 1.0]);
+                    if let Some(shift) = self.shift {
+                        if inside(image_box, shift.region) {
+                            changed = true;
+                            self.shifted_items += 1;
+                            self.lowest_shifted = self.lowest_shifted.min(image_box[1]);
+                            output.push(Operation::new("q", vec![]));
+                            output.push(page_space_move(state.ctm, shift.offset));
+                            output.push(operation);
+                            output.push(Operation::new("Q", vec![]));
+                            continue;
+                        }
+                        output.push(operation);
+                        continue;
+                    }
                     if !self.text_only && self.areas.iter().any(|a| intersects(image_box, *a)) {
                         self.report.images_removed += 1;
                         changed = true;
@@ -519,6 +653,32 @@ impl Redactor<'_> {
                         .map(|x| self.pdf.resolve(x).clone())
                         .and_then(|x| x.as_dict().ok().and_then(|d| d.get(&name).ok().cloned()))
                         .and_then(|o| o.as_reference().ok());
+                    if let (Some(shift), Some(xobject_id)) = (self.shift, xobject) {
+                        let drawn = self.pdf.doc.get_object(xobject_id).ok().and_then(|o| o.as_stream().ok()).and_then(|stream| {
+                            match stream.dict.get(b"Subtype").ok().and_then(|s| s.as_name().ok()) {
+                                Some(b"Image") => Some(transformed_box(state.ctm, [0.0, 0.0, 1.0, 1.0])),
+                                Some(b"Form") => {
+                                    let bbox = stream.dict.get(b"BBox").ok().and_then(|b| rectangle_from_object(&self.pdf.doc, b).ok())?;
+                                    let form_matrix: Matrix = stream.dict.get(b"Matrix").ok().and_then(|m| m.as_array().ok()).filter(|m| m.len() == 6).map(|m| std::array::from_fn(|i| m[i].as_float().unwrap_or(0.0))).unwrap_or(IDENTITY);
+                                    Some(transformed_box(multiply(form_matrix, state.ctm), bbox))
+                                }
+                                _ => None,
+                            }
+                        });
+                        if drawn.is_some_and(|b| inside(b, shift.region)) {
+                            let drawn = drawn.expect("checked");
+                            changed = true;
+                            self.shifted_items += 1;
+                            self.lowest_shifted = self.lowest_shifted.min(drawn[1]);
+                            output.push(Operation::new("q", vec![]));
+                            output.push(page_space_move(state.ctm, shift.offset));
+                            output.push(operation);
+                            output.push(Operation::new("Q", vec![]));
+                            continue;
+                        }
+                        output.push(operation);
+                        continue;
+                    }
                     if let Some(xobject_id) = xobject {
                         if let Some(replacement) = self.redact_xobject(xobject_id, state.ctm)? {
                             changed = true;
@@ -550,7 +710,7 @@ impl Redactor<'_> {
 
     /// Positions each glyph of a text-showing operation and replaces the
     /// covered ones with equivalent spacing. Advances `text_matrix`.
-    fn redact_text(&self, elements: &[Object], metrics: &FontMetrics, state: &GraphicsState, text_matrix: &mut Matrix) -> (Vec<Object>, usize) {
+    fn redact_text(&self, elements: &[Object], metrics: &FontMetrics, state: &GraphicsState, text_matrix: &mut Matrix, boxes: &mut Vec<[f32; 4]>) -> (Vec<Object>, usize) {
         let text = &state.text;
         let size = if text.size == 0.0 { 1.0 } else { text.size };
         let mut output: Vec<Object> = Vec::new();
@@ -579,7 +739,10 @@ impl Redactor<'_> {
                         let advance = (glyph_width * size + text.char_spacing + if is_space { text.word_spacing } else { 0.0 }) * text.horizontal_scale;
                         let rendering = multiply([size * text.horizontal_scale, 0.0, 0.0, size, 0.0, text.rise], multiply(*text_matrix, state.ctm));
                         let glyph_box = transformed_box(rendering, [0.0, metrics.descent, glyph_width.max(0.1 * metrics.units_scale * 1000.0), metrics.ascent]);
-                        let covered = if self.text_only { center_is_inside(glyph_box, &self.areas) } else { glyph_is_covered(glyph_box, &self.areas) };
+                        if !is_space_only(chunk) {
+                            boxes.push(glyph_box);
+                        }
+                        let covered = self.shift.is_none() && if self.text_only { center_is_inside(glyph_box, &self.areas) } else { glyph_is_covered(glyph_box, &self.areas) };
                         if covered && !is_space_only(chunk) {
                             flush_bytes(&mut output, &mut pending_bytes);
                             // TJ numbers are thousandths of a text-space unit, subtracted.
@@ -609,6 +772,9 @@ impl Redactor<'_> {
     fn redact_xobject(&mut self, xobject_id: ObjectId, ctm: Matrix) -> Result<Option<XObjectChange>> {
         let Ok(stream) = self.pdf.doc.get_object(xobject_id).and_then(|o| o.as_stream()).cloned() else { return Ok(None) };
         let subtype = stream.dict.get(b"Subtype").ok().and_then(|s| s.as_name().ok()).unwrap_or(b"").to_vec();
+        if self.shift.is_some() {
+            return Ok(None);
+        }
         if subtype == b"Image" {
             if self.text_only {
                 return Ok(None);
@@ -796,7 +962,7 @@ pub fn apply_redactions(pdf: &mut Pdf, areas: &[RedactionArea], settings: &Redac
         pdf.materialize_inherited_attributes(page_id)?;
         let content = pdf.doc.get_page_content(page_id);
         let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
-        let mut redactor = Redactor { pdf, areas: page_areas.clone(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false };
+        let mut redactor = Redactor { pdf, areas: page_areas.clone(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
         let resources = redactor.page_resources();
         let (new_operations, _) = redactor.process(operations, &resources, IDENTITY)?;
         let added = std::mem::take(&mut redactor.pending_resources);

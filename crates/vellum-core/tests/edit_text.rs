@@ -113,3 +113,169 @@ fn other_lines_keep_their_exact_spacing() {
     assert!(close(&before_justified, &boxes(&edited, "Justified line with spacing.")), "kerned line moved");
     assert!(close(&before_spaced, &boxes(&edited, "Spaced letters")), "letter-spaced line moved");
 }
+
+mod paragraphs {
+    use super::*;
+    use vellum_core::edit_text::{Alignment, Overflow, ParagraphStyle, editable_paragraphs, replace_paragraph};
+
+    fn letter() -> Vec<u8> {
+        let markdown = "# Notice\n\nThe quarterly meeting will be held in the main conference room on the third floor. Please arrive ten minutes early so we can start on time and finish before lunch.\n\nBring your laptop and the printed agenda.\n\nThank you.";
+        markdown_to_pdf(markdown, &TextPageSettings::default()).unwrap().to_bytes(&SaveSettings::default()).unwrap()
+    }
+
+    #[test]
+    fn paragraphs_are_grouped_by_layout() {
+        let document = engine::open_document(letter(), None).unwrap();
+        let paragraphs = editable_paragraphs(&document, 0).unwrap();
+        let texts: Vec<&str> = paragraphs.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts[0], "Notice");
+        assert!(texts[1].starts_with("The quarterly meeting") && texts[1].ends_with("finish before lunch."), "{texts:?}");
+        assert!(paragraphs[1].lines.len() >= 2, "the long paragraph wraps");
+        assert_eq!(texts[2], "Bring your laptop and the printed agenda.");
+        assert_eq!(texts[3], "Thank you.");
+        assert_eq!(paragraphs[1].alignment, Alignment::Left);
+    }
+
+    #[test]
+    fn longer_text_rewraps_within_the_paragraph() {
+        let bytes = letter();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(1);
+        drop(document);
+        let new_text = "The quarterly meeting moves to the large training room on the second floor, next to the cafeteria. Please arrive fifteen minutes early, bring a pen, and expect the session to run until two in the afternoon.";
+        let (edited, report) = replace_paragraph(&bytes, None, &paragraph, new_text, &ParagraphStyle::of(&paragraph)).unwrap();
+        assert!(report.lines_after > report.lines_before, "{report:?}");
+        std::fs::write(folder().join("paragraph.pdf"), &edited).unwrap();
+        let text = text_of(&edited).split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(text.contains(new_text), "{text}");
+        assert!(!text.contains("main conference room") && text.contains("Bring your laptop") && text.contains("Notice"));
+        // Every new line stays inside the original width, at the original spacing.
+        let document = engine::open_document(edited, None).unwrap();
+        let lines = editable_lines(&document, 0).unwrap();
+        let new_lines: Vec<_> = lines.iter().filter(|l| new_text.contains(l.text.trim())).collect();
+        assert_eq!(new_lines.len(), report.lines_after);
+        for line in &new_lines {
+            assert!(line.bounds[2] <= paragraph.left + paragraph.width + 1.0, "{} overflows", line.text);
+            assert!((line.bounds[0] - paragraph.left).abs() < 1.0, "{} does not start at the left edge", line.text);
+        }
+        for pair in new_lines.windows(2) {
+            assert!(((pair[0].matrix[5] - pair[1].matrix[5]) - paragraph.leading).abs() < 0.2, "spacing changed");
+        }
+        engine::render_page(&document, 0, &RenderOptions { dpi: 90.0, ..Default::default() }).unwrap().save(folder().join("paragraph.png")).unwrap();
+    }
+
+    #[test]
+    fn justified_paragraphs_stay_justified() {
+        use lopdf::{Dictionary, Stream, dictionary};
+        // Three justified lines and a short last line, set with word spacing.
+        let mut pdf = Pdf::new_empty();
+        let font = vellum_core::fonts::StandardFont::TimesRoman.add_to(&mut pdf.doc);
+        let font_size = 11.0;
+        let width = 300.0;
+        let words = ["Justified text keeps both edges straight by", "spreading the space between words evenly so", "every full line ends at the same right edge", "except the last."];
+        let mut content = format!("BT /F1 {font_size} Tf ");
+        for (index, line) in words.iter().enumerate() {
+            let natural = vellum_core::fonts::StandardFont::TimesRoman.text_width(line, font_size);
+            let gaps = line.matches(' ').count().max(1) as f32;
+            let word_spacing = if index + 1 < words.len() { (width - natural) / gaps } else { 0.0 };
+            content.push_str(&format!("{word_spacing} Tw 1 0 0 1 72 {} Tm ({line}) Tj ", 700.0 - index as f32 * 14.0));
+        }
+        content.push_str("ET");
+        let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
+        let root = pdf.pages_root_id().unwrap();
+        let page = pdf.doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => root,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            "Contents" => content_id,
+        });
+        pdf.set_page_order(&[page]).unwrap();
+        let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(0);
+        drop(document);
+        assert_eq!(paragraph.lines.len(), 4);
+        assert_eq!(paragraph.alignment, Alignment::Justified);
+        let new_text = "Edited justified text still keeps both edges straight, because the space between the words is spread evenly across each full line, and only the final line is left ragged.";
+        let (edited, _) = replace_paragraph(&bytes, None, &paragraph, new_text, &ParagraphStyle::of(&paragraph)).unwrap();
+        let document = engine::open_document(edited, None).unwrap();
+        let lines = editable_paragraphs(&document, 0).unwrap();
+        let rights: Vec<f32> = lines.iter().flat_map(|p| p.lines.iter()).map(|l| l.bounds[2]).collect();
+        assert!(rights.len() >= 3, "{rights:?}");
+        let full = &rights[..rights.len() - 1];
+        let edge = paragraph.left + paragraph.width;
+        assert!(full.iter().all(|r| (r - edge).abs() < 1.5), "full lines end at {full:?}, expected {edge}");
+        assert!(rights[rights.len() - 1] < edge - 5.0, "the last line stays ragged");
+    }
+
+    const LONGER: &str = "The quarterly meeting moves to the large training room on the second floor, next to the cafeteria. Please arrive fifteen minutes early, bring a pen, and expect the session to run until two in the afternoon.";
+
+    fn glyph_boxes(bytes: &[u8], phrase: &str) -> Vec<[f32; 4]> {
+        let document = engine::open_document(bytes.to_vec(), None).unwrap();
+        let text = engine::page_text(&document, 0).unwrap();
+        let (string, offsets) = text.as_string();
+        let start = string.find(phrase).unwrap_or_else(|| panic!("{phrase} missing"));
+        let first = string[..start].chars().count();
+        (first..first + phrase.chars().count()).map(|i| text.chars[offsets[i]].rect).collect()
+    }
+
+    #[test]
+    fn growing_paragraph_pushes_the_rest_down_intact() {
+        let bytes = letter();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(1);
+        drop(document);
+        let before = glyph_boxes(&bytes, "Bring your laptop and the printed agenda.");
+        let (edited, report) = replace_paragraph(&bytes, None, &paragraph, LONGER, &ParagraphStyle::of(&paragraph)).unwrap();
+        assert!(report.moved_below >= 2 && !report.overlaps, "{report:?}");
+        let growth = (report.lines_after - report.lines_before) as f32 * paragraph.leading;
+        let after = glyph_boxes(&edited, "Bring your laptop and the printed agenda.");
+        for (old, new) in before.iter().zip(&after) {
+            assert!((old[0] - new[0]).abs() < 0.01 && (old[2] - new[2]).abs() < 0.01, "moved sideways: {old:?} {new:?}");
+            assert!(((old[1] - new[1]) - growth).abs() < 0.05, "moved by {} instead of {growth}", old[1] - new[1]);
+        }
+        // "Thank you." moved the same distance, so the gap between them is unchanged.
+        let thanks_before = glyph_boxes(&bytes, "Thank you.")[0][1];
+        let thanks_after = glyph_boxes(&edited, "Thank you.")[0][1];
+        assert!(((thanks_before - thanks_after) - growth).abs() < 0.05);
+        let document = engine::open_document(edited, None).unwrap();
+        engine::render_page(&document, 0, &RenderOptions { dpi: 90.0, ..Default::default() }).unwrap().save(folder().join("paragraph-pushed.png")).unwrap();
+    }
+
+    #[test]
+    fn shrink_to_fit_and_overlap_are_honest() {
+        let bytes = letter();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(1);
+        drop(document);
+        let fit = ParagraphStyle { overflow: Overflow::ShrinkToFit, ..ParagraphStyle::of(&paragraph) };
+        let (_, report) = replace_paragraph(&bytes, None, &paragraph, LONGER, &fit).unwrap();
+        assert_eq!(report.lines_after, report.lines_before, "{report:?}");
+        assert!(report.scale < 1.0 && report.scale >= 0.75);
+
+        let overlap = ParagraphStyle { overflow: Overflow::Overlap, ..ParagraphStyle::of(&paragraph) };
+        let (edited, report) = replace_paragraph(&bytes, None, &paragraph, LONGER, &overlap).unwrap();
+        assert!(report.overlaps && report.moved_below == 0, "{report:?}");
+        assert_eq!(glyph_boxes(&bytes, "Bring your laptop")[0], glyph_boxes(&edited, "Bring your laptop")[0], "nothing moved");
+    }
+
+    #[test]
+    fn moving_a_paragraph_translates_it_exactly() {
+        let bytes = letter();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(1);
+        drop(document);
+        let phrase = "The quarterly meeting";
+        let before = glyph_boxes(&bytes, phrase);
+        let moved = vellum_core::edit_text::move_text(&bytes, None, 0, paragraph.bounds, (36.0, -200.0)).unwrap();
+        let after = glyph_boxes(&moved, phrase);
+        for (old, new) in before.iter().zip(&after) {
+            assert!((new[0] - old[0] - 36.0).abs() < 0.01 && (new[1] - old[1] + 200.0).abs() < 0.01, "{old:?} → {new:?}");
+            assert!(((new[2] - new[0]) - (old[2] - old[0])).abs() < 0.01, "glyph width changed");
+        }
+        // Text outside the paragraph stays where it was.
+        assert_eq!(glyph_boxes(&bytes, "Notice")[0], glyph_boxes(&moved, "Notice")[0]);
+        assert_eq!(glyph_boxes(&bytes, "Thank you.")[0], glyph_boxes(&moved, "Thank you.")[0]);
+    }
+}

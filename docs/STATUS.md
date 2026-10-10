@@ -54,6 +54,15 @@ saves a picture of the window and exits (setup options are documented on
   which rewrites the whole page and loses justification). The original font
   is reused when it is embedded TrueType/OpenType with the needed glyphs;
   otherwise Arial, Times New Roman or Courier New stand in by style.
+- Paragraph editing: lines are grouped into paragraphs by geometry (size,
+  steady line spacing, aligned edges, first-line indent starts a new one),
+  with alignment detected (left, center, right, justified). Replacing a
+  paragraph re-wraps it at its width, line spacing and alignment (justified
+  per word). When it grows: push the column below down (moved without
+  re-encoding, by wrapping operators in a translation; the bottom 6% of the
+  page is a footer zone that never moves), falling back to shrink-to-fit,
+  then overlap. Moving text by dragging also uses the translation, so moved
+  text keeps its exact glyphs. Tables group poorly; "Line only" handles them.
 - Desktop app: tabs, background rendering, zoom and fit, thumbnails,
   bookmarks, comments, fields, search, attachments, page organizer with drag
   and drop, every markup tool, form filling, signing, dialogs for all tools,
@@ -62,8 +71,8 @@ saves a picture of the window and exits (setup options are documented on
 
 ## Ideas for next
 
-1. Paragraph-level text editing (reflowing a whole paragraph, not just lines).
-2. Reusing bare CFF fonts (InDesign's usual embedding) when editing text.
+1. Reusing bare CFF fonts (InDesign's usual embedding) when editing text.
+2. Mixed styles within a paragraph (bold or italic words survive editing).
 3. Incremental saves for edits after signing, so signatures survive.
 4. Complex script shaping (rustybuzz) for Indic and Arabic text.
 5. Release build, installer, file associations, an app icon.
