@@ -158,3 +158,36 @@ fn stamps_comments_and_fields_accept_any_script() {
     }
     engine::render_page(&document, 0, &RenderOptions { dpi: 80.0, ..Default::default() }).unwrap().save(output_folder().join("unicode-markup.png")).unwrap();
 }
+
+/// The width tables used for measuring and positioning must agree with how
+/// PDFium actually draws each standard font.
+#[test]
+fn standard_font_widths_match_the_renderer() {
+    use lopdf::dictionary;
+    use vellum_core::fonts::StandardFont;
+    let sample = "Sphinx of black quartz, judge my vow! 0123456789 (WAVE) [x]";
+    for font in [StandardFont::Helvetica, StandardFont::HelveticaBold, StandardFont::HelveticaOblique, StandardFont::TimesRoman, StandardFont::TimesBold, StandardFont::TimesItalic, StandardFont::Courier, StandardFont::CourierBold] {
+        let mut pdf = Pdf::new_empty();
+        let font_id = font.add_to(&mut pdf.doc);
+        let content = format!("BT /F 20 Tf 50 700 Td ({sample}) Tj ET");
+        let content_id = pdf.doc.add_object(lopdf::Stream::new(lopdf::Dictionary::new(), content.into_bytes()));
+        let root = pdf.pages_root_id().unwrap();
+        let page = pdf.doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => root,
+            "MediaBox" => vec![0.into(), 0.into(), 1200.into(), 792.into()],
+            "Resources" => dictionary! { "Font" => dictionary! { "F" => font_id } },
+            "Contents" => content_id,
+        });
+        pdf.set_page_order(&[page]).unwrap();
+        let document = engine::open_document(pdf.to_bytes(&SaveSettings::default()).unwrap(), None).unwrap();
+        // The origin (not the ink box, which leans in italics) of the final "]"
+        // sits at the sum of all earlier advances.
+        let page = document.pages().get(0).unwrap();
+        let text = page.text().unwrap();
+        let all = text.chars();
+        let last = all.iter().filter(|c| c.unicode_char() == Some(']')).last().unwrap();
+        let rendered_to_last = last.origin_x().unwrap().value - 50.0;
+        let measured_to_last = font.text_width(&sample[..sample.len() - 1], 20.0);
+        assert!((rendered_to_last - measured_to_last).abs() < 1.5, "{font:?}: renderer {rendered_to_last}, table {measured_to_last}");
+    }
+}

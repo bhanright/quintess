@@ -17,6 +17,7 @@ use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::document::Pdf;
+use crate::rich_text::{RichText, SpanStyle, StyledSpan, carry_styles};
 use crate::fonts::StandardFont;
 use crate::pages::number;
 use crate::unicode_text::{TextSetter, add_fonts_to_page};
@@ -45,6 +46,9 @@ pub struct EditableLine {
     pub monospace: bool,
     /// Invisible text, such as an OCR layer over a scan.
     pub invisible: bool,
+    /// The line's text split by style. The fields above describe the style
+    /// most of the line is set in.
+    pub spans: Vec<StyledSpan>,
 }
 
 impl EditableLine {
@@ -82,6 +86,21 @@ struct Piece {
     serif: bool,
     monospace: bool,
     invisible: bool,
+}
+
+impl Piece {
+    fn span_style(&self) -> SpanStyle {
+        SpanStyle {
+            font_name: self.font_name.clone(),
+            bold: self.bold,
+            italic: self.italic,
+            serif: self.serif,
+            monospace: self.monospace,
+            color: self.color,
+            apparent_size: self.apparent_size,
+            sample_object: Some(self.index),
+        }
+    }
 }
 
 fn pieces(document: &PdfDocument, page_index: usize) -> Result<Vec<Piece>> {
@@ -138,12 +157,23 @@ pub fn editable_lines(document: &PdfDocument, page_index: usize) -> Result<Vec<E
             let gap = piece.bounds[0] - line.bounds[2];
             if gap > size * 0.15 && !line.text.ends_with(char::is_whitespace) && !piece.text.starts_with(char::is_whitespace) {
                 line.text.push(' ');
+                // The gap belongs to the text before it.
+                if let Some(last) = line.spans.last_mut() {
+                    last.text.push(' ');
+                }
             }
             line.text.push_str(&piece.text);
+            let style = piece.span_style();
+            match line.spans.last_mut() {
+                Some(last) if last.style.looks_like(&style) => last.text.push_str(&piece.text),
+                _ => line.spans.push(StyledSpan { text: piece.text.clone(), style }),
+            }
             line.object_indices.push(piece.index);
             line.bounds = [line.bounds[0].min(piece.bounds[0]), line.bounds[1].min(piece.bounds[1]), line.bounds[2].max(piece.bounds[2]), line.bounds[3].max(piece.bounds[3])];
         } else {
+            let spans = vec![StyledSpan { text: piece.text.clone(), style: piece.span_style() }];
             lines.push(EditableLine {
+                spans,
                 page_index,
                 object_indices: vec![piece.index],
                 text: piece.text,
@@ -163,6 +193,18 @@ pub fn editable_lines(document: &PdfDocument, page_index: usize) -> Result<Vec<E
     }
     for line in &mut lines {
         line.text = line.text.trim_end().to_string();
+        if let Some(last) = line.spans.last_mut() {
+            last.text = last.text.trim_end().to_string();
+        }
+        // Describe the line by the style most of its characters use.
+        if let Some(main) = line.spans.iter().max_by_key(|span| span.text.chars().filter(|c| !c.is_whitespace()).count()).map(|span| span.style.clone()) {
+            line.font_name = main.font_name;
+            line.bold = main.bold;
+            line.italic = main.italic;
+            line.serif = main.serif;
+            line.monospace = main.monospace;
+            line.color = main.color;
+        }
     }
     Ok(lines)
 }
@@ -199,8 +241,16 @@ fn take_out_line(bytes: &[u8], password: Option<&str>, line: &EditableLine) -> R
 /// Takes several lines of one page out at once (see [`take_out_line`]). The
 /// font program returned is that of the first line.
 fn take_out_lines(bytes: &[u8], password: Option<&str>, lines: &[EditableLine]) -> Result<(Pdf, Option<Vec<u8>>)> {
+    let first_object = lines.first().and_then(|l| l.object_indices.first().copied());
+    let (pdf, mut programs) = take_out_lines_keeping_fonts(bytes, password, lines, first_object.as_slice())?;
+    Ok((pdf, first_object.and_then(|index| programs.remove(&index))))
+}
+
+/// Like [`take_out_lines`], returning the embedded font program of each of
+/// `objects` (page object indices) that has one.
+fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[EditableLine], objects: &[usize]) -> Result<(Pdf, std::collections::HashMap<usize, Vec<u8>>)> {
     let Some(line) = lines.first() else { bail!("nothing to edit") };
-    let original_font = {
+    let programs = {
         let document = crate::engine::open_document(bytes.to_vec(), password)?;
         let current = editable_lines(&document, line.page_index)?;
         for wanted in lines {
@@ -209,10 +259,18 @@ fn take_out_lines(bytes: &[u8], password: Option<&str>, lines: &[EditableLine]) 
             }
         }
         let page = document.pages().get(line.page_index as i32)?;
-        page.objects()
-            .get(line.object_indices[0] as PdfPageObjectIndex)
-            .ok()
-            .and_then(|object| object.as_text_object().map(|text| text.font()).filter(|font| font.is_embedded().unwrap_or(false)).and_then(|font| font.data().ok()))
+        let mut programs = std::collections::HashMap::new();
+        for &index in objects {
+            let program = page
+                .objects()
+                .get(index as PdfPageObjectIndex)
+                .ok()
+                .and_then(|object| object.as_text_object().map(|text| text.font()).filter(|font| font.is_embedded().unwrap_or(false)).and_then(|font| font.data().ok()));
+            if let Some(program) = program {
+                programs.insert(index, program);
+            }
+        }
+        programs
     };
     let mut pdf = Pdf::from_bytes(bytes, password)?;
     // A band along the baseline catches this line's glyph centers but not
@@ -221,14 +279,16 @@ fn take_out_lines(bytes: &[u8], password: Option<&str>, lines: &[EditableLine]) 
         .iter()
         .map(|line| {
             let size = line.apparent_size.max(1.0);
-            [line.bounds[0] - 0.5, line.matrix[5] + size * 0.05, line.bounds[2] + 0.5, line.matrix[5] + size * 0.6]
+            // A little horizontal slack absorbs small differences between this
+            // program's glyph metrics and the renderer's.
+            [line.bounds[0] - size * 0.25, line.matrix[5] + size * 0.05, line.bounds[2] + size * 0.25, line.matrix[5] + size * 0.6]
         })
         .collect();
     let removed = crate::redact::remove_text(&mut pdf, line.page_index as u32 + 1, &bands)?;
     if removed == 0 {
         bail!("this text could not be taken out of the page (its encoding is not supported for editing)");
     }
-    Ok((pdf, original_font))
+    Ok((pdf, programs))
 }
 
 /// Draws a line of text at a text matrix with the given look.
@@ -334,6 +394,8 @@ pub struct EditableParagraph {
     pub lines: Vec<EditableLine>,
     /// The text with line breaks joined (hyphenated words rejoined).
     pub text: String,
+    /// The same text with each character's style.
+    pub rich: RichText,
     /// `[left, bottom, right, top]` around all its lines.
     pub bounds: [f32; 4],
     /// Left edge of lines after the first, and the width available.
@@ -361,25 +423,11 @@ fn line_width(line: &EditableLine) -> f32 {
     line.bounds[2] - line.bounds[0]
 }
 
-/// Joins wrapped lines back into running text.
-fn join_lines(lines: &[EditableLine]) -> String {
-    let mut text = String::new();
-    for line in lines {
-        let next = line.text.trim();
-        if text.is_empty() {
-            text.push_str(next);
-            continue;
-        }
-        // A hyphen at a line end followed by a lowercase letter is a word split by wrapping.
-        let split_word = text.ends_with('-') && !text.ends_with(" -") && next.chars().next().is_some_and(char::is_lowercase);
-        if split_word {
-            text.pop();
-        } else {
-            text.push(' ');
-        }
-        text.push_str(next);
-    }
-    text
+/// Whether nearly all of a line's letters are bold.
+fn mostly_bold(line: &EditableLine) -> bool {
+    let count = |bold_only: bool| line.spans.iter().filter(|span| !bold_only || span.style.bold).map(|span| span.text.chars().filter(|c| !c.is_whitespace()).count()).sum::<usize>();
+    let total = count(false);
+    total > 0 && count(true) as f32 >= total as f32 * 0.8
 }
 
 /// Groups a page's lines into paragraphs by how they sit on the page.
@@ -392,7 +440,9 @@ pub fn editable_paragraphs(document: &PdfDocument, page_index: usize) -> Result<
         let found = groups.iter_mut().rev().take(12).find(|group| {
             let last = group.last().expect("groups are never empty");
             let step = last.matrix[5] - line.matrix[5];
-            let same_look = (last.apparent_size - line.apparent_size).abs() < 0.5 && last.invisible == line.invisible && last.bold == line.bold;
+            // A wholly bold line (a run-in heading) does not join body text, but
+            // a line with a few bold words does.
+            let same_look = (last.apparent_size - line.apparent_size).abs() < 0.5 && last.invisible == line.invisible && mostly_bold(last) == mostly_bold(&line);
             let overlap = last.bounds[2].min(line.bounds[2]) - last.bounds[0].max(line.bounds[0]);
             let overlaps = overlap > 0.5 * line_width(last).min(line_width(&line));
             // Lines start together; the first line of a paragraph may be indented.
@@ -420,6 +470,41 @@ pub fn editable_paragraphs(document: &PdfDocument, page_index: usize) -> Result<
     Ok(groups.into_iter().map(|lines| paragraph_from(page_index, lines)).collect())
 }
 
+/// Joins wrapped lines back into running text with each character's
+/// style: lines meet with a space, and a word hyphenated across a line
+/// break (a hyphen followed by a lowercase letter) is rejoined.
+fn join_rich(lines: &[EditableLine]) -> RichText {
+    let mut rich = RichText::default();
+    for line in lines {
+        let first_letter_lowercase = line.text.trim_start().chars().next().is_some_and(char::is_lowercase);
+        if !rich.is_empty() {
+            let split_word = rich.text.ends_with('-') && !rich.text.ends_with(" -") && first_letter_lowercase;
+            if split_word {
+                rich.text.pop();
+                rich.styles.pop();
+            } else {
+                let style = *rich.styles.last().expect("not empty");
+                rich.text.push(' ');
+                rich.styles.push(style);
+            }
+        }
+        let mut started = false;
+        for span in &line.spans {
+            let index = rich.palette_index(&span.style);
+            for character in span.text.chars() {
+                // Leading spaces of a line were already accounted for by the join.
+                if !started && character.is_whitespace() {
+                    continue;
+                }
+                started = true;
+                rich.text.push(character);
+                rich.styles.push(index);
+            }
+        }
+    }
+    rich
+}
+
 fn paragraph_from(page_index: usize, lines: Vec<EditableLine>) -> EditableParagraph {
     let size = lines[0].apparent_size.max(1.0);
     let bounds = lines.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, l| [b[0].min(l.bounds[0]), b[1].min(l.bounds[1]), b[2].max(l.bounds[2]), b[3].max(l.bounds[3])]);
@@ -442,7 +527,8 @@ fn paragraph_from(page_index: usize, lines: Vec<EditableLine>) -> EditableParagr
     } else {
         Alignment::Left
     };
-    EditableParagraph { page_index, text: join_lines(&lines), bounds, left, width: (right - left).max(size), first_line_indent, leading, alignment, lines }
+    let rich = join_rich(&lines);
+    EditableParagraph { page_index, text: rich.text.clone(), rich, bounds, left, width: (right - left).max(size), first_line_indent, leading, alignment, lines }
 }
 
 /// How a paragraph should look after editing.
@@ -507,34 +593,99 @@ pub struct ParagraphReport {
     pub scale: f32,
 }
 
-/// One laid-out line: its text, whether it ends a paragraph, and its indent.
-type LaidOutLine = (String, bool, f32);
+/// A word made of runs that may differ in style.
+struct Word {
+    segments: Vec<(String, usize)>,
+    width: f32,
+}
 
-/// Wraps text to a width; explicit line breaks start new paragraphs, and
-/// the first line of the first paragraph is indented by `indent`.
-fn lay_out(setter: &TextSetter, text: &str, width: f32, indent: f32, size: f32) -> Vec<LaidOutLine> {
-    let mut laid_out = Vec::new();
-    for (index, source) in text.split('\n').enumerate() {
-        // Single spaces, so the first wrapped line is an exact prefix of the text.
-        let source = source.split_whitespace().collect::<Vec<_>>().join(" ");
-        if source.is_empty() {
-            laid_out.push((String::new(), true, 0.0));
+/// One laid-out line of rich text.
+struct RichLine {
+    words: Vec<Word>,
+    /// Width of each space between words (in the style of that space).
+    gaps: Vec<f32>,
+    /// The last line of its paragraph is never justified.
+    ends_paragraph: bool,
+    indent: f32,
+}
+
+/// Breaks rich text into lines no wider than `width`, measuring each run in
+/// its own font. Explicit line breaks start new paragraphs; the first line
+/// of the first one is indented by `indent`.
+fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], width: f32, indent: f32) -> Vec<RichLine> {
+    let measure = |text: &str, style: usize| setters[style].as_ref().map(|s| s.width(text, sizes[style])).unwrap_or(0.0);
+    let characters: Vec<(char, usize)> = rich.text.chars().zip(rich.styles.iter().copied()).collect();
+    let mut lines = Vec::new();
+    for (paragraph_number, paragraph) in characters.split(|(c, _)| *c == '\n').enumerate() {
+        // Words and the style of the space after each.
+        let mut words: Vec<(Word, Option<usize>)> = Vec::new();
+        let mut current: Vec<(String, usize)> = Vec::new();
+        let finish = |current: &mut Vec<(String, usize)>, words: &mut Vec<(Word, Option<usize>)>, space: Option<usize>| {
+            if !current.is_empty() {
+                let width = current.iter().map(|(text, style)| measure(text, *style)).sum();
+                words.push((Word { segments: std::mem::take(current), width }, space));
+            } else if let (Some(last), Some(space)) = (words.last_mut(), space) {
+                last.1.get_or_insert(space);
+            }
+        };
+        for &(character, style) in paragraph {
+            if character.is_whitespace() {
+                finish(&mut current, &mut words, Some(style));
+                continue;
+            }
+            match current.last_mut() {
+                Some((text, last)) if *last == style => text.push(character),
+                _ => current.push((character.to_string(), style)),
+            }
+        }
+        finish(&mut current, &mut words, None);
+        let first_indent = if paragraph_number == 0 { indent } else { 0.0 };
+        if words.is_empty() {
+            lines.push(RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: true, indent: 0.0 });
             continue;
         }
-        let first_indent = if index == 0 { indent } else { 0.0 };
-        let first_lines = crate::fonts::wrap_text_by(&source, width - first_indent, |piece| setter.width(piece, size));
-        let head = first_lines.first().cloned().unwrap_or_default();
-        let rest = source[head.len().min(source.len())..].trim();
-        let mut lines = vec![head];
-        if !rest.is_empty() {
-            lines.extend(crate::fonts::wrap_text_by(rest, width, |piece| setter.width(piece, size)));
+        let mut line = RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: false, indent: first_indent };
+        let mut line_width = 0.0;
+        let mut pending_gap = 0.0;
+        for (word, space_after) in words {
+            let available = width - line.indent;
+            if !line.words.is_empty() && line_width + pending_gap + word.width > available {
+                lines.push(std::mem::replace(&mut line, RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: false, indent: 0.0 }));
+                line_width = 0.0;
+            } else if !line.words.is_empty() {
+                line.gaps.push(pending_gap);
+                line_width += pending_gap;
+            }
+            line_width += word.width;
+            line.words.push(word);
+            pending_gap = space_after.map(|style| measure(" ", style)).unwrap_or(0.0);
         }
-        let count = lines.len();
-        for (line_index, line) in lines.into_iter().enumerate() {
-            laid_out.push((line, line_index + 1 == count, if line_index == 0 { first_indent } else { 0.0 }));
-        }
+        line.ends_paragraph = true;
+        lines.push(line);
     }
-    laid_out
+    lines
+}
+
+/// Fonts for each style in use: the original program when it can draw all
+/// of that style's characters, otherwise the closest system or standard font.
+/// Returns the setters (by palette index) and whether every one reused its original.
+fn setters_for(rich: &RichText, programs: &std::collections::HashMap<usize, Vec<u8>>) -> (Vec<Option<TextSetter>>, bool) {
+    let mut reused_all = true;
+    let setters = (0..rich.palette.len())
+        .map(|index| {
+            let text: String = rich.text.chars().zip(&rich.styles).filter(|(_, s)| **s == index).map(|(c, _)| c).collect();
+            if text.is_empty() {
+                return None;
+            }
+            let style = &rich.palette[index];
+            let original = style.sample_object.and_then(|object| programs.get(&object)).and_then(|program| TextSetter::with_font_program(style.standard_font(), program.clone(), &style.font_name, &text));
+            if original.is_none() && !text.trim().is_empty() {
+                reused_all = false;
+            }
+            Some(original.unwrap_or_else(|| TextSetter::for_texts(style.standard_font(), [text.as_str()])))
+        })
+        .collect();
+    (setters, reused_all)
 }
 
 /// Replaces a paragraph's text, re-wrapping it to the paragraph's width at
@@ -545,38 +696,64 @@ fn lay_out(setter: &TextSetter, text: &str, width: f32, indent: f32, size: f32) 
 /// reaching the footer or leaving the page, the paragraph is shrunk to fit
 /// instead (and only overlaps if even 75% does not fit); the report's
 /// `would_leave_page` says this happened.
+///
+/// Styles within the paragraph (bold or italic words, colors, other fonts)
+/// carry over to the new text. A `style` whose font or color differs from
+/// the paragraph's main style applies to the whole paragraph.
 pub fn replace_paragraph(bytes: &[u8], password: Option<&str>, paragraph: &EditableParagraph, new_text: &str, style: &ParagraphStyle) -> Result<(Vec<u8>, ParagraphReport)> {
-    let (edited, report) = replace_paragraph_once(bytes, password, paragraph, new_text, style)?;
+    let mut rich = carry_styles(&paragraph.rich, new_text);
+    let first = paragraph.first();
+    if style.font != first.matching_font() {
+        let font = style.font;
+        let (bold, italic) = (matches!(font, StandardFont::HelveticaBold | StandardFont::TimesBold | StandardFont::CourierBold), matches!(font, StandardFont::HelveticaOblique | StandardFont::TimesItalic));
+        let (serif, monospace) = (matches!(font, StandardFont::TimesRoman | StandardFont::TimesBold | StandardFont::TimesItalic), matches!(font, StandardFont::Courier | StandardFont::CourierBold));
+        for entry in &mut rich.palette {
+            *entry = SpanStyle { bold, italic, serif, monospace, sample_object: None, ..entry.clone() };
+        }
+    }
+    if style.color.iter().zip(&first.color).any(|(a, b)| (a - b).abs() > 0.004) {
+        for entry in &mut rich.palette {
+            entry.color = style.color;
+        }
+    }
+    replace_paragraph_rich(bytes, password, paragraph, &rich, style)
+}
+
+/// Replaces a paragraph with rich text, each character in its own style.
+/// Only `style`'s size (as a scale against the paragraph's main size),
+/// alignment, spacing, width, offset and overflow apply.
+pub fn replace_paragraph_rich(bytes: &[u8], password: Option<&str>, paragraph: &EditableParagraph, rich: &RichText, style: &ParagraphStyle) -> Result<(Vec<u8>, ParagraphReport)> {
+    let (edited, report) = replace_paragraph_once(bytes, password, paragraph, rich, style)?;
     if style.overflow == Overflow::PushDown && report.would_leave_page {
         let shrink = ParagraphStyle { overflow: Overflow::ShrinkToFit, ..style.clone() };
-        let (edited, mut report) = replace_paragraph_once(bytes, password, paragraph, new_text, &shrink)?;
+        let (edited, mut report) = replace_paragraph_once(bytes, password, paragraph, rich, &shrink)?;
         report.would_leave_page = true;
         return Ok((edited, report));
     }
     Ok((edited, report))
 }
 
-fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &EditableParagraph, new_text: &str, style: &ParagraphStyle) -> Result<(Vec<u8>, ParagraphReport)> {
-    let (mut pdf, original_font) = take_out_lines(bytes, password, &paragraph.lines)?;
+fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &EditableParagraph, rich: &RichText, style: &ParagraphStyle) -> Result<(Vec<u8>, ParagraphReport)> {
+    let objects: Vec<usize> = rich.palette.iter().filter_map(|s| s.sample_object).collect();
+    let (mut pdf, programs) = take_out_lines_keeping_fonts(bytes, password, &paragraph.lines, &objects)?;
     let first = paragraph.first();
-    let keep_font = style.font == first.matching_font();
-    let from_original = original_font.filter(|_| keep_font).and_then(|program| TextSetter::with_font_program(style.font, program, &first.font_name, new_text));
-    let reused_font = from_original.is_some();
-    let mut setter = from_original.unwrap_or_else(|| TextSetter::for_texts(style.font, [new_text]));
+    let (setters, reused_font) = setters_for(rich, &programs);
     let indent = paragraph.first_line_indent;
     let before = paragraph.lines.len();
-    // Shrinking to fit tries smaller sizes until the text fits the old line count.
+    // The style bar's size scales every run, keeping their proportions.
+    let requested_scale = style.apparent_size / first.apparent_size.max(0.1);
+    let sizes_at = |scale: f32| -> Vec<f32> { rich.palette.iter().map(|s| s.apparent_size * requested_scale * scale).collect() };
     let mut scale = 1.0f32;
-    let mut laid_out = lay_out(&setter, new_text, style.width, indent, style.apparent_size);
+    let mut sizes = sizes_at(scale);
+    let mut laid_out = lay_out_rich(rich, &setters, &sizes, style.width, indent);
     if style.overflow == Overflow::ShrinkToFit {
         while laid_out.len() > before && scale > 0.76 {
             scale -= 0.05;
-            laid_out = lay_out(&setter, new_text, style.width, indent, style.apparent_size * scale);
+            sizes = sizes_at(scale);
+            laid_out = lay_out_rich(rich, &setters, &sizes, style.width, indent);
         }
     }
-    let size = style.apparent_size * scale;
     let leading = style.leading * scale;
-    let space_width = setter.width(" ", size).max(size * 0.2);
     let left = paragraph.left + style.offset.0;
     let first_baseline = first.matrix[5] + style.offset.1;
 
@@ -613,44 +790,51 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
     }
 
     let page_id = pdf.page_id(paragraph.page_index as u32 + 1)?;
-    let [red, green, blue] = style.color;
-    let mut content = format!("q BT {} {} {} {} rg ", if first.invisible { "3 Tr" } else { "0 Tr" }, number(red), number(green), number(blue));
-    for (index, (line, last_of_paragraph, line_indent)) in laid_out.iter().enumerate() {
-        if line.is_empty() {
+    let mut setters = setters;
+    let mut content = format!("q BT {} ", if first.invisible { "3 Tr" } else { "0 Tr" });
+    let mut current_color: Option<[f32; 3]> = None;
+    for (index, line) in laid_out.iter().enumerate() {
+        if line.words.is_empty() {
             continue;
         }
         let baseline = first_baseline - index as f32 * leading;
-        let natural = setter.width(line, size);
-        let available = style.width - line_indent;
-        let words: Vec<&str> = line.split(' ').filter(|w| !w.is_empty()).collect();
-        let justify = style.alignment == Alignment::Justified && !last_of_paragraph && words.len() > 1;
-        if justify {
-            // Spread the leftover space evenly between words.
-            let words_width: f32 = words.iter().map(|w| setter.width(w, size)).sum();
-            let gap = (available - words_width) / (words.len() - 1) as f32;
-            // Do not stretch absurdly when a line holds very few words.
-            let gap = gap.min(space_width * 4.0);
-            let mut x = left + line_indent;
-            for word in words {
+        let natural: f32 = line.words.iter().map(|w| w.width).sum::<f32>() + line.gaps.iter().sum::<f32>();
+        let available = style.width - line.indent;
+        let justify = style.alignment == Alignment::Justified && !line.ends_paragraph && line.words.len() > 1;
+        // Extra space per gap when justifying, never stretching absurdly.
+        let extra = if justify { ((available - natural) / line.gaps.len().max(1) as f32).min(sizes.iter().copied().fold(0.0, f32::max)) } else { 0.0 };
+        let mut x = match style.alignment {
+            Alignment::Center => left + line.indent + (available - natural) / 2.0,
+            Alignment::Right => left + line.indent + (available - natural),
+            _ => left + line.indent,
+        };
+        for (word_index, word) in line.words.iter().enumerate() {
+            for (text, style_index) in &word.segments {
+                let span = &rich.palette[*style_index];
+                if current_color != Some(span.color) {
+                    content.push_str(&format!("{} {} {} rg ", number(span.color[0]), number(span.color[1]), number(span.color[2])));
+                    current_color = Some(span.color);
+                }
                 content.push_str(&format!("1 0 0 1 {} {} Tm ", number(x), number(baseline)));
-                content.push_str(&setter.show(&mut pdf.doc, word, size));
-                x += setter.width(word, size) + gap;
+                let setter = setters[*style_index].as_mut().expect("styles in use have setters");
+                content.push_str(&setter.show(&mut pdf.doc, text, sizes[*style_index]));
+                x += setter.width(text, sizes[*style_index]);
             }
-        } else {
-            let x = match style.alignment {
-                Alignment::Center => left + line_indent + (available - natural) / 2.0,
-                Alignment::Right => left + line_indent + (available - natural),
-                _ => left + line_indent,
-            };
-            content.push_str(&format!("1 0 0 1 {} {} Tm ", number(x), number(baseline)));
-            content.push_str(&setter.show(&mut pdf.doc, line, size));
+            if let Some(gap) = line.gaps.get(word_index) {
+                x += gap + extra;
+            }
         }
     }
     content.push_str("ET Q\n");
-    let fonts = setter.finish(&mut pdf.doc)?;
+    let mut fonts = lopdf::Dictionary::new();
+    for setter in setters.into_iter().flatten() {
+        for (name, value) in setter.finish(&mut pdf.doc)?.iter() {
+            fonts.set(name.clone(), value.clone());
+        }
+    }
     add_fonts_to_page(&mut pdf, page_id, &fonts)?;
     pdf.add_page_content(page_id, content.into_bytes(), true)?;
-    let report = ParagraphReport { lines_before: before, lines_after: laid_out.iter().filter(|(l, _, _)| !l.is_empty()).count(), reused_font, moved_below, overlaps, would_leave_page, scale };
+    let report = ParagraphReport { lines_before: before, lines_after: laid_out.iter().filter(|l| !l.words.is_empty()).count(), reused_font, moved_below, overlaps, would_leave_page, scale };
     Ok((pdf.to_bytes(&crate::SaveSettings::default())?, report))
 }
 

@@ -278,4 +278,81 @@ mod paragraphs {
         assert_eq!(glyph_boxes(&bytes, "Notice")[0], glyph_boxes(&moved, "Notice")[0]);
         assert_eq!(glyph_boxes(&bytes, "Thank you.")[0], glyph_boxes(&moved, "Thank you.")[0]);
     }
+
+    /// A paragraph of plain, bold, italic and red words across lines.
+    fn mixed() -> Vec<u8> {
+        use lopdf::{Dictionary, Stream, dictionary};
+        let mut pdf = Pdf::new_empty();
+        let regular = vellum_core::fonts::StandardFont::TimesRoman.add_to(&mut pdf.doc);
+        let bold = vellum_core::fonts::StandardFont::TimesBold.add_to(&mut pdf.doc);
+        let italic = vellum_core::fonts::StandardFont::TimesItalic.add_to(&mut pdf.doc);
+        let content = "BT 0 g /R 12 Tf 1 0 0 1 72 700 Tm (Payment is ) Tj /B 12 Tf (due on receipt) Tj /R 12 Tf (, and late) Tj                        1 0 0 1 72 685 Tm (fees apply after ) Tj /I 12 Tf (thirty days) Tj /R 12 Tf (. Contact the) Tj                        1 0 0 1 72 670 Tm (office ) Tj 0.8 0 0 rg (immediately) Tj 0 g ( with questions.) Tj ET";
+        let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), content.as_bytes().to_vec()));
+        let root = pdf.pages_root_id().unwrap();
+        let page = pdf.doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => root,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Resources" => dictionary! { "Font" => dictionary! { "R" => regular, "B" => bold, "I" => italic } },
+            "Contents" => content_id,
+        });
+        pdf.set_page_order(&[page]).unwrap();
+        pdf.to_bytes(&SaveSettings::default()).unwrap()
+    }
+
+    /// The text of each run in the paragraph, with whether it is bold,
+    /// italic or red.
+    fn runs(bytes: &[u8]) -> Vec<(String, bool, bool, bool)> {
+        let document = engine::open_document(bytes.to_vec(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(0);
+        paragraph.rich.runs().into_iter().map(|(text, style)| {
+            let s = &paragraph.rich.palette[style];
+            (text, s.bold, s.italic, s.color[0] > 0.5 && s.color[1] < 0.2)
+        }).collect()
+    }
+
+    fn styled(runs: &[(String, bool, bool, bool)], pick: impl Fn(&(String, bool, bool, bool)) -> bool) -> String {
+        runs.iter().filter(|r| pick(r)).map(|r| r.0.trim().to_string()).collect::<Vec<_>>().join("|")
+    }
+
+    #[test]
+    fn mixed_styles_are_read_as_one_paragraph() {
+        let runs = runs(&mixed());
+        assert_eq!(styled(&runs, |r| r.1), "due on receipt");
+        assert_eq!(styled(&runs, |r| r.2), "thirty days");
+        assert_eq!(styled(&runs, |r| r.3), "immediately");
+    }
+
+    #[test]
+    fn editing_keeps_each_words_style_through_rewrapping() {
+        let bytes = mixed();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(0);
+        drop(document);
+        assert!(paragraph.lines.len() == 3, "one paragraph of three lines: {:?}", paragraph.text);
+        let new_text = "Payment of the full balance is due on receipt, and a small late fee applies after thirty days. Please contact the billing office immediately with any questions.";
+        let (edited, report) = replace_paragraph(&bytes, None, &paragraph, new_text, &ParagraphStyle::of(&paragraph)).unwrap();
+        assert!(report.reused_font || !report.reused_font);
+        std::fs::write(folder().join("mixed.pdf"), &edited).unwrap();
+        let after = runs(&edited);
+        assert_eq!(styled(&after, |r| r.1), "due on receipt", "{after:?}");
+        assert_eq!(styled(&after, |r| r.2), "thirty days", "{after:?}");
+        assert_eq!(styled(&after, |r| r.3), "immediately", "{after:?}");
+        let document = engine::open_document(edited, None).unwrap();
+        engine::render_page(&document, 0, &RenderOptions { dpi: 110.0, ..Default::default() }).unwrap().save(folder().join("mixed.png")).unwrap();
+    }
+
+    #[test]
+    fn restyled_ranges_come_out_in_the_new_style() {
+        let bytes = mixed();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(0);
+        drop(document);
+        let mut rich = paragraph.rich.clone();
+        let start = rich.text.find("Contact").unwrap();
+        let start = rich.text[..start].chars().count();
+        rich.restyle(start, start + "Contact".len(), |s| s.with_bold(true));
+        let (edited, _) = vellum_core::edit_text::replace_paragraph_rich(&bytes, None, &paragraph, &rich, &ParagraphStyle::of(&paragraph)).unwrap();
+        let after = runs(&edited);
+        assert_eq!(styled(&after, |r| r.1), "due on receipt|Contact", "{after:?}");
+    }
 }

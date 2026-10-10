@@ -11,6 +11,7 @@ use vellum_core::forms::{FieldInfo, FieldType, NewField, NewFieldKind};
 
 use vellum_core::edit_text::{Alignment, EditableLine, EditableParagraph, LineStyle, Overflow, ParagraphStyle};
 use vellum_core::fonts::StandardFont;
+use vellum_core::rich_text::{RichText, carry_styles};
 
 use crate::render::{RenderRequest, RenderWorker};
 use crate::tab::{DocumentTab, FitMode, PageGeometry, TextSelection};
@@ -117,7 +118,7 @@ pub enum ViewerAction {
     DeleteText(EditableLine),
     /// Move existing text (a line or paragraph) by an offset, unchanged in look.
     MoveText { page_index: usize, bounds: [f32; 4], offset: (f32, f32) },
-    ReplaceParagraph { paragraph: EditableParagraph, text: String, style: ParagraphStyle },
+    ReplaceParagraph { paragraph: EditableParagraph, rich: RichText, style: ParagraphStyle },
     DeleteParagraph(EditableParagraph),
     AddPageText { page: u32, x: f32, y: f32, text: String, style: LineStyle },
 }
@@ -173,6 +174,8 @@ struct TextEditing {
     alignment: Alignment,
     overflow: Overflow,
     text: String,
+    /// The paragraph's text with a style per character (paragraph mode).
+    rich: Option<RichText>,
     family: FontFamilyChoice,
     bold: bool,
     italic: bool,
@@ -217,6 +220,7 @@ impl TextEditing {
             line_only: true,
             alignment: Alignment::Left,
             overflow: Overflow::PushDown,
+            rich: None,
             focus_requested: false,
         }
     }
@@ -225,6 +229,7 @@ impl TextEditing {
     fn start_paragraph(paragraph: EditableParagraph, line: EditableLine) -> Self {
         let mut editing = Self::start(paragraph.first().clone());
         editing.text = paragraph.text.clone();
+        editing.rich = Some(paragraph.rich.clone());
         editing.alignment = paragraph.alignment;
         editing.line = line;
         editing.paragraph = Some(paragraph);
@@ -248,7 +253,21 @@ impl TextEditing {
         }
         self.line_only = line_only;
         self.text = if line_only { self.line.text.clone() } else { self.paragraph.as_ref().map(|p| p.text.clone()).unwrap_or_default() };
+        self.rich = if line_only { None } else { self.paragraph.as_ref().map(|p| p.rich.clone()) };
         self.focus_requested = false;
+    }
+
+    /// The selected characters (or all of them when nothing is selected).
+    fn selection(&self, ctx: &egui::Context, editor: egui::Id) -> (usize, usize) {
+        let total = self.text.chars().count();
+        let range = egui::text_edit::TextEditState::load(ctx, editor).and_then(|state| state.cursor.char_range());
+        match range {
+            Some(range) if range.primary.index != range.secondary.index => {
+                let (primary, secondary): (usize, usize) = (range.primary.index.into(), range.secondary.index.into());
+                (primary.min(secondary).min(total), primary.max(secondary).min(total))
+            }
+            _ => (0, total),
+        }
     }
 
     fn paragraph_style(&self, paragraph: &EditableParagraph) -> ParagraphStyle {
@@ -273,7 +292,7 @@ impl TextEditing {
             Some(paragraph) => TextEditing::start_paragraph(paragraph.clone(), self.line.clone()),
             None => TextEditing::start(self.line.clone()),
         };
-        if self.alignment != original.alignment {
+        if self.alignment != original.alignment || self.rich != original.rich {
             return true;
         }
         self.text != original.text || self.family != original.family || self.bold != original.bold || self.italic != original.italic || (self.size - original.size).abs() > 0.05 || self.color != original.color
@@ -511,12 +530,41 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         } else {
             egui::Rect::from_min_size(rect.min - vec2(2.0, 2.0), vec2((rect.width() + 80.0).max(160.0), rect.height().max(14.0) + 4.0))
         };
-        let editor = if is_paragraph {
-            egui::TextEdit::multiline(&mut editing.text).desired_width(editor_rect.width()).desired_rows(2)
-        } else {
-            egui::TextEdit::singleline(&mut editing.text)
+        let snapshot = editing.rich.clone();
+        let text_color = ui.visuals().text_color();
+        // Shows each character in its style (bold, italic, color) while editing.
+        let mut layouter = move |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+            let current = buffer.as_str();
+            let mut job = egui::text::LayoutJob::default();
+            job.wrap.max_width = wrap_width;
+            match &snapshot {
+                Some(rich) => {
+                    let rich = if rich.text == current { rich.clone() } else { carry_styles(rich, current) };
+                    for (text, index) in rich.runs() {
+                        let style = &rich.palette[index];
+                        let family = if style.bold { egui::FontFamily::Name("bold".into()) } else { egui::FontFamily::Proportional };
+                        let near_black = style.color.iter().all(|c| *c < 0.15);
+                        let color = if near_black { text_color } else { Color32::from_rgb((style.color[0] * 255.0) as u8, (style.color[1] * 255.0) as u8, (style.color[2] * 255.0) as u8) };
+                        job.append(&text, 0.0, egui::TextFormat { font_id: egui::FontId::new(font_size, family), color, italics: style.italic, ..Default::default() });
+                    }
+                }
+                None => job.append(current, 0.0, egui::TextFormat { font_id: egui::FontId::proportional(font_size), color: text_color, ..Default::default() }),
+            }
+            ui.painter().layout_job(job)
         };
-        let response = ui.put(editor_rect, editor.font(egui::FontId::proportional(font_size)).margin(vec2(2.0, 0.0)));
+        let editor = if is_paragraph {
+            egui::TextEdit::multiline(&mut editing.text).desired_width(editor_rect.width()).desired_rows(2).layouter(&mut layouter)
+        } else {
+            egui::TextEdit::singleline(&mut editing.text).font(egui::FontId::proportional(font_size))
+        };
+        let response = ui.put(editor_rect, editor.margin(vec2(2.0, 0.0)));
+        // Keep the styles in step with what was typed.
+        if let Some(rich) = editing.rich.as_mut() {
+            if rich.text != editing.text {
+                *rich = carry_styles(rich, &editing.text);
+            }
+        }
+        let editor_id = response.id;
         if !editing.focus_requested {
             response.request_focus();
             editing.focus_requested = true;
@@ -531,6 +579,9 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         egui::Area::new(ui.id().with(("text style", page_index))).order(egui::Order::Foreground).fixed_pos(bar_position).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).inner_margin(4.0).show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    if editing.rich.is_some() {
+                        rich_style_controls(ui, editing, editor_id);
+                    } else {
                     egui::ComboBox::from_id_salt("edit text family")
                         .width(70.0)
                         .selected_text(match editing.family {
@@ -547,6 +598,7 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                     ui.toggle_value(&mut editing.italic, egui::RichText::new("I").italics()).on_hover_text("Italic");
                     ui.add(egui::DragValue::new(&mut editing.size).range(2.0..=144.0).speed(0.1).suffix(" pt")).on_hover_text("Size");
                     ui.color_edit_button_rgb(&mut editing.color).on_hover_text("Color");
+                    }
                     if is_paragraph {
                         ui.separator();
                         for (alignment, icon, hint) in [(Alignment::Left, "⫷", "Align left"), (Alignment::Center, "≡", "Center"), (Alignment::Right, "⫸", "Align right"), (Alignment::Justified, "☰", "Justify")] {
@@ -584,7 +636,11 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                         cancel = true;
                     }
                 });
-                ui.weak(format!("Original font: {}", editing.line.font_name));
+                if editing.rich.is_some() {
+                    ui.weak("Select words, then B, I or the color to restyle them. Ctrl+Enter applies.");
+                } else {
+                    ui.weak(format!("Original font: {}", editing.line.font_name));
+                }
             });
         });
         if delete {
@@ -600,7 +656,8 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                     actions.push(ViewerAction::DeleteParagraph(paragraph));
                 } else if editing.changed() {
                     let style = editing.paragraph_style(&paragraph);
-                    actions.push(ViewerAction::ReplaceParagraph { paragraph, text: editing.text, style });
+                    let rich = editing.rich.clone().unwrap_or_else(|| carry_styles(&paragraph.rich, &editing.text));
+                    actions.push(ViewerAction::ReplaceParagraph { paragraph, rich, style });
                 }
             } else if editing.text.trim().is_empty() {
                 actions.push(ViewerAction::DeleteText(editing.line));
@@ -895,6 +952,48 @@ pub fn complete_pending_text(pending: &PendingText, settings: &ToolSettings) -> 
             })
         }
     })
+}
+
+/// Bold, italic, color, family and size controls for rich paragraph editing.
+/// Each acts on the selected characters, or the whole paragraph when nothing
+/// is selected; bold and italic turn off when the whole range already has them.
+fn rich_style_controls(ui: &mut egui::Ui, editing: &mut TextEditing, editor_id: egui::Id) {
+    let (start, end) = editing.selection(ui.ctx(), editor_id);
+    let Some(rich) = editing.rich.as_mut() else { return };
+    let current = rich.style_at(start).clone();
+    let family = if current.monospace { FontFamilyChoice::Monospace } else if current.serif { FontFamilyChoice::Serif } else { FontFamilyChoice::Sans };
+    let mut chosen = family;
+    egui::ComboBox::from_id_salt("edit text family")
+        .width(70.0)
+        .selected_text(match family {
+            FontFamilyChoice::Sans => "Sans",
+            FontFamilyChoice::Serif => "Serif",
+            FontFamilyChoice::Monospace => "Mono",
+        })
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut chosen, FontFamilyChoice::Sans, "Sans (Helvetica)");
+            ui.selectable_value(&mut chosen, FontFamilyChoice::Serif, "Serif (Times)");
+            ui.selectable_value(&mut chosen, FontFamilyChoice::Monospace, "Mono (Courier)");
+        });
+    if chosen != family {
+        rich.restyle(start, end, |s| vellum_core::rich_text::SpanStyle { serif: chosen == FontFamilyChoice::Serif, monospace: chosen == FontFamilyChoice::Monospace, sample_object: None, ..s.clone() });
+        editing.focus_requested = false;
+    }
+    let all_bold = rich.all(start, end, |s| s.bold);
+    if ui.selectable_label(all_bold, egui::RichText::new("B").strong()).on_hover_text("Bold (the selection, or the whole paragraph)").clicked() {
+        rich.restyle(start, end, |s| s.with_bold(!all_bold));
+        editing.focus_requested = false;
+    }
+    let all_italic = rich.all(start, end, |s| s.italic);
+    if ui.selectable_label(all_italic, egui::RichText::new("I").italics()).on_hover_text("Italic (the selection, or the whole paragraph)").clicked() {
+        rich.restyle(start, end, |s| s.with_italic(!all_italic));
+        editing.focus_requested = false;
+    }
+    ui.add(egui::DragValue::new(&mut editing.size).range(2.0..=144.0).speed(0.1).suffix(" pt")).on_hover_text("Size of the whole paragraph");
+    let mut color = current.color;
+    if ui.color_edit_button_rgb(&mut color).on_hover_text("Color (the selection, or the whole paragraph)").changed() {
+        rich.restyle(start, end, |s| s.with_color(color));
+    }
 }
 
 /// Opens the line editor on a line, as clicking it with the Edit text tool does.

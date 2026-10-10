@@ -29,6 +29,7 @@ pub mod preflight;
 pub mod print;
 pub mod ranges;
 pub mod redact;
+pub mod rich_text;
 pub mod security;
 pub mod settings;
 pub mod signatures;

@@ -41,6 +41,20 @@ const TIMES_ROMAN_WIDTHS: [u16; 95] = [
     500, 500, 500, 500, 333, 389, 278, 500, 500, 722, 500, 500, 444, 480, 200, 480, 541,
 ];
 
+const TIMES_BOLD_WIDTHS: [u16; 95] = [
+    250, 333, 555, 500, 500, 1000, 833, 278, 333, 333, 500, 570, 250, 333, 250, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+    333, 333, 570, 570, 570, 500, 930, 722, 667, 722, 722, 667, 611, 778, 778, 389, 500, 778, 667, 944, 722, 778, 611, 778, 722, 556,
+    667, 722, 722, 1000, 722, 722, 667, 333, 278, 333, 581, 500, 333, 500, 556, 444, 556, 444, 333, 500, 556, 278, 333, 556, 278, 833,
+    556, 500, 556, 556, 444, 389, 333, 556, 500, 722, 500, 500, 444, 394, 220, 394, 520,
+];
+
+const TIMES_ITALIC_WIDTHS: [u16; 95] = [
+    250, 333, 420, 500, 500, 833, 778, 214, 333, 333, 500, 675, 250, 333, 250, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+    333, 333, 675, 675, 675, 500, 920, 611, 611, 667, 722, 611, 611, 722, 722, 333, 444, 667, 556, 833, 667, 722, 611, 722, 611, 500,
+    556, 722, 611, 833, 611, 556, 556, 389, 278, 389, 422, 500, 333, 500, 500, 444, 500, 444, 278, 500, 500, 278, 278, 444, 278, 722,
+    500, 500, 500, 500, 389, 389, 278, 500, 444, 667, 444, 444, 389, 400, 275, 400, 541,
+];
+
 impl StandardFont {
     pub fn base_font_name(self) -> &'static str {
         match self {
@@ -74,8 +88,10 @@ impl StandardFont {
     fn code_width(self, code: u8) -> u16 {
         let table = match self {
             StandardFont::Courier | StandardFont::CourierBold => return 600,
-            StandardFont::HelveticaBold | StandardFont::TimesBold => &HELVETICA_BOLD_WIDTHS,
-            StandardFont::TimesRoman | StandardFont::TimesItalic => &TIMES_ROMAN_WIDTHS,
+            StandardFont::HelveticaBold => &HELVETICA_BOLD_WIDTHS,
+            StandardFont::TimesBold => &TIMES_BOLD_WIDTHS,
+            StandardFont::TimesItalic => &TIMES_ITALIC_WIDTHS,
+            StandardFont::TimesRoman => &TIMES_ROMAN_WIDTHS,
             StandardFont::Helvetica | StandardFont::HelveticaOblique => &HELVETICA_WIDTHS,
         };
         match code {
@@ -161,6 +177,14 @@ mod tests {
     fn measures_helvetica() {
         // "Hi" = H (722) + i (222) = 944 / 1000 em.
         assert!((StandardFont::Helvetica.text_width("Hi", 10.0) - 9.44).abs() < 0.001);
+    }
+
+    #[test]
+    fn measures_times_weights_separately() {
+        // Sums of the published AFM widths for "Hamburg" in each face.
+        assert_eq!(StandardFont::TimesRoman.text_width("Hamburg", 1000.0), 3777.0);
+        assert_eq!(StandardFont::TimesBold.text_width("Hamburg", 1000.0), 4167.0);
+        assert_eq!(StandardFont::TimesItalic.text_width("Hamburg", 1000.0), 3833.0);
     }
 
     #[test]

@@ -1405,10 +1405,10 @@ impl VellumApp {
                 ViewerAction::ReplaceText { line, text, style } => self.edit_page_text("Edit text", |bytes, password| vellum_core::edit_text::replace_line(bytes, password, &line, &text, &style)),
                 ViewerAction::DeleteText(line) => self.edit_page_text("Delete text", |bytes, password| vellum_core::edit_text::delete_line(bytes, password, &line)),
                 ViewerAction::MoveText { page_index, bounds, offset } => self.edit_page_text("Move text", |bytes, password| vellum_core::edit_text::move_text(bytes, password, page_index, bounds, offset)),
-                ViewerAction::ReplaceParagraph { paragraph, text, style } => {
+                ViewerAction::ReplaceParagraph { paragraph, rich, style } => {
                     let Some(tab) = self.tabs.get_mut(self.active) else { continue };
                     let was_signed = tab.signed;
-                    let result = vellum_core::edit_text::replace_paragraph(&tab.bytes, tab.password.as_deref(), &paragraph, &text, &style).and_then(|(bytes, report)| {
+                    let result = vellum_core::edit_text::replace_paragraph_rich(&tab.bytes, tab.password.as_deref(), &paragraph, &rich, &style).and_then(|(bytes, report)| {
                         tab.replace_bytes("Edit paragraph", bytes)?;
                         Ok(report)
                     });
@@ -1428,7 +1428,7 @@ impl VellumApp {
                             message.push_str(" Ctrl+Z undoes it.");
                         }
                         if !report.reused_font {
-                            message.push_str(" (The original font could not be reused, so a matching one stands in.)");
+                            message.push_str(" (Some original fonts could not be reused, so matching ones stand in.)");
                         }
                         if was_signed {
                             message.push_str(" This invalidated the document's signatures.");
@@ -1617,6 +1617,11 @@ impl VellumApp {
 fn install_system_fonts(ctx: &egui::Context) {
     let folder = std::path::Path::new(&std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
     let mut fonts = egui::FontDefinitions::default();
+    // A bold family, so the rich text editor can show bold words as bold.
+    if let Ok(bytes) = std::fs::read(folder.join("segoeuib.ttf")) {
+        fonts.font_data.insert("Segoe UI Bold".to_owned(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+        fonts.families.insert(egui::FontFamily::Name("bold".into()), vec!["Segoe UI Bold".to_owned()]);
+    }
     for (name, file, primary) in [("Segoe UI", "segoeui.ttf", true), ("Segoe UI Symbol", "seguisym.ttf", false), ("Segoe UI Emoji", "seguiemj.ttf", false)] {
         let Ok(bytes) = std::fs::read(folder.join(file)) else { continue };
         fonts.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));

@@ -63,6 +63,17 @@ saves a picture of the window and exits (setup options are documented on
   page is a footer zone that never moves), falling back to shrink-to-fit,
   then overlap. Moving text by dragging also uses the translation, so moved
   text keeps its exact glyphs. Tables group poorly; "Line only" handles them.
+- Mixed styles (`rich_text.rs`): every character keeps its style (font,
+  bold, italic, family, color, size). Edits carry styles over by a
+  character diff (letters typed onto a word continue it; punctuation or a
+  space at a style boundary joins what follows). Runs are measured and
+  drawn in their own fonts, each reusing its original embedded font when
+  possible. The app's paragraph editor shows the styles and applies B, I,
+  color and family to the selection. Standard-font width tables are checked
+  against PDFium's rendering (`standard_font_widths_match_the_renderer`).
+- Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
+  (which embedded fonts are reusable) and `--example width_probe` (per-glyph
+  widths against PDFium).
 - Desktop app: tabs, background rendering, zoom and fit, thumbnails,
   bookmarks, comments, fields, search, attachments, page organizer with drag
   and drop, every markup tool, form filling, signing, dialogs for all tools,
@@ -72,7 +83,7 @@ saves a picture of the window and exits (setup options are documented on
 ## Ideas for next
 
 1. Reusing bare CFF fonts (InDesign's usual embedding) when editing text.
-2. Mixed styles within a paragraph (bold or italic words survive editing).
+2. Underline and strikethrough as character styles (drawn as lines).
 3. Incremental saves for edits after signing, so signatures survive.
 4. Complex script shaping (rustybuzz) for Indic and Arabic text.
 5. Release build, installer, file associations, an app icon.

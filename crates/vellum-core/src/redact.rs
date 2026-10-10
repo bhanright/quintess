@@ -349,7 +349,13 @@ fn standard_font_for(base_font: &str) -> Option<StandardFont> {
     Some(if name.starts_with("courier") {
         StandardFont::Courier
     } else if name.starts_with("times") {
-        if name.contains("bold") { StandardFont::TimesBold } else { StandardFont::TimesRoman }
+        if name.contains("bold") {
+            StandardFont::TimesBold
+        } else if name.contains("italic") || name.contains("oblique") {
+            StandardFont::TimesItalic
+        } else {
+            StandardFont::TimesRoman
+        }
     } else if name.starts_with("helvetica") || name.starts_with("arial") {
         if name.contains("bold") { StandardFont::HelveticaBold } else { StandardFont::Helvetica }
     } else {
