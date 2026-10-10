@@ -7,10 +7,10 @@ use lopdf::{Dictionary, Stream, dictionary};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{Pdf, rectangle_to_object};
-use crate::fonts::{StandardFont, wrap_text};
+use crate::fonts::{StandardFont, wrap_text, wrap_text_by};
+use crate::unicode_text::{TextSetter, fits_win_ansi, measure};
 use crate::images::{draw_image_operator, embed_image_file};
 use crate::pages::number;
-use crate::strings::{encode_win_ansi, hex_string};
 
 /// How each image is laid onto its page.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -99,14 +99,22 @@ struct Block {
 /// Plain text to PDF, wrapping long lines and breaking pages as needed.
 pub fn text_to_pdf(text: &str, settings: &TextPageSettings) -> Result<Pdf> {
     let width = settings.page_size.0 - settings.margin * 2.0;
-    let block = Block { lines: wrap_text(text, settings.font, settings.size, width), font: settings.font, size: settings.size, space_before: 0.0, indent: 0.0 };
-    typeset(&[block], settings)
+    let embed = !fits_win_ansi(text);
+    let block = Block { lines: wrap(text, settings.font, embed, settings.size, width), font: settings.font, size: settings.size, space_before: 0.0, indent: 0.0 };
+    typeset(&[block], settings, embed)
+}
+
+/// Wraps with the widths of the fonts the text will be drawn in.
+fn wrap(text: &str, font: StandardFont, embed: bool, size: f32, width: f32) -> Vec<String> {
+    if embed { wrap_text_by(text, width, |piece| measure(font, true, piece, size)) } else { wrap_text(text, font, size, width) }
 }
 
 /// Markdown to PDF, covering headings, paragraphs, bullet and numbered
 /// lists, block quotes, code blocks and horizontal rules.
 pub fn markdown_to_pdf(markdown: &str, settings: &TextPageSettings) -> Result<Pdf> {
     let width = settings.page_size.0 - settings.margin * 2.0;
+    let embed = !fits_win_ansi(markdown);
+    let wrap_text = |text: &str, font: StandardFont, size: f32, width: f32| wrap(text, font, embed, size, width);
     let serif = matches!(settings.font, StandardFont::TimesRoman | StandardFont::TimesBold | StandardFont::TimesItalic);
     let (body_font, bold_font) = if serif { (StandardFont::TimesRoman, StandardFont::TimesBold) } else { (StandardFont::Helvetica, StandardFont::HelveticaBold) };
     let mut blocks = Vec::new();
@@ -184,7 +192,7 @@ pub fn markdown_to_pdf(markdown: &str, settings: &TextPageSettings) -> Result<Pd
         paragraph.push_str(trimmed);
     }
     flush_paragraph(&mut paragraph, &mut blocks);
-    typeset(&blocks, settings)
+    typeset(&blocks, settings, embed)
 }
 
 /// Removes `**bold**`, `*emphasis*`, `` `code` `` and link markup, keeping the text.
@@ -210,27 +218,18 @@ mod tests {
 }
 
 /// Lays blocks out top to bottom, starting new pages as they fill.
-fn typeset(blocks: &[Block], settings: &TextPageSettings) -> Result<Pdf> {
+fn typeset(blocks: &[Block], settings: &TextPageSettings, embed: bool) -> Result<Pdf> {
     let (page_width, page_height) = settings.page_size;
     let mut pdf = Pdf::new_empty();
-    let fonts: Vec<StandardFont> = {
-        let mut list: Vec<StandardFont> = blocks.iter().map(|block| block.font).collect();
-        list.push(settings.font);
-        list.dedup();
-        list.sort_by_key(|font| font.base_font_name());
-        list.dedup();
-        list
-    };
-    let mut font_resources = Dictionary::new();
-    for (index, font) in fonts.iter().enumerate() {
-        let id = font.add_to(&mut pdf.doc);
-        font_resources.set(format!("F{index}").as_bytes(), id);
-    }
-    let font_name = |font: StandardFont| format!("F{}", fonts.iter().position(|candidate| *candidate == font).unwrap_or(0));
-
+    // One setter per font; each embeds subset fonts when the text needs them.
+    let mut setters: Vec<(StandardFont, TextSetter)> = Vec::new();
     let mut pages: Vec<String> = vec![String::new()];
     let mut cursor_y = page_height - settings.margin;
     for block in blocks {
+        if !setters.iter().any(|(font, _)| *font == block.font) {
+            setters.push((block.font, TextSetter::new(block.font, embed)));
+        }
+        let setter = &mut setters.iter_mut().find(|(font, _)| *font == block.font).expect("just added").1;
         let line_height = block.size * settings.line_spacing;
         let at_page_top = (cursor_y - (page_height - settings.margin)).abs() < 0.01;
         if !at_page_top {
@@ -254,15 +253,16 @@ fn typeset(blocks: &[Block], settings: &TextPageSettings) -> Result<Pdf> {
                 None => (None, line.as_str()),
             };
             if let Some(marker) = marker {
-                let marker_width = block.font.text_width(marker, block.size);
-                content.push_str(&format!("BT /{} {} Tf {} {} Td ", font_name(block.font), number(block.size), number(x - marker_width - 5.0), number(cursor_y)));
-                content.push_str(&hex_string(&encode_win_ansi(marker)));
-                content.push_str(" Tj ET\n");
+                let marker_width = setter.width(marker, block.size);
+                content.push_str(&format!("BT {} {} Td {}ET\n", number(x - marker_width - 5.0), number(cursor_y), setter.show(&mut pdf.doc, marker, block.size)));
             }
-            // A hexadecimal string keeps WinAnsi bytes above 127 intact in this UTF-8 buffer.
-            content.push_str(&format!("BT /{} {} Tf {} {} Td ",font_name(block.font), number(block.size), number(x), number(cursor_y)));
-            content.push_str(&hex_string(&encode_win_ansi(text)));
-            content.push_str(" Tj ET\n");
+            content.push_str(&format!("BT {} {} Td {}ET\n", number(x), number(cursor_y), setter.show(&mut pdf.doc, text, block.size)));
+        }
+    }
+    let mut font_resources = Dictionary::new();
+    for (_, setter) in setters {
+        for (name, value) in setter.finish(&mut pdf.doc)?.iter() {
+            font_resources.set(name.clone(), value.clone());
         }
     }
     let pages_root_id = pdf.pages_root_id()?;

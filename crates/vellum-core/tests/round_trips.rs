@@ -125,3 +125,36 @@ fn search_finds_text_with_positions() {
     let [left, bottom, right, top] = matches[0].rects[0];
     assert!(left >= 72.0 && right > left && top > bottom, "box {:?}", matches[0].rects[0]);
 }
+
+#[test]
+fn any_script_round_trips_through_embedded_fonts() {
+    let text = "English, Ελληνικά, Русский, 中文汉字, 日本語のテキスト, 한국어, हिन्दी, symbols ☐ ✓ → ∑";
+    let mut pdf = markdown_to_pdf(&format!("# Unicode ✓\n\n{text}\n\n- ☐ unchecked box"), &TextPageSettings::default()).unwrap();
+    let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+    std::fs::write(output_folder().join("unicode.pdf"), &bytes).unwrap();
+    assert!(bytes.len() < 400_000, "fonts are subset, not embedded whole: {} bytes", bytes.len());
+    let document = engine::open_document(bytes, None).unwrap();
+    let extracted: String = engine::extract_text(&document).unwrap().split_whitespace().collect::<Vec<_>>().join(" ");
+    let expected: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(extracted.contains(&expected), "extracted: {extracted}");
+    engine::render_page(&document, 0, &RenderOptions { dpi: 110.0, ..Default::default() }).unwrap().save(output_folder().join("unicode.png")).unwrap();
+}
+
+#[test]
+fn stamps_comments_and_fields_accept_any_script() {
+    use vellum_core::annotations::{AnnotationKind, NewAnnotation, add_annotation};
+    use vellum_core::forms::{NewField, NewFieldKind, add_field, fill_fields, flatten};
+    let mut pdf = text_to_pdf("Plain page.", &TextPageSettings::default()).unwrap();
+    stamp_text(&mut pdf, &[1], &TextStamp { text: "機密 — Конфиденциально".into(), ..Default::default() }, "x.pdf").unwrap();
+    add_annotation(&mut pdf, 1, &NewAnnotation::new(AnnotationKind::TextBox { rect: [72.0, 600.0, 400.0, 650.0], font_size: 12.0, fill: None, border_width: 1.0 }).with_contents("会議メモ ✓ done")).unwrap();
+    add_field(&mut pdf, &NewField { name: "city".into(), page: 1, rect: [72.0, 500.0, 300.0, 520.0], kind: NewFieldKind::Text { multiline: false, font_size: 11.0, max_length: None, default_value: String::new() }, tooltip: String::new(), required: false }).unwrap();
+    fill_fields(&mut pdf, &std::collections::BTreeMap::from([("city".to_string(), "東京 Tōkyō".to_string())])).unwrap();
+    flatten(&mut pdf, false).unwrap();
+    let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+    let document = engine::open_document(bytes, None).unwrap();
+    let text = engine::extract_text(&document).unwrap();
+    for expected in ["機密", "Конфиденциально", "会議メモ ✓ done", "東京 Tōkyō"] {
+        assert!(text.contains(expected), "missing {expected:?} in {text:?}");
+    }
+    engine::render_page(&document, 0, &RenderOptions { dpi: 80.0, ..Default::default() }).unwrap().save(output_folder().join("unicode-markup.png")).unwrap();
+}

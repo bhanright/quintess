@@ -12,7 +12,7 @@ use crate::fonts::StandardFont;
 use crate::images::{draw_image_operator, embed_image_file};
 use crate::metadata::{page_labels, read_info};
 use crate::pages::{display_to_page_matrix, displayed_page_size, matrix_operator, number};
-use crate::strings::{encode_win_ansi, literal_string_bytes};
+use crate::unicode_text::{TextSetter, add_fonts_to_page};
 
 /// Where on the displayed page something is anchored.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -138,12 +138,9 @@ pub fn expand_tokens(template: &str, values: &TokenValues) -> String {
 }
 
 /// Registers a font and an opacity state on a page and returns their names.
-fn add_text_resources(pdf: &mut Pdf, page_id: ObjectId, font: StandardFont, opacity: f32) -> Result<(String, String)> {
-    let font_id = font.add_to(&mut pdf.doc);
-    let font_name = pdf.add_page_resource(page_id, b"Font", "VlF", Object::Reference(font_id))?;
+fn add_opacity_state(pdf: &mut Pdf, page_id: ObjectId, opacity: f32) -> Result<String> {
     let state = dictionary! { "Type" => "ExtGState", "ca" => opacity, "CA" => opacity };
-    let state_name = pdf.add_page_resource(page_id, b"ExtGState", "VlGs", Object::Dictionary(state))?;
-    Ok((font_name, state_name))
+    pdf.add_page_resource(page_id, b"ExtGState", "VlGs", Object::Dictionary(state))
 }
 
 /// The content stream for a multi-line text block centered on (`center_x`,
@@ -153,12 +150,13 @@ fn text_block_content(
     lines: &[String],
     size: f32,
     center: (f32, f32),
-    font_name: &str,
+    setter: &mut TextSetter,
+    doc: &mut lopdf::Document,
     state_name: &str,
     page_matrix: [f32; 6],
 ) -> Vec<u8> {
     let line_height = size * 1.2;
-    let block_height = line_height * (lines.len() as f32 - 1.0) + size * stamp.font.cap_height();
+    let block_height = line_height * (lines.len() as f32 - 1.0) + size * setter.cap_height();
     let angle = stamp.rotation.to_radians();
     let (sin, cos) = angle.sin_cos();
     let [red, green, blue] = stamp.color;
@@ -171,13 +169,12 @@ fn text_block_content(
         content.extend_from_slice(format!("{} {} {} rg\n", number(red), number(green), number(blue)).as_bytes());
     }
     content.extend_from_slice(b"BT\n");
-    content.extend_from_slice(format!("/{font_name} {} Tf\n", number(size)).as_bytes());
     for (index, line) in lines.iter().enumerate() {
-        let width = stamp.font.text_width(line, size);
-        let baseline = block_height / 2.0 - size * stamp.font.cap_height() - index as f32 * line_height;
+        let width = setter.width(line, size);
+        let baseline = block_height / 2.0 - size * setter.cap_height() - index as f32 * line_height;
         content.extend_from_slice(format!("1 0 0 1 {} {} Tm ", number(-width / 2.0), number(baseline)).as_bytes());
-        content.extend_from_slice(&literal_string_bytes(&encode_win_ansi(line)));
-        content.extend_from_slice(b" Tj\n");
+        content.extend_from_slice(setter.show(doc, line, size).as_bytes());
+        content.extend_from_slice(b"\n");
     }
     content.extend_from_slice(b"ET\nQ\n");
     content
@@ -205,7 +202,8 @@ pub fn stamp_text(pdf: &mut Pdf, page_numbers: &[u32], stamp: &TextStamp, file_n
             continue;
         }
         let (page_width, page_height) = displayed_page_size(pdf, page_id)?;
-        let widest = lines.iter().map(|line| stamp.font.text_width(line, 1.0)).fold(0.0f32, f32::max).max(0.01);
+        let mut setter = TextSetter::for_texts(stamp.font, lines.iter().map(String::as_str));
+        let widest = lines.iter().map(|line| setter.width(line, 1.0)).fold(0.0f32, f32::max).max(0.01);
         let size = if stamp.size > 0.0 {
             stamp.size
         } else {
@@ -216,9 +214,11 @@ pub fn stamp_text(pdf: &mut Pdf, page_numbers: &[u32], stamp: &TextStamp, file_n
         let block_width = widest * size;
         let block_height = size * 1.2 * lines.len() as f32;
         let center = stamp.anchor.box_center(page_width, page_height, block_width, block_height, stamp.margin);
-        let (font_name, state_name) = add_text_resources(pdf, page_id, stamp.font, stamp.opacity)?;
+        let state_name = add_opacity_state(pdf, page_id, stamp.opacity)?;
         let page_matrix = display_to_page_matrix(pdf.page_box(page_id)?, pdf.page_rotation(page_id)?);
-        let content = text_block_content(stamp, &lines, size, center, &font_name, &state_name, page_matrix);
+        let content = text_block_content(stamp, &lines, size, center, &mut setter, &mut pdf.doc, &state_name, page_matrix);
+        let fonts = setter.finish(&mut pdf.doc)?;
+        add_fonts_to_page(pdf, page_id, &fonts)?;
         pdf.add_page_content(page_id, content, !stamp.behind_content)?;
     }
     Ok(())
@@ -307,7 +307,8 @@ pub fn add_header_footer(pdf: &mut Pdf, page_numbers: &[u32], settings: &HeaderF
         if filled.is_empty() {
             continue;
         }
-        let (font_name, state_name) = add_text_resources(pdf, page_id, settings.font, 1.0)?;
+        let state_name = add_opacity_state(pdf, page_id, 1.0)?;
+        let mut setter = TextSetter::for_texts(settings.font, filled.iter().map(|(text, _)| text.as_str()));
         let page_matrix = display_to_page_matrix(pdf.page_box(page_id)?, pdf.page_rotation(page_id)?);
         let mut content = Vec::new();
         for (text, anchor) in filled {
@@ -324,15 +325,17 @@ pub fn add_header_footer(pdf: &mut Pdf, page_numbers: &[u32], settings: &HeaderF
                 behind_content: false,
                 outline_only: false,
             };
-            let widest = lines.iter().map(|line| settings.font.text_width(line, settings.size)).fold(0.0f32, f32::max);
+            let widest = lines.iter().map(|line| setter.width(line, settings.size)).fold(0.0f32, f32::max);
             let height = settings.size * 1.2 * lines.len() as f32;
             let mut center = anchor.box_center(page_width, page_height, widest, height, settings.margin);
             // Left and right slots align their text to the margin, not center it.
             if matches!(anchor, Anchor::TopLeft | Anchor::BottomLeft | Anchor::TopRight | Anchor::BottomRight) && lines.len() > 1 {
                 center.0 = if matches!(anchor, Anchor::TopLeft | Anchor::BottomLeft) { settings.margin + widest / 2.0 } else { page_width - settings.margin - widest / 2.0 };
             }
-            content.extend(text_block_content(&stamp, &lines, settings.size, center, &font_name, &state_name, page_matrix));
+            content.extend(text_block_content(&stamp, &lines, settings.size, center, &mut setter, &mut pdf.doc, &state_name, page_matrix));
         }
+        let fonts = setter.finish(&mut pdf.doc)?;
+        add_fonts_to_page(pdf, page_id, &fonts)?;
         pdf.add_page_content(page_id, content, true)?;
     }
     Ok(bates)

@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::document::{Pdf, page_numbers_by_id, rectangle_from_object, rectangle_to_object};
 use crate::fonts::StandardFont;
 use crate::pages::number;
-use crate::strings::{encode_win_ansi, hex_string, object_to_text, text_string};
+use crate::strings::{object_to_text, text_string};
+use crate::unicode_text::TextSetter;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FieldType {
@@ -260,42 +261,46 @@ fn regenerate_text_appearance(pdf: &mut Pdf, field_id: ObjectId, value: &str) ->
     let alignment = inherited(pdf, &field, b"Q").and_then(|q| q.as_i64().ok()).unwrap_or(0);
     let comb_length = if flags & (1 << 24) != 0 { inherited(pdf, &field, b"MaxLen").and_then(|m| m.as_i64().ok()) } else { None };
     let (requested_size, color) = parse_default_appearance(&da);
-    let font = StandardFont::Helvetica;
-    let font_id = ensure_form_font(pdf)?;
+    // Keep the form's default font resource, which readers use when editing.
+    ensure_form_font(pdf)?;
     for widget in widget_ids(pdf, field_id) {
         let rect = rectangle_from_object(&pdf.doc, pdf.doc.get_dictionary(widget)?.get(b"Rect")?)?;
         let (width, height) = (rect[2] - rect[0], rect[3] - rect[1]);
         let multiline = flags & FLAG_MULTILINE != 0;
         let size = if requested_size > 0.0 { requested_size } else if multiline { 10.0 } else { (height * 0.66).clamp(4.0, 14.0) };
-        let mut content = format!("/Tx BMC q 1 1 {} {} re W n BT /Helv {} Tf {} {} {} rg ", number(width - 2.0), number(height - 2.0), number(size), number(color[0]), number(color[1]), number(color[2]));
-        let lines: Vec<String> = if multiline { crate::fonts::wrap_text(value, font, size, width - 4.0) } else { vec![value.replace('\n', " ")] };
+        let mut setter = TextSetter::for_texts(StandardFont::Helvetica, [value]);
+        let mut content = format!("/Tx BMC q 1 1 {} {} re W n BT {} {} {} rg ", number(width - 2.0), number(height - 2.0), number(color[0]), number(color[1]), number(color[2]));
+        let lines: Vec<String> = if multiline { crate::fonts::wrap_text_by(value, width - 4.0, |piece| setter.width(piece, size)) } else { vec![value.replace('\n', " ")] };
         if let Some(cells) = comb_length.filter(|c| *c > 0) {
             let cell = width / cells as f32;
             for (index, character) in value.chars().take(cells as usize).enumerate() {
                 let text = character.to_string();
-                let x = cell * index as f32 + (cell - font.text_width(&text, size)) / 2.0;
-                content.push_str(&format!("1 0 0 1 {} {} Tm {} Tj ", number(x), number((height - size * 0.72) / 2.0), hex_string(&encode_win_ansi(&text))));
+                let x = cell * index as f32 + (cell - setter.width(&text, size)) / 2.0;
+                content.push_str(&format!("1 0 0 1 {} {} Tm ", number(x), number((height - size * 0.72) / 2.0)));
+                content.push_str(&setter.show(&mut pdf.doc, &text, size));
             }
         } else {
             let mut y = if multiline { height - 2.0 - size } else { (height - size * 0.72) / 2.0 };
             for line in lines {
-                let line_width = font.text_width(&line, size);
+                let line_width = setter.width(&line, size);
                 let x = match alignment {
                     1 => (width - line_width) / 2.0,
                     2 => width - 2.0 - line_width,
                     _ => 2.0,
                 };
-                content.push_str(&format!("1 0 0 1 {} {} Tm {} Tj ", number(x), number(y), hex_string(&encode_win_ansi(&line))));
+                content.push_str(&format!("1 0 0 1 {} {} Tm ", number(x), number(y)));
+                content.push_str(&setter.show(&mut pdf.doc, &line, size));
                 y -= size * 1.15;
             }
         }
         content.push_str("ET Q EMC");
+        let fonts = setter.finish(&mut pdf.doc)?;
         let stream = Stream::new(
             dictionary! {
                 "Type" => "XObject",
                 "Subtype" => "Form",
                 "BBox" => rectangle_to_object([0.0, 0.0, width, height]),
-                "Resources" => dictionary! { "Font" => dictionary! { "Helv" => font_id } },
+                "Resources" => dictionary! { "Font" => fonts },
             },
             content.into_bytes(),
         );

@@ -19,6 +19,7 @@ pub mod ranges;
 pub mod redact;
 pub mod security;
 pub mod strings;
+pub mod unicode_text;
 
 pub use document::{Pdf, SaveSettings};
 

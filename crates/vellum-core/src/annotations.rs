@@ -10,7 +10,8 @@ use lopdf::{Dictionary, Object, ObjectId, Stream, dictionary};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{Pdf, rectangle_from_object, rectangle_to_object};
-use crate::fonts::{StandardFont, wrap_text};
+use crate::fonts::{StandardFont, wrap_text_by};
+use crate::unicode_text::TextSetter;
 use crate::pages::number;
 use crate::strings::{encode_win_ansi, hex_string, object_to_text, pdf_date_now, text_string};
 
@@ -248,8 +249,7 @@ pub fn add_annotation(pdf: &mut Pdf, page_number: u32, annotation: &NewAnnotatio
             ("Text", rect, content, transparency_resources(opacity, false))
         }
         AnnotationKind::TextBox { rect, font_size, fill, border_width } => {
-            let font = StandardFont::Helvetica;
-            let font_id = font.add_to(&mut pdf.doc);
+            let mut setter = TextSetter::for_texts(StandardFont::Helvetica, [annotation.contents.as_str()]);
             dict.set("DA", text_string(&format!("/Helv {} Tf {}", number(*font_size), rgb(color, false))));
             dict.set("BS", dictionary! { "W" => *border_width });
             let [left, bottom, right, top] = *rect;
@@ -266,21 +266,20 @@ pub fn add_annotation(pdf: &mut Pdf, page_number: u32, annotation: &NewAnnotatio
                 ));
             }
             let padding = 2.0 + border_width;
-            let lines = wrap_text(&annotation.contents, font, *font_size, right - left - padding * 2.0);
-            content.push_str(&format!("BT /Helv {} Tf {} ", number(*font_size), rgb(color, false)));
+            let lines = wrap_text_by(&annotation.contents, right - left - padding * 2.0, |piece| setter.width(piece, *font_size));
+            content.push_str(&format!("BT {} ", rgb(color, false)));
             let mut y = top - padding - font_size * 0.9;
             for line in lines {
                 if y < bottom + padding * 0.5 {
                     break;
                 }
                 content.push_str(&format!("1 0 0 1 {} {} Tm ", number(left + padding), number(y)));
-                content.push_str(&hex_string(&encode_win_ansi(&line)));
-                content.push_str(" Tj ");
+                content.push_str(&setter.show(&mut pdf.doc, &line, *font_size));
                 y -= font_size * 1.2;
             }
             content.push_str("ET");
             let mut resources = transparency_resources(opacity, false);
-            resources.set("Font", dictionary! { "Helv" => font_id });
+            resources.set("Font", setter.finish(&mut pdf.doc)?);
             ("FreeText", *rect, content, resources)
         }
         AnnotationKind::Rectangle { rect, fill, border_width } | AnnotationKind::Ellipse { rect, fill, border_width } => {

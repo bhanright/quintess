@@ -113,6 +113,12 @@ impl StandardFont {
 /// Breaks text into lines no wider than `max_width`, honoring existing line
 /// breaks and splitting words that are wider than a line on their own.
 pub fn wrap_text(text: &str, font: StandardFont, size: f32, max_width: f32) -> Vec<String> {
+    wrap_text_by(text, max_width, |piece| font.text_width(piece, size))
+}
+
+/// Like [`wrap_text`], measuring with any width function. Text without
+/// spaces (Chinese, Japanese) breaks between characters.
+pub fn wrap_text_by(text: &str, max_width: f32, width_of: impl Fn(&str) -> f32) -> Vec<String> {
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
         let paragraph = paragraph.trim_end_matches('\r');
@@ -123,7 +129,7 @@ pub fn wrap_text(text: &str, font: StandardFont, size: f32, max_width: f32) -> V
         let mut current = String::new();
         for word in paragraph.split(' ') {
             let candidate = if current.is_empty() { word.to_string() } else { format!("{current} {word}") };
-            if font.text_width(&candidate, size) <= max_width {
+            if width_of(&candidate) <= max_width {
                 current = candidate;
                 continue;
             }
@@ -134,7 +140,7 @@ pub fn wrap_text(text: &str, font: StandardFont, size: f32, max_width: f32) -> V
             let mut piece = String::new();
             for character in word.chars() {
                 piece.push(character);
-                if font.text_width(&piece, size) > max_width && piece.chars().count() > 1 {
+                if width_of(&piece) > max_width && piece.chars().count() > 1 {
                     piece.pop();
                     lines.push(std::mem::take(&mut piece));
                     piece.push(character);
