@@ -189,6 +189,9 @@ struct TextEditing {
     italic: bool,
     size: f32,
     color: [f32; 3],
+    /// Line mode: underline or strike out the whole line.
+    underline: bool,
+    strikethrough: bool,
     focus_requested: bool,
     preview: EditPreview,
 }
@@ -243,7 +246,10 @@ fn compose_font(family: FontFamilyChoice, bold: bool, italic: bool) -> StandardF
 impl TextEditing {
     fn start(line: EditableLine) -> Self {
         let family = if line.monospace { FontFamilyChoice::Monospace } else if line.serif { FontFamilyChoice::Serif } else { FontFamilyChoice::Sans };
+        let line_style = LineStyle::of(&line);
         Self {
+            underline: line_style.underline,
+            strikethrough: line_style.strikethrough,
             text: line.text.clone(),
             family,
             bold: line.bold,
@@ -333,7 +339,7 @@ impl TextEditing {
     }
 
     fn style(&self) -> LineStyle {
-        LineStyle { font: compose_font(self.family, self.bold, self.italic), apparent_size: self.size, color: self.color, offset: (0.0, 0.0) }
+        LineStyle { font: compose_font(self.family, self.bold, self.italic), apparent_size: self.size, color: self.color, offset: (0.0, 0.0), underline: self.underline, strikethrough: self.strikethrough }
     }
 
     fn changed(&self) -> bool {
@@ -344,7 +350,7 @@ impl TextEditing {
         if self.alignment != original.alignment || self.rich != original.rich {
             return true;
         }
-        self.text != original.text || self.family != original.family || self.bold != original.bold || self.italic != original.italic || (self.size - original.size).abs() > 0.05 || self.color != original.color
+        self.text != original.text || self.family != original.family || self.bold != original.bold || self.italic != original.italic || (self.size - original.size).abs() > 0.05 || self.color != original.color || self.underline != original.underline || self.strikethrough != original.strikethrough
     }
 }
 
@@ -602,7 +608,8 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                         let family = if style.bold { egui::FontFamily::Name("bold".into()) } else { egui::FontFamily::Proportional };
                         let near_black = style.color.iter().all(|c| *c < 0.15);
                         let color = if near_black { text_color } else { Color32::from_rgb((style.color[0] * 255.0) as u8, (style.color[1] * 255.0) as u8, (style.color[2] * 255.0) as u8) };
-                        job.append(&text, 0.0, egui::TextFormat { font_id: egui::FontId::new(font_size, family), color, italics: style.italic, ..Default::default() });
+                        let rule = |on: bool| if on { Stroke::new(1.0, color) } else { Stroke::NONE };
+                        job.append(&text, 0.0, egui::TextFormat { font_id: egui::FontId::new(font_size, family), color, italics: style.italic, underline: rule(style.underline), strikethrough: rule(style.strikethrough), ..Default::default() });
                     }
                 }
                 None => job.append(current, 0.0, egui::TextFormat { font_id: egui::FontId::proportional(font_size), color: text_color, ..Default::default() }),
@@ -671,6 +678,8 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                         });
                     ui.toggle_value(&mut editing.bold, egui::RichText::new("B").strong()).on_hover_text("Bold");
                     ui.toggle_value(&mut editing.italic, egui::RichText::new("I").italics()).on_hover_text("Italic");
+                    ui.toggle_value(&mut editing.underline, egui::RichText::new("U").underline()).on_hover_text("Underline");
+                    ui.toggle_value(&mut editing.strikethrough, egui::RichText::new("S").strikethrough()).on_hover_text("Strikethrough");
                     ui.add(egui::DragValue::new(&mut editing.size).range(2.0..=144.0).speed(0.1).suffix(" pt")).on_hover_text("Size");
                     ui.color_edit_button_rgb(&mut editing.color).on_hover_text("Color");
                     }
@@ -1013,7 +1022,7 @@ pub fn complete_pending_text(pending: &PendingText, settings: &ToolSettings) -> 
                 return None;
             }
             // The click marks where the first baseline starts.
-            ViewerAction::AddPageText { page, x: pending.rect[0], y: pending.rect[1], text: pending.text.clone(), style: LineStyle { font: StandardFont::Helvetica, apparent_size: settings.font_size, color: [0.0; 3], offset: (0.0, 0.0) } }
+            ViewerAction::AddPageText { page, x: pending.rect[0], y: pending.rect[1], text: pending.text.clone(), style: LineStyle { font: StandardFont::Helvetica, apparent_size: settings.font_size, color: [0.0; 3], offset: (0.0, 0.0), underline: false, strikethrough: false } }
         }
         TextPurpose::FieldName(kind) => {
             let name = pending.text.trim();
@@ -1210,6 +1219,16 @@ fn rich_style_controls(ui: &mut egui::Ui, editing: &mut TextEditing, editor_id: 
     let all_italic = rich.all(start, end, |s| s.italic);
     if ui.selectable_label(all_italic, egui::RichText::new("I").italics()).on_hover_text("Italic (the selection, or the whole paragraph)").clicked() {
         rich.restyle(start, end, |s| s.with_italic(!all_italic));
+        editing.focus_requested = false;
+    }
+    let all_underlined = rich.all(start, end, |s| s.underline);
+    if ui.selectable_label(all_underlined, egui::RichText::new("U").underline()).on_hover_text("Underline (the selection, or the whole paragraph)").clicked() {
+        rich.restyle(start, end, |s| s.with_underline(!all_underlined));
+        editing.focus_requested = false;
+    }
+    let all_struck = rich.all(start, end, |s| s.strikethrough);
+    if ui.selectable_label(all_struck, egui::RichText::new("S").strikethrough()).on_hover_text("Strikethrough (the selection, or the whole paragraph)").clicked() {
+        rich.restyle(start, end, |s| s.with_strikethrough(!all_struck));
         editing.focus_requested = false;
     }
     ui.add(egui::DragValue::new(&mut editing.size).range(2.0..=144.0).speed(0.1).suffix(" pt")).on_hover_text("Size of the whole paragraph");

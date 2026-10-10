@@ -60,7 +60,7 @@ fn delete_add_and_find_replace() {
     assert!(!text_of(&without).contains("Thank you"));
 
     let mut pdf = Pdf::from_bytes(&without, None).unwrap();
-    let style = LineStyle { font: vellum_core::fonts::StandardFont::HelveticaOblique, apparent_size: 10.0, color: [0.2, 0.2, 0.6], offset: (0.0, 0.0) };
+    let style = LineStyle { font: vellum_core::fonts::StandardFont::HelveticaOblique, apparent_size: 10.0, color: [0.2, 0.2, 0.6], offset: (0.0, 0.0), underline: false, strikethrough: false };
     add_text(&mut pdf, 0, 72.0, 400.0, "Payment terms: net 30\nLate fee: 1.5% per month", &style).unwrap();
     let added = pdf.to_bytes(&SaveSettings::default()).unwrap();
     assert!(text_of(&added).contains("Payment terms: net 30") && text_of(&added).contains("Late fee"));
@@ -403,4 +403,65 @@ fn edits_draw_with_the_documents_own_font_object() {
     let fonts = pdf.resolve(pdf.resolve(&resources).as_dict().unwrap().get(b"Font").unwrap()).as_dict().unwrap().clone();
     assert!(fonts.iter().any(|(name, _)| name.starts_with(b"VlX")), "drawn by reference to the existing font");
     assert!(text_of(&edited).contains("résumé naïve café"), "{}", text_of(&edited));
+}
+
+mod rules {
+    use super::*;
+    use vellum_core::edit_text::{ParagraphStyle, editable_paragraphs, replace_paragraph};
+    use vellum_core::fonts::StandardFont;
+
+    /// Two lines: "terms below" underlined, "40 dollars" struck out, each
+    /// rule a thin filled rectangle as word processors draw them.
+    fn ruled() -> Vec<u8> {
+        use lopdf::{Dictionary, Stream, dictionary};
+        let mut pdf = Pdf::new_empty();
+        let font = StandardFont::TimesRoman.add_to(&mut pdf.doc);
+        let width = |text: &str| StandardFont::TimesRoman.text_width(text, 12.0);
+        let underline_start = 72.0 + width("Please read the ");
+        let strike_start = 72.0 + width("signing. The old price was ");
+        let content = format!(
+            "BT /F 12 Tf 1 0 0 1 72 700 Tm (Please read the terms below before) Tj 1 0 0 1 72 686 Tm (signing. The old price was 40 dollars.) Tj ET \
+             {underline_start} 698.2 {} 0.6 re f {strike_start} 689.0 {} 0.6 re f",
+            width("terms below"),
+            width("40 dollars")
+        );
+        let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
+        let root = pdf.pages_root_id().unwrap();
+        let page = pdf.doc.add_object(dictionary! { "Type" => "Page", "Parent" => root, "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()], "Resources" => dictionary! { "Font" => dictionary! { "F" => font } }, "Contents" => content_id });
+        pdf.set_page_order(&[page]).unwrap();
+        pdf.to_bytes(&SaveSettings::default()).unwrap()
+    }
+
+    fn styled_text(paragraph: &vellum_core::edit_text::EditableParagraph, test: impl Fn(&vellum_core::rich_text::SpanStyle) -> bool) -> String {
+        paragraph.rich.runs().into_iter().filter(|(_, s)| test(&paragraph.rich.palette[*s])).map(|(t, _)| t.trim().to_string()).collect::<Vec<_>>().join("|")
+    }
+
+    /// The thin rules drawn on the page, as (left, right, middle height).
+    fn rules_on_page(bytes: &[u8]) -> Vec<(f32, f32, f32)> {
+        use vellum_core::pdfium_render::prelude::*;
+        let document = engine::open_document(bytes.to_vec(), None).unwrap();
+        let page = document.pages().get(0).unwrap();
+        page.objects().iter().filter(|o| o.as_path_object().is_some()).filter_map(|o| o.bounds().ok()).map(|b| (b.left().value, b.right().value, (b.bottom().value + b.top().value) / 2.0)).filter(|r| r.1 - r.0 > 2.0).collect()
+    }
+
+    #[test]
+    fn underlines_and_strikethrough_are_read_and_redrawn() {
+        let bytes = ruled();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(0);
+        drop(document);
+        assert_eq!(styled_text(&paragraph, |s| s.underline), "terms below", "{:?}", paragraph.rich.runs());
+        assert_eq!(styled_text(&paragraph, |s| s.strikethrough), "40 dollars");
+
+        let new_text = "Please read all of the terms below carefully before signing. The old price was 40 dollars, and the new one is lower.";
+        let (edited, _) = replace_paragraph(&bytes, None, &paragraph, new_text, &ParagraphStyle::of(&paragraph)).unwrap();
+        std::fs::write(folder().join("rules.pdf"), &edited).unwrap();
+        let document = engine::open_document(edited.clone(), None).unwrap();
+        engine::render_page(&document, 0, &RenderOptions { dpi: 130.0, ..Default::default() }).unwrap().save(folder().join("rules.png")).unwrap();
+        let after = editable_paragraphs(&document, 0).unwrap().remove(0);
+        assert_eq!(styled_text(&after, |s| s.underline), "terms below", "{:?}", after.rich.runs());
+        assert_eq!(styled_text(&after, |s| s.strikethrough), "40 dollars");
+        drop(document);
+        assert_eq!(rules_on_page(&edited).len(), 2, "the old rules are gone and two new ones drawn: {:?}", rules_on_page(&edited));
+    }
 }

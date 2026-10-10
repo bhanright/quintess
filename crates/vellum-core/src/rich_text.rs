@@ -20,6 +20,10 @@ pub struct SpanStyle {
     pub color: [f32; 3],
     /// Size as it appears on the page.
     pub apparent_size: f32,
+    #[serde(default)]
+    pub underline: bool,
+    #[serde(default)]
+    pub strikethrough: bool,
     /// A page object drawn in exactly this style, whose embedded font can
     /// be reused. `None` once the style has been changed by editing.
     pub sample_object: Option<usize>,
@@ -49,6 +53,8 @@ impl SpanStyle {
             && self.monospace == other.monospace
             && self.color.iter().zip(&other.color).all(|(a, b)| (a - b).abs() < 0.004)
             && (self.apparent_size - other.apparent_size).abs() < 0.05
+            && self.underline == other.underline
+            && self.strikethrough == other.strikethrough
     }
 
     /// The same style made bold or not, which can no longer reuse the
@@ -65,6 +71,15 @@ impl SpanStyle {
             return self.clone();
         }
         SpanStyle { italic, sample_object: None, ..self.clone() }
+    }
+
+    /// Underline and strikethrough are drawn as lines, so the font stays.
+    pub fn with_underline(&self, underline: bool) -> SpanStyle {
+        SpanStyle { underline, ..self.clone() }
+    }
+
+    pub fn with_strikethrough(&self, strikethrough: bool) -> SpanStyle {
+        SpanStyle { strikethrough, ..self.clone() }
     }
 
     pub fn with_color(&self, color: [f32; 3]) -> SpanStyle {
@@ -212,7 +227,7 @@ mod tests {
     use super::*;
 
     fn style(bold: bool) -> SpanStyle {
-        SpanStyle { font_name: "Body".into(), bold, italic: false, serif: true, monospace: false, color: [0.0; 3], apparent_size: 10.0, sample_object: Some(1) }
+        SpanStyle { font_name: "Body".into(), bold, italic: false, serif: true, monospace: false, color: [0.0; 3], apparent_size: 10.0, underline: false, strikethrough: false, sample_object: Some(1) }
     }
 
     #[test]

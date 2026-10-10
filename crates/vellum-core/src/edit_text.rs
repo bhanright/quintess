@@ -86,6 +86,8 @@ struct Piece {
     serif: bool,
     monospace: bool,
     invisible: bool,
+    underline: bool,
+    strikethrough: bool,
 }
 
 impl Piece {
@@ -98,13 +100,133 @@ impl Piece {
             monospace: self.monospace,
             color: self.color,
             apparent_size: self.apparent_size,
+            underline: self.underline,
+            strikethrough: self.strikethrough,
             sample_object: Some(self.index),
         }
     }
 }
 
+/// Where a thin rule sits against text: under it, through it, or neither.
+#[derive(Clone, Copy, PartialEq)]
+enum RulePlace {
+    Under,
+    Through,
+}
+
+/// How a rule at height `rule_middle` relates to text of `size` on `baseline`.
+fn rule_place(rule_middle: f32, baseline: f32, size: f32) -> Option<RulePlace> {
+    let offset = rule_middle - baseline;
+    if offset >= -size * 0.35 && offset <= size * 0.06 {
+        Some(RulePlace::Under)
+    } else if offset >= size * 0.12 && offset <= size * 0.5 {
+        Some(RulePlace::Through)
+    } else {
+        None
+    }
+}
+
+/// Thin horizontal shapes that underline or strike out text: each must
+/// start and end at text it sits under or through, which tells them apart
+/// from table rules and borders.
+fn text_rules(page: &PdfPage, text: &PdfPageText) -> Vec<[f32; 4]> {
+    let mut candidates = Vec::new();
+    for object in page.objects().iter() {
+        if object.as_path_object().is_none() {
+            continue;
+        }
+        let Ok(quad) = object.bounds() else { continue };
+        let rule = [quad.left().value, quad.bottom().value, quad.right().value, quad.top().value];
+        let (width, height) = (rule[2] - rule[0], rule[3] - rule[1]);
+        if height <= 3.0 && width >= 2.0 && width >= height * 4.0 {
+            candidates.push(rule);
+        }
+    }
+    if candidates.is_empty() {
+        return candidates;
+    }
+    let characters: Vec<([f32; 4], f32, f32)> = text
+        .chars()
+        .iter()
+        .filter(|c| c.unicode_char().is_some_and(|ch| !ch.is_whitespace()))
+        .filter_map(|c| {
+            let bounds = c.loose_bounds().ok()?;
+            Some(([bounds.left().value, bounds.bottom().value, bounds.right().value, bounds.top().value], c.origin_y().ok()?.value, c.scaled_font_size().value))
+        })
+        .collect();
+    candidates
+        .into_iter()
+        .filter(|rule| {
+            let middle = (rule[1] + rule[3]) / 2.0;
+            let related: Vec<&([f32; 4], f32, f32)> = characters.iter().filter(|(bounds, baseline, size)| {
+                let center = (bounds[0] + bounds[2]) / 2.0;
+                center >= rule[0] && center <= rule[2] && rule_place(middle, *baseline, *size).is_some()
+            }).collect();
+            let starts_at_text = related.iter().any(|(bounds, _, size)| (bounds[0] - rule[0]).abs() < size * 0.7);
+            let ends_at_text = related.iter().any(|(bounds, _, size)| (bounds[2] - rule[2]).abs() < size * 0.7);
+            starts_at_text && ends_at_text
+        })
+        .collect()
+}
+
+/// Splits a text object into runs by underline and strikethrough, using
+/// each character's box against the page's text rules.
+fn split_by_rules(piece: Piece, text_object: &PdfPageTextObject, text: &PdfPageText, rules: &[[f32; 4]]) -> Vec<Piece> {
+    let size = piece.apparent_size.max(1.0);
+    let near = rules.iter().any(|r| r[2] > piece.bounds[0] && r[0] < piece.bounds[2] && r[3] > piece.bounds[1] - size * 0.4 && r[1] < piece.bounds[3]);
+    let Ok(characters) = text_object.chars(text) else { return vec![piece] };
+    if !near || piece.matrix[1].abs() > 0.01 {
+        return vec![piece];
+    }
+    let baseline = piece.matrix[5];
+    let mut runs: Vec<Piece> = Vec::new();
+    for character in characters.iter() {
+        let Some(ch) = character.unicode_char() else { continue };
+        let bounds = character.loose_bounds().ok().map(|b| [b.left().value, b.bottom().value, b.right().value, b.top().value]);
+        let center = bounds.map(|b| (b[0] + b[2]) / 2.0);
+        let ruled = |place: RulePlace| center.is_some_and(|x| rules.iter().any(|r| x >= r[0] && x <= r[2] && rule_place((r[1] + r[3]) / 2.0, baseline, size) == Some(place)));
+        let (underline, strikethrough) = (ruled(RulePlace::Under), ruled(RulePlace::Through));
+        match runs.last_mut() {
+            // Spaces join the run they follow, so a space between underlined words stays underlined.
+            Some(run) if (run.underline == underline && run.strikethrough == strikethrough) || ch.is_whitespace() => {
+                run.text.push(ch);
+                if let Some(b) = bounds.filter(|_| !ch.is_whitespace()) {
+                    run.bounds = [run.bounds[0].min(b[0]), run.bounds[1].min(b[1]), run.bounds[2].max(b[2]), run.bounds[3].max(b[3])];
+                }
+            }
+            _ => {
+                let start = bounds.unwrap_or(piece.bounds);
+                let mut matrix = piece.matrix;
+                if !runs.is_empty() {
+                    matrix[4] = start[0];
+                }
+                runs.push(Piece { text: ch.to_string(), bounds: start, matrix, underline, strikethrough, font_name: piece.font_name.clone(), ..piece.clone_without_text() });
+            }
+        }
+    }
+    // A space ending a run belongs with what follows, so text typed after an
+    // underlined phrase doesn't continue its underline.
+    for index in 1..runs.len() {
+        let trailing: String = runs[index - 1].text.chars().rev().take_while(|c| c.is_whitespace()).collect();
+        if !trailing.is_empty() {
+            let kept = runs[index - 1].text.trim_end().to_string();
+            runs[index - 1].text = kept;
+            runs[index].text.insert_str(0, &trailing);
+        }
+    }
+    if runs.is_empty() { vec![piece] } else { runs }
+}
+
+impl Piece {
+    fn clone_without_text(&self) -> Piece {
+        Piece { text: String::new(), font_name: String::new(), ..*self }
+    }
+}
+
 fn pieces(document: &PdfDocument, page_index: usize) -> Result<Vec<Piece>> {
     let page = document.pages().get(page_index as i32)?;
+    let page_text = page.text()?;
+    let rules = text_rules(&page, &page_text);
     let mut found = Vec::new();
     for (index, object) in page.objects().iter().enumerate() {
         let Some(text_object) = object.as_text_object() else { continue };
@@ -120,7 +242,7 @@ fn pieces(document: &PdfDocument, page_index: usize) -> Result<Vec<Piece>> {
         let name = font.name();
         let lowercase = name.to_ascii_lowercase();
         let weight_is_bold = matches!(font.weight(), Ok(PdfFontWeight::Weight700Bold | PdfFontWeight::Weight800 | PdfFontWeight::Weight900));
-        found.push(Piece {
+        let piece = Piece {
             index,
             text,
             bounds,
@@ -134,7 +256,14 @@ fn pieces(document: &PdfDocument, page_index: usize) -> Result<Vec<Piece>> {
             monospace: font.is_fixed_pitch() || lowercase.contains("courier") || lowercase.contains("mono") || lowercase.contains("consolas"),
             invisible: matches!(text_object.render_mode(), PdfPageTextRenderMode::Invisible),
             font_name: name,
-        });
+            underline: false,
+            strikethrough: false,
+        };
+        if rules.is_empty() {
+            found.push(piece);
+        } else {
+            found.extend(split_by_rules(piece, text_object, &page_text, &rules));
+        }
     }
     Ok(found)
 }
@@ -168,7 +297,9 @@ pub fn editable_lines(document: &PdfDocument, page_index: usize) -> Result<Vec<E
                 Some(last) if last.style.looks_like(&style) => last.text.push_str(&piece.text),
                 _ => line.spans.push(StyledSpan { text: piece.text.clone(), style }),
             }
-            line.object_indices.push(piece.index);
+            if line.object_indices.last() != Some(&piece.index) {
+                line.object_indices.push(piece.index);
+            }
             line.bounds = [line.bounds[0].min(piece.bounds[0]), line.bounds[1].min(piece.bounds[1]), line.bounds[2].max(piece.bounds[2]), line.bounds[3].max(piece.bounds[3])];
         } else {
             let spans = vec![StyledSpan { text: piece.text.clone(), style: piece.span_style() }];
@@ -218,12 +349,19 @@ pub struct LineStyle {
     pub color: [f32; 3],
     /// Move the line by this much, in page space.
     pub offset: (f32, f32),
+    #[serde(default)]
+    pub underline: bool,
+    #[serde(default)]
+    pub strikethrough: bool,
 }
 
 impl LineStyle {
     /// The line's current look, unmoved.
     pub fn of(line: &EditableLine) -> Self {
-        Self { font: line.matching_font(), apparent_size: line.apparent_size, color: line.color, offset: (0.0, 0.0) }
+        // Underlined or struck out when most of the line is.
+        let letters = |test: fn(&SpanStyle) -> bool| line.spans.iter().filter(|s| test(&s.style)).map(|s| s.text.chars().filter(|c| !c.is_whitespace()).count()).sum::<usize>();
+        let all = letters(|_| true).max(1);
+        Self { font: line.matching_font(), apparent_size: line.apparent_size, color: line.color, offset: (0.0, 0.0), underline: letters(|s| s.underline) * 2 > all, strikethrough: letters(|s| s.strikethrough) * 2 > all }
     }
 }
 
@@ -325,7 +463,16 @@ fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[E
             [line.bounds[0] - size * 0.25, line.matrix[5] + size * 0.05, line.bounds[2] + size * 0.25, line.matrix[5] + size * 0.6]
         })
         .collect();
-    let removed = crate::redact::remove_text(&mut pdf, line.page_index as u32 + 1, &bands)?;
+    // Underlined or struck-out lines take their rules out with them.
+    let rule_areas: Vec<[f32; 4]> = lines
+        .iter()
+        .filter(|line| line.spans.iter().any(|s| s.style.underline || s.style.strikethrough))
+        .map(|line| {
+            let size = line.apparent_size.max(1.0);
+            [line.bounds[0] - 1.0, line.matrix[5] - size * 0.4, line.bounds[2] + 1.0, line.matrix[5] + size * 0.6]
+        })
+        .collect();
+    let removed = crate::redact::remove_text_and_rules(&mut pdf, line.page_index as u32 + 1, &bands, &rule_areas)?;
     if removed == 0 {
         bail!("this text could not be taken out of the page (its encoding is not supported for editing)");
     }
@@ -360,9 +507,70 @@ fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], sty
     );
     content.push_str(&setter.show(&mut pdf.doc, text, style.apparent_size));
     content.push_str("ET Q\n");
+    // Rules for an unrotated line, from its start across the text's width.
+    if (style.underline || style.strikethrough) && unit[1].abs() < 0.01 {
+        let start = matrix[4] + style.offset.0;
+        let rule = TextRule { start, end: start + setter.width(text, style.apparent_size), baseline: matrix[5] + style.offset.1, size: style.apparent_size, color: style.color, underline: style.underline, strikethrough: style.strikethrough };
+        content.push_str(&rules_content(&[rule]));
+    }
     let fonts = setter.finish(&mut pdf.doc)?;
     add_fonts_to_page(pdf, page_id, &fonts)?;
     pdf.add_page_content(page_id, content.into_bytes(), true)
+}
+
+/// A stretch of text to underline or strike out.
+#[derive(Clone, Copy)]
+struct TextRule {
+    start: f32,
+    end: f32,
+    baseline: f32,
+    size: f32,
+    color: [f32; 3],
+    underline: bool,
+    strikethrough: bool,
+}
+
+/// Drawing operators for underlines and strikethrough lines: an underline a
+/// little below the baseline, a strikethrough near the middle of lowercase
+/// letters, each about a twentieth of the size thick.
+fn rules_content(rules: &[TextRule]) -> String {
+    let mut content = String::new();
+    for rule in rules.iter().filter(|r| r.end > r.start) {
+        let thickness = (rule.size * 0.05).max(0.4);
+        let mut rectangles = Vec::new();
+        if rule.underline {
+            rectangles.push(rule.baseline - rule.size * 0.12 - thickness / 2.0);
+        }
+        if rule.strikethrough {
+            rectangles.push(rule.baseline + rule.size * 0.26 - thickness / 2.0);
+        }
+        for bottom in rectangles {
+            content.push_str(&format!(
+                "q {} {} {} rg {} {} {} {} re f Q\n",
+                number(rule.color[0]),
+                number(rule.color[1]),
+                number(rule.color[2]),
+                number(rule.start),
+                number(bottom),
+                number(rule.end - rule.start),
+                number(thickness)
+            ));
+        }
+    }
+    content
+}
+
+/// Joins rules of one look that meet across the space between words, so an
+/// underlined phrase gets one unbroken line.
+fn join_rules(rules: Vec<TextRule>, largest_size: f32) -> Vec<TextRule> {
+    let mut joined: Vec<TextRule> = Vec::new();
+    for rule in rules {
+        match joined.last_mut() {
+            Some(last) if last.underline == rule.underline && last.strikethrough == rule.strikethrough && last.color == rule.color && (last.size - rule.size).abs() < 0.01 && rule.start - last.end < largest_size * 1.2 => last.end = rule.end,
+            _ => joined.push(rule),
+        }
+    }
+    joined
 }
 
 /// Replaces a line's text (and optionally its look) and returns the new file.
@@ -883,6 +1091,7 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
     let mut setters = setters;
     let mut content = format!("q BT {} ", if first.invisible { "3 Tr" } else { "0 Tr" });
     let mut current_color: Option<[f32; 3]> = None;
+    let mut rules: Vec<TextRule> = Vec::new();
     for (index, line) in laid_out.iter().enumerate() {
         if line.words.is_empty() {
             continue;
@@ -898,9 +1107,11 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
             Alignment::Right => left + line.indent + (available - natural),
             _ => left + line.indent,
         };
+        let mut line_rules: Vec<TextRule> = Vec::new();
         for (word_index, word) in line.words.iter().enumerate() {
             for (text, style_index) in &word.segments {
                 let span = &rich.palette[*style_index];
+                let segment_start = x;
                 if current_color != Some(span.color) {
                     content.push_str(&format!("{} {} {} rg ", number(span.color[0]), number(span.color[1]), number(span.color[2])));
                     current_color = Some(span.color);
@@ -909,13 +1120,18 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
                 let setter = setters[*style_index].as_mut().expect("styles in use have setters");
                 content.push_str(&setter.show(&mut pdf.doc, text, sizes[*style_index]));
                 x += setter.width(text, sizes[*style_index]);
+                if span.underline || span.strikethrough {
+                    line_rules.push(TextRule { start: segment_start, end: x, baseline, size: sizes[*style_index], color: span.color, underline: span.underline, strikethrough: span.strikethrough });
+                }
             }
             if let Some(gap) = line.gaps.get(word_index) {
                 x += gap + extra;
             }
         }
+        rules.extend(join_rules(line_rules, largest_size));
     }
     content.push_str("ET Q\n");
+    content.push_str(&rules_content(&rules));
     let mut fonts = lopdf::Dictionary::new();
     for setter in setters.into_iter().flatten() {
         for (name, value) in setter.finish(&mut pdf.doc)?.iter() {

@@ -176,12 +176,18 @@ fn center_is_inside(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
 /// leaving every other drawing operation exactly as it was. Returns the
 /// number of glyphs removed.
 pub fn remove_text(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]]) -> Result<usize> {
+    remove_text_and_rules(pdf, page_number, areas, &[])
+}
+
+/// Like [`remove_text`], also removing thin horizontal rules (underlines
+/// and strikethrough lines) drawn wholly inside `rule_areas`.
+pub fn remove_text_and_rules(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]], rule_areas: &[[f32; 4]]) -> Result<usize> {
     let page_id = pdf.page_id(page_number)?;
     pdf.materialize_inherited_attributes(page_id)?;
     let content = pdf.doc.get_page_content(page_id);
     let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
     let mut report = RedactionReport::default();
-    let mut remover = Redactor { pdf, areas: areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
+    let mut remover = Redactor { pdf, areas: areas.to_vec(), rule_areas: rule_areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
     let resources = remover.page_resources();
     let (new_operations, changed) = remover.process(operations, &resources, IDENTITY)?;
     let added = std::mem::take(&mut remover.pending_resources);
@@ -216,6 +222,7 @@ pub fn shift_content(pdf: &mut Pdf, page_number: u32, region: [f32; 4], offset: 
     let mut mover = Redactor {
         pdf,
         areas: Vec::new(),
+        rule_areas: Vec::new(),
         page_id,
         report: &mut report,
         font_cache: HashMap::new(),
@@ -394,6 +401,9 @@ struct Redactor<'a> {
     /// Remove only glyphs whose centers fall in an area, leaving images and
     /// shapes alone (used to take a line of text out for editing).
     text_only: bool,
+    /// Thin horizontal rules wholly inside these are removed too (the
+    /// underlines and strikethrough lines of text being edited).
+    rule_areas: Vec<[f32; 4]>,
     /// Instead of removing anything, move what lies inside a region.
     shift: Option<ShiftRegion>,
     /// Items moved by a shift, and the lowest point among them.
@@ -611,7 +621,9 @@ impl Redactor<'_> {
                             continue;
                         }
                     }
-                    let fully_inside = self.shift.is_none() && !self.text_only && path_box.is_some_and(|b| self.areas.iter().any(|a| b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]));
+                    let within = |b: [f32; 4], areas: &[[f32; 4]]| areas.iter().any(|a| b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]);
+                    let is_rule = |b: [f32; 4]| b[3] - b[1] <= 3.0 && b[2] - b[0] >= (b[3] - b[1]) * 3.0;
+                    let fully_inside = self.shift.is_none() && path_box.is_some_and(|b| (!self.text_only && within(b, &self.areas)) || (is_rule(b) && within(b, &self.rule_areas)));
                     if fully_inside && operation.operator != "n" {
                         // Keep the path (it may be a clip) but paint nothing.
                         output.append(&mut path_operations);
@@ -968,7 +980,7 @@ pub fn apply_redactions(pdf: &mut Pdf, areas: &[RedactionArea], settings: &Redac
         pdf.materialize_inherited_attributes(page_id)?;
         let content = pdf.doc.get_page_content(page_id);
         let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
-        let mut redactor = Redactor { pdf, areas: page_areas.clone(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
+        let mut redactor = Redactor { pdf, areas: page_areas.clone(), rule_areas: Vec::new(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
         let resources = redactor.page_resources();
         let (new_operations, _) = redactor.process(operations, &resources, IDENTITY)?;
         let added = std::mem::take(&mut redactor.pending_resources);
