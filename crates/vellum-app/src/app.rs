@@ -131,6 +131,14 @@ impl VellumApp {
                         viewer::set_text_being_edited(self.viewer_states.entry(tab.id).or_default(), text, key == "show-result");
                     }
                 }
+                "merge-data" => {
+                    self.open_form_merge();
+                    let fields = self.tabs.get(self.active).map(|t| t.fields.clone()).unwrap_or_default();
+                    if let Some(Dialog::FormMerge(merge)) = self.dialogs.last_mut() {
+                        let _ = merge.load(PathBuf::from(value), &fields);
+                        merge.name_pattern = "{Name}".into();
+                    }
+                }
                 "wait" => {
                     if let (Some(check), Ok(seconds)) = (self.self_check.as_mut(), value.parse::<f32>()) {
                         check.not_before = std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
@@ -899,6 +907,9 @@ impl VellumApp {
             if ui.button("Import data…").clicked() {
                 self.import_form_data();
             }
+            if ui.button("Fill from spreadsheet…").on_hover_text("One filled copy of this form for every row of a spreadsheet").clicked() {
+                self.open_form_merge();
+            }
             if ui.button("Clear all fields").clicked() {
                 self.edit("Clear form", forms::reset_form);
             }
@@ -1098,6 +1109,16 @@ impl VellumApp {
             self.show_sidebar = true;
             self.sidebar.page = sidebar::SidebarPage::Fields;
         }
+    }
+
+    fn open_form_merge(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let fields: Vec<String> = tab.fields.iter().filter(|f| !f.read_only && !matches!(f.field_type, forms::FieldType::PushButton | forms::FieldType::Signature)).map(|f| f.name.clone()).collect();
+        if fields.is_empty() {
+            self.error("This document has no form fields to fill. Forms ▸ Detect fields automatically can add them.");
+            return;
+        }
+        self.dialogs.push(Dialog::FormMerge(Box::new(dialogs::FormMergeDialog::new(fields))));
     }
 
     fn import_form_data(&mut self) {
@@ -1556,6 +1577,34 @@ impl VellumApp {
                             }
                         }
                         Ok(JobOutcome::ShowText { title: "Action results".into(), text })
+                    });
+                }
+                AppRequest::StartFormMerge(job) => {
+                    let ctx = self.worker_context.clone();
+                    self.start_job(&ctx, "Filling copies", move |progress| {
+                        let mut problems: Vec<String> = Vec::new();
+                        let mut copies = Vec::new();
+                        let count = vellum_core::form_merge::fill_rows(&job.template, job.password.as_deref(), &job.table, &job.plan, &job.settings, progress, |copy| {
+                            problems.extend(copy.problems.iter().map(|problem| format!("Row {} ({}): {problem}", copy.row, copy.file_name)));
+                            match &job.folder {
+                                Some(folder) => std::fs::write(folder.join(&copy.file_name), &copy.bytes)?,
+                                None => copies.push((copy.file_name, copy.bytes)),
+                            }
+                            Ok(())
+                        })?;
+                        let place = match (&job.folder, &job.combined_file) {
+                            (Some(folder), _) => folder.display().to_string(),
+                            (None, Some(file)) => {
+                                std::fs::write(file, vellum_core::form_merge::combine(&copies)?)?;
+                                file.display().to_string()
+                            }
+                            (None, None) => String::new(),
+                        };
+                        if problems.is_empty() {
+                            Ok(JobOutcome::Message(format!("Filled {count} copies into {place}.")))
+                        } else {
+                            Ok(JobOutcome::ShowText { title: "Filled copies".into(), text: format!("Filled {count} copies into {place}.\n\n{} values need a look:\n{}\n", problems.len(), problems.join("\n")) })
+                        }
                     });
                 }
                 AppRequest::SettingsChanged(settings) => {

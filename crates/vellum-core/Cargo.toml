@@ -27,10 +27,13 @@ rcgen = "0.14"
 x509-parser = "0.18.1"
 sha2 = "0.11.0"
 ring = "0.17"
+csv = "1.4.0"
+calamine = { version = "0.36.1", features = ["chrono"] }
 
 [dev-dependencies]
 image = "0.25"
 regex = "1"
+rust_xlsxwriter = "0.99.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Storage_Xps"] }

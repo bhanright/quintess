@@ -588,6 +588,30 @@ enum FormAction {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Fill one copy of the form per row of a spreadsheet (CSV, Excel,
+    /// OpenDocument or a JSON list); columns fill the fields of the same name.
+    Merge {
+        #[command(flatten)]
+        input: Input,
+        /// The spreadsheet.
+        #[arg(long)]
+        data: PathBuf,
+        /// Folder for the filled copies (created if needed).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// File name for each copy: {Column} is that row's value, {row} its number.
+        #[arg(long, default_value = "{row}")]
+        name: String,
+        /// Flatten each copy so its values can't be changed.
+        #[arg(long)]
+        flatten: bool,
+        /// Write every copy into this one PDF instead (copies are flattened).
+        #[arg(long)]
+        combined: Option<PathBuf>,
+        /// Only show how the columns match the fields.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Find blanks (____) and boxes and turn them into fields.
     Detect {
         #[command(flatten)]
@@ -1151,6 +1175,63 @@ fn form(action: FormAction) -> Result<()> {
                 _ => serde_json::to_string_pretty(&forms::export_values(&pdf))?,
             };
             write_or_print(&text, &output)?;
+        }
+        FormAction::Merge { input, data, out_dir, name, flatten, combined, dry_run } => {
+            use vellum_core::form_merge::{self, MergeSettings, Table};
+            let table = Table::read(&data)?;
+            let template = std::fs::read(&input.input)?;
+            let fields = forms::list_fields(&Pdf::from_bytes(&template, input.password.as_deref())?);
+            let plan = form_merge::plan(&fields, &table.columns);
+            for entry in &plan.matches {
+                match &entry.field {
+                    Some(field) if field == &entry.column => println!("{:<28} fills {field}", entry.column),
+                    Some(field) => println!("{:<28} fills {field} (matched by spelling)", entry.column),
+                    None => println!("{:<28} (no matching field; not used)", entry.column),
+                }
+            }
+            if !plan.unfilled_fields.is_empty() {
+                println!("fields no column fills: {}", plan.unfilled_fields.join(", "));
+            }
+            println!("{} rows", table.rows.len());
+            if dry_run {
+                return Ok(());
+            }
+            let settings = MergeSettings { name_pattern: name, flatten: flatten || combined.is_some() };
+            let mut problems = 0;
+            let mut report = |copy: &form_merge::FilledCopy| {
+                for problem in &copy.problems {
+                    eprintln!("row {} ({}): {problem}", copy.row, copy.file_name);
+                    problems += 1;
+                }
+            };
+            let count = match &combined {
+                Some(target) => {
+                    let mut copies = Vec::new();
+                    form_merge::fill_rows(&template, input.password.as_deref(), &table, &plan, &settings, &|_, _| {}, |copy| {
+                        report(&copy);
+                        copies.push((copy.file_name, copy.bytes));
+                        Ok(())
+                    })?;
+                    std::fs::write(target, form_merge::combine(&copies)?)?;
+                    println!("wrote {} copies into {}", copies.len(), target.display());
+                    copies.len()
+                }
+                None => {
+                    let stem = input.input.file_stem().and_then(|s| s.to_str()).unwrap_or("form").to_string();
+                    let folder = out_dir.unwrap_or_else(|| input.input.with_file_name(format!("{stem} filled")));
+                    std::fs::create_dir_all(&folder)?;
+                    let count = form_merge::fill_rows(&template, input.password.as_deref(), &table, &plan, &settings, &|_, _| {}, |copy| {
+                        report(&copy);
+                        std::fs::write(folder.join(&copy.file_name), &copy.bytes)?;
+                        Ok(())
+                    })?;
+                    println!("wrote {count} copies to {}", folder.display());
+                    count
+                }
+            };
+            if problems > 0 {
+                eprintln!("{problems} values in {count} rows need a look (listed above)");
+            }
         }
         FormAction::Detect { input, dry_run, output } => {
             let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;

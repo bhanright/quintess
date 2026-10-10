@@ -14,6 +14,7 @@ pub mod convert;
 pub mod create;
 pub mod der;
 pub mod fonts;
+pub mod form_merge;
 pub mod forms;
 pub mod images;
 pub mod stamp;

@@ -38,6 +38,45 @@ pub enum AppRequest {
     ConvertToPdfA,
     StartPrint(vellum_core::print::PrintSettings),
     StartFindReplace { pattern: regex::Regex, replacement: String },
+    StartFormMerge(FormMergeJob),
+}
+
+/// Everything a spreadsheet fill needs, handed to a background job.
+pub struct FormMergeJob {
+    pub template: std::sync::Arc<Vec<u8>>,
+    pub password: Option<String>,
+    pub table: vellum_core::form_merge::Table,
+    pub plan: vellum_core::form_merge::MergePlan,
+    pub settings: vellum_core::form_merge::MergeSettings,
+    /// A folder for separate files, or one combined file.
+    pub folder: Option<PathBuf>,
+    pub combined_file: Option<PathBuf>,
+}
+
+/// Choices in the "Fill from spreadsheet" dialog.
+pub struct FormMergeDialog {
+    pub data_path: Option<PathBuf>,
+    pub table: Option<vellum_core::form_merge::Table>,
+    pub plan: Option<vellum_core::form_merge::MergePlan>,
+    pub fields: Vec<String>,
+    pub name_pattern: String,
+    pub flatten: bool,
+    pub combine: bool,
+}
+
+impl FormMergeDialog {
+    pub fn new(fields: Vec<String>) -> Self {
+        Self { data_path: None, table: None, plan: None, fields, name_pattern: "{row}".into(), flatten: false, combine: false }
+    }
+
+    /// Reads a spreadsheet and matches its columns to the form's fields.
+    pub fn load(&mut self, path: PathBuf, fields: &[vellum_core::forms::FieldInfo]) -> anyhow::Result<()> {
+        let table = vellum_core::form_merge::Table::read(&path)?;
+        self.plan = Some(vellum_core::form_merge::plan(fields, &table.columns));
+        self.table = Some(table);
+        self.data_path = Some(path);
+        Ok(())
+    }
 }
 
 pub enum Dialog {
@@ -76,6 +115,7 @@ pub enum Dialog {
     ComparisonResult { summary: String, report_path: PathBuf },
     Print(PrintDialog),
     FindReplace { find: String, replace: String, use_regex: bool, match_case: bool },
+    FormMerge(Box<FormMergeDialog>),
 }
 
 /// Choices in the Print dialog.
@@ -146,6 +186,7 @@ impl Dialog {
             Dialog::ComparisonResult { .. } => "Comparison",
             Dialog::Print(_) => "Print",
             Dialog::FindReplace { .. } => "Find and replace text",
+            Dialog::FormMerge(_) => "Fill from spreadsheet",
         };
         title.to_string()
     }
@@ -251,6 +292,93 @@ pub fn show(ctx: &egui::Context, dialog: &mut Dialog, tab: Option<&mut DocumentT
         outcome.keep_open = false;
     }
     outcome
+}
+
+/// Choosing a spreadsheet, checking which column fills which field, naming
+/// the copies, and starting the fill.
+fn form_merge_body(ui: &mut egui::Ui, merge: &mut FormMergeDialog, tab: &mut DocumentTab, outcome: &mut DialogOutcome) -> anyhow::Result<()> {
+    use vellum_core::form_merge;
+    ui.set_min_width(460.0);
+    ui.label("Makes one filled copy of this form for every row of a spreadsheet. Each column fills the field with the same name.");
+    ui.horizontal(|ui| -> anyhow::Result<()> {
+        if ui.button("Choose spreadsheet…").clicked() {
+            if let Some(path) = rfd::FileDialog::new().add_filter("Spreadsheet", &["csv", "xlsx", "xls", "ods", "json", "txt"]).pick_file() {
+                merge.load(path, &tab.fields)?;
+            }
+        }
+        match (&merge.data_path, &merge.table) {
+            (Some(path), Some(table)) => ui.label(format!("{} ({} rows)", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), table.rows.len())),
+            _ => ui.weak("CSV, Excel, OpenDocument or JSON"),
+        };
+        Ok(())
+    })
+    .inner?;
+    let (Some(table), Some(plan)) = (&merge.table, merge.plan.as_mut()) else {
+        if ui.button("Cancel").clicked() {
+            outcome.keep_open = false;
+        }
+        return Ok(());
+    };
+    ui.add_space(4.0);
+    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+        egui::Grid::new("merge columns").num_columns(2).striped(true).show(ui, |ui| {
+            ui.strong("Column");
+            ui.strong("Fills field");
+            ui.end_row();
+            for (index, entry) in plan.matches.iter_mut().enumerate() {
+                ui.label(&entry.column);
+                egui::ComboBox::from_id_salt(("merge field", index)).width(200.0).selected_text(entry.field.clone().unwrap_or_else(|| "(not used)".into())).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut entry.field, None, "(not used)");
+                    for field in &merge.fields {
+                        ui.selectable_value(&mut entry.field, Some(field.clone()), field);
+                    }
+                });
+                ui.end_row();
+            }
+        });
+    });
+    let used: std::collections::HashSet<&String> = plan.matches.iter().filter_map(|m| m.field.as_ref()).collect();
+    let unfilled: Vec<&String> = merge.fields.iter().filter(|f| !used.contains(f)).collect();
+    if !unfilled.is_empty() {
+        ui.weak(format!("Fields no column fills: {}", unfilled.iter().map(|f| f.as_str()).collect::<Vec<_>>().join(", ")));
+    }
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("File names");
+        ui.add(egui::TextEdit::singleline(&mut merge.name_pattern).desired_width(220.0).hint_text("{row} or {Last name}"));
+    });
+    match form_merge::check_name_pattern(&merge.name_pattern, &table.columns) {
+        Ok(()) => {
+            let examples: Vec<String> = (0..table.rows.len().min(3)).map(|row| form_merge::file_name_for(&merge.name_pattern, table, row)).collect();
+            ui.weak(format!("For example: {}", examples.join(", ")));
+        }
+        Err(problem) => {
+            ui.colored_label(egui::Color32::from_rgb(200, 50, 50), format!("{problem:#}"));
+        }
+    }
+    ui.radio_value(&mut merge.combine, false, "A folder of separate PDFs");
+    ui.radio_value(&mut merge.combine, true, "One combined PDF, a bookmark per copy (flattened)");
+    ui.add_enabled_ui(!merge.combine, |ui| {
+        ui.checkbox(&mut merge.flatten, "Flatten each copy so its values can't be changed");
+    });
+    if buttons(ui, &format!("Fill {} copies…", table.rows.len()), outcome) {
+        form_merge::check_name_pattern(&merge.name_pattern, &table.columns)?;
+        if plan.matched_count() == 0 {
+            anyhow::bail!("no column fills a field; pick fields for the columns above");
+        }
+        let stem = tab.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "form".into());
+        let (folder, combined_file) = if merge.combine {
+            (None, rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(format!("{stem} (all copies).pdf")).save_file())
+        } else {
+            (rfd::FileDialog::new().set_title("Choose a folder for the filled copies").pick_folder(), None)
+        };
+        if folder.is_some() || combined_file.is_some() {
+            let settings = form_merge::MergeSettings { name_pattern: merge.name_pattern.clone(), flatten: merge.flatten || merge.combine };
+            outcome.requests.push(AppRequest::StartFormMerge(FormMergeJob { template: tab.bytes.clone(), password: tab.password.clone(), table: table.clone(), plan: plan.clone(), settings, folder, combined_file }));
+            outcome.keep_open = false;
+        }
+    }
+    Ok(())
 }
 
 /// Standard OK / Cancel row; returns true when OK was pressed.
@@ -1204,6 +1332,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 outcome.keep_open = false;
             }
         }
+        Dialog::FormMerge(merge) => form_merge_body(ui, merge, tab, outcome)?,
         Dialog::GoToPage { text } => {
             let response = ui.add(egui::TextEdit::singleline(text).hint_text(format!("1 to {}, or a page label", tab.pages.len())));
             response.request_focus();
