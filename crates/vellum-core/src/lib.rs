@@ -16,6 +16,7 @@ pub mod engine;
 pub mod metadata;
 pub mod pages;
 pub mod ranges;
+pub mod redact;
 pub mod security;
 pub mod strings;
 
