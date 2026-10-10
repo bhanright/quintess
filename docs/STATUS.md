@@ -119,6 +119,28 @@ saves a picture of the window and exits (setup options are documented on
 - Watched folder (`watch.rs`, Tools ▸ Watch a folder, CLI `watch`): PDFs
   dropped into a folder are run through an action once their size settles;
   originals move to Processed (or Failed with a note), results to Done.
+- Signed documents: edits are saved as incremental updates after the
+  signed bytes (`incremental.rs`, used by `DocumentTab::replace_bytes` and
+  the CLI's `save`), so signatures stay valid and verification reports the
+  later changes.
+- Font reuse when editing (`font_reuse.rs`): new text is drawn with the
+  document's own font object (any format, including bare CFF from
+  InDesign) when every character already appears in that font in the
+  document; then a re-embeddable TrueType/OpenType program; then a stand-in.
+  Probes: `--example reuse_probe`, `--example reuse_edit_probe`.
+- Underline and strikethrough are character styles: thin rules whose ends
+  meet text are read per character, removed with the edited text
+  (`remove_text_and_rules`) and redrawn per run.
+- Shaping (`unicode_text.rs`, rustybuzz + unicode-bidi): direction runs in
+  visual order, font runs per word, glyph positions via TJ adjustments and
+  text rise. ActualText spans carry Indic and similar text for copying;
+  right-to-left text relies on glyph order (readers reverse it), with
+  ligature text stored reversed. Edited lines draw words in bidi order.
+- Release: `cargo build --release -j 6` (thin LTO, stripped; about 8
+  minutes). The icon (`assets/`, drawn by a script) is embedded by each
+  crate's `build.rs` and set as the window icon. `installer/vellum.iss` is
+  an Inno Setup script (per-user install, Open with registration, Default
+  Programs capabilities, optional PATH entry); it has not been compiled.
 - Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).
@@ -130,11 +152,5 @@ saves a picture of the window and exits (setup options are documented on
 
 ## Ideas for next
 
-The ChatGPT feature list William shared on 2026-10-10 was reviewed; the
-three picks above came from it. Everything worth doing from it is now done.
-
-1. Reusing bare CFF fonts (InDesign's usual embedding) when editing text.
-2. Underline and strikethrough as character styles (drawn as lines).
-3. Incremental saves for edits after signing, so signatures survive.
-4. Complex script shaping (rustybuzz) for Indic and Arabic text.
-5. Release build, installer, file associations, an app icon.
+1. Compile the installer (needs Inno Setup 6); William wanted to discuss
+   changes first (2026-10-10).
