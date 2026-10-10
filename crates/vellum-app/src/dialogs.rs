@@ -40,6 +40,26 @@ pub enum AppRequest {
     StartFindReplace { pattern: regex::Regex, replacement: String },
     StartFormMerge(FormMergeJob),
     ShowRedactionCheck(vellum_core::redaction_check::RedactionCheck),
+    StartFolderSearch(FolderQuery),
+    /// Open a file (or switch to it) at a page, with the search shown.
+    OpenAtMatch { path: PathBuf, page_index: usize, query: FolderQuery },
+}
+
+/// What to look for, and where.
+#[derive(Clone)]
+pub struct FolderQuery {
+    pub folder: PathBuf,
+    pub text: String,
+    pub use_regex: bool,
+    pub match_case: bool,
+    pub whole_words: bool,
+    pub subfolders: bool,
+}
+
+/// A finished folder search, shown in its own window.
+pub struct FolderResults {
+    pub query: FolderQuery,
+    pub found: vellum_core::folder_search::FolderSearch,
 }
 
 /// Everything a spreadsheet fill needs, handed to a background job.
@@ -118,6 +138,8 @@ pub enum Dialog {
     FindReplace { find: String, replace: String, use_regex: bool, match_case: bool },
     FormMerge(Box<FormMergeDialog>),
     RedactionCheck(vellum_core::redaction_check::RedactionCheck),
+    FolderSearch { folder: Option<PathBuf>, text: String, use_regex: bool, match_case: bool, whole_words: bool, subfolders: bool },
+    FolderResults(Box<FolderResults>),
     CheckForText { texts: String },
 }
 
@@ -191,6 +213,8 @@ impl Dialog {
             Dialog::FindReplace { .. } => "Find and replace text",
             Dialog::FormMerge(_) => "Fill from spreadsheet",
             Dialog::RedactionCheck(_) => "Redaction check",
+            Dialog::FolderSearch { .. } => "Search a folder",
+            Dialog::FolderResults(_) => "Folder search results",
             Dialog::CheckForText { .. } => "Check for leftover text",
         };
         title.to_string()
@@ -297,6 +321,63 @@ pub fn show(ctx: &egui::Context, dialog: &mut Dialog, tab: Option<&mut DocumentT
         outcome.keep_open = false;
     }
     outcome
+}
+
+/// Matches grouped by file; clicking one opens that file at the page.
+fn folder_results_body(ui: &mut egui::Ui, results: &FolderResults, outcome: &mut DialogOutcome) {
+    let found = &results.found;
+    ui.set_min_width(620.0);
+    let mut files: Vec<(&PathBuf, Vec<&vellum_core::folder_search::FolderHit>)> = Vec::new();
+    for hit in &found.hits {
+        match files.last_mut() {
+            Some((path, hits)) if *path == &hit.path => hits.push(hit),
+            _ => files.push((&hit.path, vec![hit])),
+        }
+    }
+    let matches = if found.hits.len() == 1 { "1 match".to_string() } else { format!("{} matches", found.hits.len()) };
+    ui.label(format!(
+        "{matches} for \"{}\" in {} of {} files searched{}.",
+        results.query.text,
+        files.len(),
+        found.files_searched,
+        if found.stopped_early { format!(" (stopped at {} matches)", vellum_core::folder_search::MOST_HITS) } else { String::new() }
+    ));
+    if !found.skipped.is_empty() {
+        ui.weak(format!("Skipped {} file{}: {}", found.skipped.len(), if found.skipped.len() == 1 { "" } else { "s" }, found.skipped.iter().take(4).map(|(p, why)| format!("{} ({why})", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())).collect::<Vec<_>>().join(", ")));
+    }
+    let height = ui.ctx().content_rect().height() * 0.6;
+    egui::ScrollArea::vertical().max_height(height).show(ui, |ui| {
+        for (path, hits) in &files {
+            let name = path.strip_prefix(&results.query.folder).unwrap_or(path).display().to_string();
+            egui::CollapsingHeader::new(format!("{name}  ({})", hits.len())).id_salt(path).default_open(files.len() <= 12).show(ui, |ui| {
+                for hit in hits.iter().take(200) {
+                    let mut job = egui::text::LayoutJob::default();
+                    let normal = egui::TextFormat { color: ui.visuals().text_color(), ..Default::default() };
+                    let strong = egui::TextFormat { color: ui.visuals().strong_text_color(), background: egui::Color32::from_rgba_unmultiplied(255, 220, 0, 90), ..Default::default() };
+                    job.append(&format!("p. {}   ", hit.page_index + 1), 0.0, egui::TextFormat { color: ui.visuals().weak_text_color(), ..Default::default() });
+                    job.append(&hit.before, 0.0, normal.clone());
+                    job.append(&hit.matched, 0.0, strong);
+                    job.append(&hit.after, 0.0, normal);
+                    if ui.add(egui::Label::new(job).sense(egui::Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        outcome.requests.push(AppRequest::OpenAtMatch { path: hit.path.clone(), page_index: hit.page_index, query: results.query.clone() });
+                    }
+                }
+                if hits.len() > 200 {
+                    ui.weak(format!("and {} more in this file", hits.len() - 200));
+                }
+            });
+        }
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        if ui.button("Copy as text").clicked() {
+            let text: String = found.hits.iter().map(|h| format!("{}\tpage {}\t{}{}{}\n", h.path.display(), h.page_index + 1, h.before, h.matched, h.after)).collect();
+            ui.ctx().copy_text(text);
+        }
+        if ui.button("Close").clicked() {
+            outcome.keep_open = false;
+        }
+    });
 }
 
 /// The redaction check, place by place, with a way to save it.
@@ -555,6 +636,39 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         }
         Dialog::RedactionCheck(check) => {
             redaction_check_body(ui, check, outcome);
+            return Ok(());
+        }
+        Dialog::FolderSearch { folder, text, use_regex, match_case, whole_words, subfolders } => {
+            ui.horizontal(|ui| {
+                if ui.button("Choose folder…").clicked() {
+                    if let Some(chosen) = rfd::FileDialog::new().set_title("Folder to search").pick_folder() {
+                        *folder = Some(chosen);
+                    }
+                }
+                ui.label(folder.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "No folder chosen".into()));
+            });
+            let response = ui.add(egui::TextEdit::singleline(text).desired_width(f32::INFINITY).hint_text("Words to find"));
+            response.request_focus();
+            ui.horizontal(|ui| {
+                ui.checkbox(subfolders, "Include subfolders");
+                ui.checkbox(whole_words, "Whole words");
+                ui.checkbox(match_case, "Match case");
+                ui.checkbox(use_regex, "Regular expression");
+            });
+            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if buttons(ui, "Search", outcome) || pressed_enter {
+                let folder = folder.clone().ok_or_else(|| anyhow::anyhow!("choose a folder to search"))?;
+                if text.trim().is_empty() {
+                    anyhow::bail!("enter the words to find");
+                }
+                vellum_core::engine::search_pattern(text, *use_regex, *match_case, *whole_words)?;
+                outcome.requests.push(AppRequest::StartFolderSearch(FolderQuery { folder, text: text.clone(), use_regex: *use_regex, match_case: *match_case, whole_words: *whole_words, subfolders: *subfolders }));
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::FolderResults(results) => {
+            folder_results_body(ui, results, outcome);
             return Ok(());
         }
         Dialog::TextResult { text, .. } => {

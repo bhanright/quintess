@@ -485,6 +485,20 @@ enum Command {
         #[arg(long)]
         whole_words: bool,
     },
+    /// Search every PDF in a folder (and its subfolders).
+    SearchFolder {
+        folder: PathBuf,
+        query: String,
+        #[arg(long)]
+        regex: bool,
+        #[arg(long)]
+        match_case: bool,
+        #[arg(long)]
+        whole_words: bool,
+        /// Only the folder itself, not its subfolders.
+        #[arg(long)]
+        no_subfolders: bool,
+    },
     /// Extract the text of the document.
     Text {
         #[command(flatten)]
@@ -1057,6 +1071,23 @@ fn run(cli: Cli) -> Result<()> {
                 println!("page {:>3}  {}", found.page_index + 1, found.text.replace(['\n', '\r'], " "));
             }
             println!("{} matches", matches.len());
+        }
+        Command::SearchFolder { folder, query, regex, match_case, whole_words, no_subfolders } => {
+            let pattern = engine::search_pattern(&query, regex, match_case, whole_words)?;
+            let found = vellum_core::folder_search::search_folder(&folder, !no_subfolders, &pattern, &|_, _| {})?;
+            let mut last_file = None;
+            for hit in &found.hits {
+                if last_file != Some(&hit.path) {
+                    println!("{}", hit.path.strip_prefix(&folder).unwrap_or(&hit.path).display());
+                    last_file = Some(&hit.path);
+                }
+                println!("  page {:>3}  {}[{}]{}", hit.page_index + 1, hit.before, hit.matched, hit.after);
+            }
+            for (path, reason) in &found.skipped {
+                eprintln!("skipped {}: {reason}", path.display());
+            }
+            let files_with_hits = found.hits.iter().map(|h| &h.path).collect::<std::collections::BTreeSet<_>>().len();
+            println!("{} match{} in {} of {} files{}", found.hits.len(), if found.hits.len() == 1 { "" } else { "es" }, files_with_hits, found.files_searched, if found.stopped_early { " (stopped at the limit)" } else { "" });
         }
         Command::Text { input, output } => {
             let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;

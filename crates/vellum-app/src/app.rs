@@ -152,6 +152,17 @@ impl VellumApp {
                         }
                     }
                 }
+                "search-folder" => {
+                    // folder;words
+                    if let Some((folder, words)) = value.split_once(';') {
+                        let query = dialogs::FolderQuery { folder: PathBuf::from(folder), text: words.to_string(), use_regex: false, match_case: false, whole_words: false, subfolders: true };
+                        if let Ok(pattern) = vellum_core::engine::search_pattern(words, false, false, false) {
+                            if let Ok(found) = vellum_core::folder_search::search_folder(&query.folder, true, &pattern, &|_, _| {}) {
+                                self.dialogs.push(Dialog::FolderResults(Box::new(dialogs::FolderResults { query, found })));
+                            }
+                        }
+                    }
+                }
                 "merge-data" => {
                     self.open_form_merge();
                     let fields = self.tabs.get(self.active).map(|t| t.fields.clone()).unwrap_or_default();
@@ -438,6 +449,9 @@ impl VellumApp {
         if shortcut(Modifiers::COMMAND, Key::W) {
             self.close_tab(self.active, false);
         }
+        if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::F) {
+            self.dialogs.push(Dialog::FolderSearch { folder: None, text: String::new(), use_regex: false, match_case: false, whole_words: false, subfolders: true });
+        }
         if shortcut(Modifiers::COMMAND, Key::F) {
             self.show_sidebar = true;
             self.sidebar.page = sidebar::SidebarPage::Search;
@@ -678,6 +692,7 @@ impl VellumApp {
             JobOutcome::ShowText { title, text } => self.dialogs.push(Dialog::TextResult { title, text }),
             JobOutcome::Comparison { summary, report_path } => self.dialogs.push(Dialog::ComparisonResult { summary, report_path }),
             JobOutcome::Message(message) => self.info(message),
+            JobOutcome::FolderSearch(results) => self.dialogs.push(Dialog::FolderResults(results)),
         }
     }
 
@@ -898,6 +913,34 @@ impl VellumApp {
             self.info(format!("Added {count} form fields. Review them in the Fields panel."));
             self.show_sidebar = true;
             self.sidebar.page = sidebar::SidebarPage::Fields;
+        }
+    }
+
+    /// Shows a folder search match: switches to the file (opening it if
+    /// needed), runs the same search in it and turns to the page.
+    fn open_at_match(&mut self, path: PathBuf, page_index: usize, query: dialogs::FolderQuery) {
+        match self.tabs.iter().position(|t| t.path.as_ref() == Some(&path)) {
+            Some(index) => self.active = index,
+            None => {
+                self.open_path(path.clone());
+                if self.tabs.last().and_then(|t| t.path.as_ref()) != Some(&path) {
+                    return;
+                }
+                self.active = self.tabs.len() - 1;
+            }
+        }
+        self.show_sidebar = true;
+        self.sidebar.page = sidebar::SidebarPage::Search;
+        if let Some(tab) = self.tab() {
+            tab.search.query = query.text;
+            tab.search.use_regex = query.use_regex;
+            tab.search.match_case = query.match_case;
+            tab.search.whole_words = query.whole_words;
+            tab.run_search();
+            if let Some(index) = tab.search.results.iter().position(|r| r.page_index == page_index) {
+                tab.search.current = index;
+            }
+            viewer::go_to_page(tab, page_index);
         }
     }
 
@@ -1370,6 +1413,15 @@ impl VellumApp {
                     });
                 }
                 AppRequest::ShowRedactionCheck(check) => self.dialogs.push(Dialog::RedactionCheck(check)),
+                AppRequest::StartFolderSearch(query) => {
+                    let ctx = self.worker_context.clone();
+                    self.start_job(&ctx, "Searching the folder", move |progress| {
+                        let pattern = vellum_core::engine::search_pattern(&query.text, query.use_regex, query.match_case, query.whole_words)?;
+                        let found = vellum_core::folder_search::search_folder(&query.folder, query.subfolders, &pattern, progress)?;
+                        Ok(JobOutcome::FolderSearch(Box::new(dialogs::FolderResults { query, found })))
+                    });
+                }
+                AppRequest::OpenAtMatch { path, page_index, query } => self.open_at_match(path, page_index, query),
                 AppRequest::StartFormMerge(job) => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Filling copies", move |progress| {

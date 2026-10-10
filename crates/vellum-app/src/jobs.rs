@@ -13,6 +13,7 @@ pub enum JobOutcome {
     ShowText { title: String, text: String },
     Comparison { summary: String, report_path: std::path::PathBuf },
     Message(String),
+    FolderSearch(Box<crate::dialogs::FolderResults>),
 }
 
 pub struct Job {
