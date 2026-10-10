@@ -17,6 +17,7 @@ pub mod stamp;
 pub mod document;
 pub mod engine;
 pub mod metadata;
+pub mod ocr;
 pub mod optimize;
 pub mod pages;
 pub mod ranges;
