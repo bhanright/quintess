@@ -4,7 +4,8 @@
 //! equivalent). It is looked for, in order: the folder named by the
 //! `VELLUM_PDFIUM_DIR` environment variable, the executable's folder and its
 //! `pdfium` subfolder, a `vendor/pdfium/bin` folder above the executable or
-//! the working directory, and finally the system library path.
+//! the working directory, the repository's own `vendor/pdfium/bin`, and
+//! finally the system library path.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -66,6 +67,8 @@ fn candidate_folders() -> Vec<PathBuf> {
             cursor = folder.parent();
         }
     }
+    // The repository's own copy, for builds whose output lives elsewhere.
+    folders.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("vendor").join("pdfium").join("bin"));
     folders
 }
 

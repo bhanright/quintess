@@ -106,7 +106,10 @@ pub fn optimize(pdf: &mut Pdf, settings: &OptimizeSettings) -> Result<(Vec<u8>, 
     if settings.deduplicate {
         report.duplicate_streams_merged = deduplicate_streams(pdf);
     }
-    let bytes = pdf.to_bytes(&crate::SaveSettings { compress_streams: true, use_object_streams: true, remove_unused_objects: true })?;
+    // Object streams usually save space, but add overhead to small files; keep the smaller.
+    let packed = pdf.to_bytes(&crate::SaveSettings { compress_streams: true, use_object_streams: true, remove_unused_objects: true })?;
+    let plain = pdf.to_bytes(&crate::SaveSettings { compress_streams: true, use_object_streams: false, remove_unused_objects: true })?;
+    let bytes = if plain.len() < packed.len() { plain } else { packed };
     report.bytes_after = bytes.len();
     Ok((bytes, report))
 }

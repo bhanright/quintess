@@ -3,6 +3,8 @@
 //! Page numbers are 1-based and accept range expressions such as
 //! `1-3,5,end`, `odd`, `even` or `all,!2`.
 
+mod more;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -490,6 +492,8 @@ enum Command {
         #[arg(short, long)]
         output_folder: Option<PathBuf>,
     },
+    #[command(flatten)]
+    More(more::MoreCommand),
     /// Save every embedded image as a PNG.
     Images {
         #[command(flatten)]
@@ -1004,6 +1008,7 @@ fn run(cli: Cli) -> Result<()> {
                 println!("wrote {}", target.display());
             }
         }
+        Command::More(command) => more::run(command)?,
         Command::Images { input, min_size, output_folder } => {
             let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
             let folder = folder_or_parent(&output_folder, &input.input)?;

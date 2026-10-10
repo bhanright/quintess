@@ -81,6 +81,13 @@ pub fn analyze(document: &PdfDocument, with_images: bool) -> Result<DocumentStru
         if page_index > 0 {
             blocks.push(Block { kind: BlockKind::PageBreak, text: String::new(), page, bold: false, italic: false });
         }
+        // The usual gap between lines of one paragraph on this page; a clearly
+        // larger gap starts a new paragraph.
+        let typical_gap = {
+            let mut gaps: Vec<f32> = lines.windows(2).filter(|pair| (pair[0].font_size - pair[1].font_size).abs() < 0.6).map(|pair| pair[0].rect[1] - pair[1].rect[3]).filter(|gap| *gap > -2.0).collect();
+            gaps.sort_by(|a, b| a.total_cmp(b));
+            gaps.get(gaps.len() / 4).copied().unwrap_or(2.0)
+        };
         let mut previous: Option<&TextLine> = None;
         for line in lines {
             let text = line.text.trim().to_string();
@@ -103,7 +110,10 @@ pub fn analyze(document: &PdfDocument, with_images: bool) -> Result<DocumentStru
                     let line_height = (before.rect[3] - before.rect[1]).max(1.0);
                     // A list item only continues onto lines indented past its bullet.
                     let indented_enough = last.kind != BlockKind::ListItem || line.rect[0] > before.rect[0] + 2.0;
-                    gap < line_height * 0.9 && (before.font_size - line.font_size).abs() < 0.6 && line.rect[1] < before.rect[1] && indented_enough
+                    // Body text is set at about 1.2 to 1.4 times its size; more means a paragraph break.
+                    let baseline_step = before.rect[1] - line.rect[1];
+                    let close_enough = gap < line_height * 0.9 && gap <= typical_gap * 1.3 + 1.0 && baseline_step <= before.font_size.max(line.font_size) * 1.5;
+                    close_enough && (before.font_size - line.font_size).abs() < 0.6 && line.rect[1] < before.rect[1] && indented_enough
                 }
                 (Some(before), Some(last)) if last.page == page && matches!(kind, BlockKind::Heading(_)) && last.kind == kind => {
                     let gap = before.rect[1] - line.rect[3];
