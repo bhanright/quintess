@@ -98,9 +98,18 @@ fn describe(object: &PdfPageObject, index: usize, bounds: [f32; 4]) -> ObjectDet
                 (None, _) => "not embedded (the reader substitutes a font)".to_string(),
             };
             add("Embedding", embedding);
-            // Text editing can reuse a font only when its program is TrueType or OpenType.
-            let reusable = program.as_deref().is_some_and(|data| ttf_parser::Face::parse(data, 0).is_ok());
-            add("Reusable when editing", if reusable { "yes".into() } else { "no; a matching font stands in".into() });
+            // Editing draws with the font object itself for characters the
+            // document already shows in it; a TrueType or OpenType program can
+            // also be embedded again for new characters it holds.
+            let full_program = program.as_deref().is_some_and(|data| ttf_parser::Face::parse(data, 0).is_ok());
+            let reuse = if full_program {
+                "yes"
+            } else if embedded || font.is_built_in() {
+                "for characters the document already shows in it"
+            } else {
+                "no; a matching font stands in"
+            };
+            add("Reusable when editing", reuse.to_string());
             add("Size as drawn", format!("{:.2} pt", text.scaled_font_size().value));
             if (text.scaled_font_size().value - text.unscaled_font_size().value).abs() > 0.01 {
                 add("Size set in the file", format!("{:.2} (scaled by the drawing's transform)", text.unscaled_font_size().value));

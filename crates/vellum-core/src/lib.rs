@@ -14,6 +14,7 @@ pub mod convert;
 pub mod create;
 pub mod der;
 pub mod folder_search;
+pub mod font_reuse;
 pub mod fonts;
 pub mod form_merge;
 pub mod forms;

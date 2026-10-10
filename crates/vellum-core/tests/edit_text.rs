@@ -1,6 +1,6 @@
 //! Editing existing page text.
 
-use vellum_core::create::{TextPageSettings, markdown_to_pdf};
+use vellum_core::create::{TextPageSettings, markdown_to_pdf, text_to_pdf};
 use vellum_core::edit_text::{LineStyle, add_text, delete_line, editable_lines, find_and_replace, replace_line};
 use vellum_core::engine::{self, RenderOptions};
 use vellum_core::{Pdf, SaveSettings};
@@ -384,4 +384,23 @@ mod paragraphs {
         let after = runs(&edited);
         assert_eq!(styled(&after, |r| r.1), "due on receipt|Contact", "{after:?}");
     }
+}
+
+#[test]
+fn edits_draw_with_the_documents_own_font_object() {
+    // A check mark forces an embedded Unicode font (Type 0, Identity-H, with a ToUnicode table).
+    let bytes = text_to_pdf("Café naïve résumé ✓ done\nSecond line here.", &TextPageSettings::default()).unwrap().to_bytes(&SaveSettings::default()).unwrap();
+    let document = engine::open_document(bytes.clone(), None).unwrap();
+    let line = editable_lines(&document, 0).unwrap().into_iter().find(|l| l.text.contains("Café")).unwrap();
+    drop(document);
+    let fonts_before = Pdf::from_bytes(&bytes, None).unwrap().doc.objects.values().filter(|o| o.as_dict().is_ok_and(|d| d.has_type(b"Font"))).count();
+    // Only characters the document already shows in that font.
+    let edited = vellum_core::edit_text::replace_line(&bytes, None, &line, "résumé naïve café", &vellum_core::edit_text::LineStyle::of(&line)).unwrap();
+    let pdf = Pdf::from_bytes(&edited, None).unwrap();
+    let fonts_after = pdf.doc.objects.values().filter(|o| o.as_dict().is_ok_and(|d| d.has_type(b"Font"))).count();
+    assert!(fonts_after <= fonts_before, "no new font was embedded ({fonts_before} before, {fonts_after} after)");
+    let resources = pdf.doc.get_dictionary(pdf.page_id(1).unwrap()).unwrap().get(b"Resources").unwrap().clone();
+    let fonts = pdf.resolve(pdf.resolve(&resources).as_dict().unwrap().get(b"Font").unwrap()).as_dict().unwrap().clone();
+    assert!(fonts.iter().any(|(name, _)| name.starts_with(b"VlX")), "drawn by reference to the existing font");
+    assert!(text_of(&edited).contains("résumé naïve café"), "{}", text_of(&edited));
 }

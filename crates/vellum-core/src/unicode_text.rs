@@ -379,6 +379,8 @@ pub struct TextSetter {
     unicode: Option<UnicodeFonts>,
     /// Font resource name → font object, to add to the resources that use the text.
     pub fonts: Dictionary,
+    /// A font already in the document, drawn by reference (see `font_reuse`).
+    existing: Option<crate::font_reuse::ExistingFont>,
 }
 
 impl TextSetter {
@@ -392,7 +394,12 @@ impl TextSetter {
     pub fn new(preferred: StandardFont, embed: bool) -> Self {
         let style = style_of(preferred);
         let unicode = (embed && UnicodeFonts::available(style)).then(|| UnicodeFonts::new(style));
-        Self { standard: preferred, standard_id: None, unicode, fonts: Dictionary::new() }
+        Self { standard: preferred, standard_id: None, unicode, fonts: Dictionary::new(), existing: None }
+    }
+
+    /// A setter that draws with a font object the document already has.
+    pub fn with_existing_font(preferred: StandardFont, font: crate::font_reuse::ExistingFont) -> Self {
+        Self { standard: preferred, standard_id: None, unicode: None, fonts: Dictionary::new(), existing: Some(font) }
     }
 
     /// A setter that draws with an existing font program (for example the
@@ -407,21 +414,32 @@ impl TextSetter {
         drop(parsed);
         let mut unicode = UnicodeFonts::new(style_of(preferred));
         unicode.preferred = Some(std::sync::Arc::new(face));
-        Some(Self { standard: preferred, standard_id: None, unicode: Some(unicode), fonts: Dictionary::new() })
+        Some(Self { standard: preferred, standard_id: None, unicode: Some(unicode), fonts: Dictionary::new(), existing: None })
     }
 
     pub fn uses_embedded_fonts(&self) -> bool {
-        self.unicode.is_some()
+        self.unicode.is_some() || self.existing.is_some()
+    }
+
+    /// Draws with a font the document already had.
+    pub fn reuses_document_font(&self) -> bool {
+        self.existing.is_some()
     }
 
     /// The name of the font that draws most text: the original program, the
     /// first system font in the fallback chain, or the standard font.
     pub fn font_name(&self) -> String {
+        if let Some(existing) = &self.existing {
+            return existing.name.clone();
+        }
         let embedded = self.unicode.as_ref().and_then(|unicode| unicode.preferred.as_ref().map(|face| face.postscript_name.clone()).or_else(|| faces(unicode.style).first().map(|face| face.postscript_name.clone())));
         embedded.unwrap_or_else(|| self.standard.base_font_name().to_string())
     }
 
     pub fn width(&self, text: &str, size: f32) -> f32 {
+        if let Some(existing) = &self.existing {
+            return existing.width(text, size);
+        }
         match &self.unicode {
             Some(unicode) => unicode.measure(text) * size,
             None => self.standard.text_width(text, size),
@@ -435,6 +453,11 @@ impl TextSetter {
     /// Operators that show `text` at `size` from the current text position
     /// (use inside `BT` … `ET`, after positioning).
     pub fn show(&mut self, doc: &mut Document, text: &str, size: f32) -> String {
+        if let Some(existing) = &self.existing {
+            let name = format!("VlX{}", existing.font_id.0);
+            self.fonts.set(name.as_bytes(), existing.font_id);
+            return existing.show(&name, text, size);
+        }
         match &mut self.unicode {
             Some(unicode) => {
                 let mut operators = String::new();

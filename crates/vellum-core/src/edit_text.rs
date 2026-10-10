@@ -234,21 +234,62 @@ impl LineStyle {
 /// other operator stays byte-for-byte the same, so the rest of the page keeps
 /// its exact spacing. (Regenerating the page with PDFium would rewrite all
 /// its text and lose justification.)
-fn take_out_line(bytes: &[u8], password: Option<&str>, line: &EditableLine) -> Result<(Pdf, Option<Vec<u8>>)> {
+fn take_out_line(bytes: &[u8], password: Option<&str>, line: &EditableLine) -> Result<(Pdf, Option<OriginalFont>)> {
     take_out_lines(bytes, password, std::slice::from_ref(line))
 }
 
 /// Takes several lines of one page out at once (see [`take_out_line`]). The
 /// font program returned is that of the first line.
-fn take_out_lines(bytes: &[u8], password: Option<&str>, lines: &[EditableLine]) -> Result<(Pdf, Option<Vec<u8>>)> {
+fn take_out_lines(bytes: &[u8], password: Option<&str>, lines: &[EditableLine]) -> Result<(Pdf, Option<OriginalFont>)> {
     let first_object = lines.first().and_then(|l| l.object_indices.first().copied());
-    let (pdf, mut programs) = take_out_lines_keeping_fonts(bytes, password, lines, first_object.as_slice())?;
-    Ok((pdf, first_object.and_then(|index| programs.remove(&index))))
+    let (pdf, mut originals) = take_out_lines_keeping_fonts(bytes, password, lines, first_object.as_slice())?;
+    Ok((pdf, first_object.and_then(|index| originals.remove(&index))))
 }
 
-/// Like [`take_out_lines`], returning the embedded font program of each of
-/// `objects` (page object indices) that has one.
-fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[EditableLine], objects: &[usize]) -> Result<(Pdf, std::collections::HashMap<usize, Vec<u8>>)> {
+/// What is known about the font of some original text, for drawing new
+/// text in it.
+struct OriginalFont {
+    name: String,
+    /// The embedded program, when there is one.
+    program: Option<Vec<u8>>,
+    /// Characters the document already shows in this font, which a subset
+    /// font is sure to have glyphs for.
+    shown: std::collections::HashSet<char>,
+}
+
+/// How many pages are read for the characters each font already shows.
+const PAGES_READ_FOR_CHARACTERS: usize = 40;
+
+/// The characters each font shows, by font name without its subset tag:
+/// this page first, then the rest of the document up to a limit.
+fn characters_by_font(document: &PdfDocument, first_page: usize) -> std::collections::HashMap<String, std::collections::HashSet<char>> {
+    let mut shown: std::collections::HashMap<String, std::collections::HashSet<char>> = std::collections::HashMap::new();
+    let page_count = document.pages().len() as usize;
+    let pages = std::iter::once(first_page).chain((0..page_count).filter(|p| *p != first_page)).take(PAGES_READ_FOR_CHARACTERS);
+    for page_index in pages {
+        let Ok(text) = crate::engine::page_text(document, page_index) else { continue };
+        for character in text.chars.iter().filter(|c| !c.generated) {
+            shown.entry(crate::font_reuse::without_subset_tag(&character.font_name).to_string()).or_default().insert(character.character);
+        }
+    }
+    shown
+}
+
+/// A setter drawing `text` in an original font: the very font object when
+/// the document shows every character in it, else its program when that
+/// can be embedded again; `None` when neither can draw the text.
+fn original_setter(pdf: &mut Pdf, page_id: lopdf::ObjectId, font: &OriginalFont, preferred: StandardFont, text: &str) -> Option<TextSetter> {
+    if let Some(existing) = crate::font_reuse::ExistingFont::find(pdf, page_id, &font.name) {
+        if existing.can_draw(text, &font.shown) {
+            return Some(TextSetter::with_existing_font(preferred, existing));
+        }
+    }
+    font.program.clone().and_then(|program| TextSetter::with_font_program(preferred, program, &font.name, text))
+}
+
+/// Like [`take_out_lines`], returning the original font of each of
+/// `objects` (page object indices).
+fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[EditableLine], objects: &[usize]) -> Result<(Pdf, std::collections::HashMap<usize, OriginalFont>)> {
     let Some(line) = lines.first() else { bail!("nothing to edit") };
     let programs = {
         let document = crate::engine::open_document(bytes.to_vec(), password)?;
@@ -258,17 +299,17 @@ fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[E
                 bail!("the page changed since the text was selected; select it again");
             }
         }
+        let shown = characters_by_font(&document, line.page_index);
         let page = document.pages().get(line.page_index as i32)?;
         let mut programs = std::collections::HashMap::new();
         for &index in objects {
-            let program = page
-                .objects()
-                .get(index as PdfPageObjectIndex)
-                .ok()
-                .and_then(|object| object.as_text_object().map(|text| text.font()).filter(|font| font.is_embedded().unwrap_or(false)).and_then(|font| font.data().ok()));
-            if let Some(program) = program {
-                programs.insert(index, program);
-            }
+            let Ok(object) = page.objects().get(index as PdfPageObjectIndex) else { continue };
+            let Some(text_object) = object.as_text_object() else { continue };
+            let font = text_object.font();
+            let name = font.name();
+            let program = font.is_embedded().unwrap_or(false).then(|| font.data().ok()).flatten();
+            let shown = shown.get(crate::font_reuse::without_subset_tag(&name)).cloned().unwrap_or_default();
+            programs.insert(index, OriginalFont { name, program, shown });
         }
         programs
     };
@@ -292,7 +333,7 @@ fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[E
 }
 
 /// Draws a line of text at a text matrix with the given look.
-fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], style: &LineStyle, invisible: bool, original_font: Option<(Vec<u8>, &str)>) -> Result<()> {
+fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], style: &LineStyle, invisible: bool, original_font: Option<&OriginalFont>) -> Result<()> {
     if text.trim().is_empty() {
         return Ok(());
     }
@@ -302,7 +343,7 @@ fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], sty
     let scale = (matrix[0] * matrix[0] + matrix[1] * matrix[1]).sqrt().max(0.0001);
     let unit = [matrix[0] / scale, matrix[1] / scale, matrix[2] / scale, matrix[3] / scale];
     // The original font when it can draw the new text; otherwise a matching one.
-    let mut setter = original_font.and_then(|(program, name)| TextSetter::with_font_program(style.font, program, name, text)).unwrap_or_else(|| TextSetter::for_texts(style.font, [text]));
+    let mut setter = original_font.and_then(|font| original_setter(pdf, page_id, font, style.font, text)).unwrap_or_else(|| TextSetter::for_texts(style.font, [text]));
     let [red, green, blue] = style.color;
     let mut content = format!(
         "q BT {} {} {} {} rg {} {} {} {} {} {} Tm ",
@@ -329,8 +370,8 @@ pub fn replace_line(bytes: &[u8], password: Option<&str>, line: &EditableLine, n
     let (mut pdf, original_font) = take_out_line(bytes, password, line)?;
     // Reuse the original font only while the person keeps the line's style.
     let keep_font = style.font == line.matching_font();
-    let original = original_font.filter(|_| keep_font).map(|program| (program, line.font_name.as_str()));
-    draw_line(&mut pdf, line.page_index, new_text.trim_end(), line.matrix, style, line.invisible, original)?;
+    let original = original_font.filter(|_| keep_font);
+    draw_line(&mut pdf, line.page_index, new_text.trim_end(), line.matrix, style, line.invisible, original.as_ref())?;
     pdf.to_bytes(&crate::SaveSettings::default())
 }
 
@@ -690,7 +731,7 @@ fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], 
 /// of that style's characters, otherwise the closest system or standard font.
 /// Returns the setters (by palette index) and the fonts standing in for
 /// originals that could not be reused.
-fn setters_for(rich: &RichText, programs: &std::collections::HashMap<usize, Vec<u8>>) -> (Vec<Option<TextSetter>>, Vec<FontStandIn>) {
+fn setters_for(pdf: &mut Pdf, page_id: lopdf::ObjectId, rich: &RichText, originals: &std::collections::HashMap<usize, OriginalFont>) -> (Vec<Option<TextSetter>>, Vec<FontStandIn>) {
     let mut stand_ins: Vec<FontStandIn> = Vec::new();
     let setters = (0..rich.palette.len())
         .map(|index| {
@@ -699,7 +740,7 @@ fn setters_for(rich: &RichText, programs: &std::collections::HashMap<usize, Vec<
                 return None;
             }
             let style = &rich.palette[index];
-            let original = style.sample_object.and_then(|object| programs.get(&object)).and_then(|program| TextSetter::with_font_program(style.standard_font(), program.clone(), &style.font_name, &text));
+            let original = style.sample_object.and_then(|object| originals.get(&object)).and_then(|font| original_setter(pdf, page_id, font, style.standard_font(), &text));
             let setter = original.unwrap_or_else(|| {
                 let stand_in = TextSetter::for_texts(style.standard_font(), [text.as_str()]);
                 // A standard font that was never embedded, drawn again as itself, is no substitution.
@@ -777,9 +818,10 @@ pub fn replace_paragraph_rich(bytes: &[u8], password: Option<&str>, paragraph: &
 
 fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &EditableParagraph, rich: &RichText, style: &ParagraphStyle) -> Result<(Vec<u8>, ParagraphReport)> {
     let objects: Vec<usize> = rich.palette.iter().filter_map(|s| s.sample_object).collect();
-    let (mut pdf, programs) = take_out_lines_keeping_fonts(bytes, password, &paragraph.lines, &objects)?;
+    let (mut pdf, originals) = take_out_lines_keeping_fonts(bytes, password, &paragraph.lines, &objects)?;
+    let page_id = pdf.page_id(paragraph.page_index as u32 + 1)?;
     let first = paragraph.first();
-    let (setters, stand_ins) = setters_for(rich, &programs);
+    let (setters, stand_ins) = setters_for(&mut pdf, page_id, rich, &originals);
     let indent = paragraph.first_line_indent;
     let before = paragraph.lines.len();
     // The style bar's size scales every run, keeping their proportions.
