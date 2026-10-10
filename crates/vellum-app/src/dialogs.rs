@@ -40,8 +40,12 @@ pub enum AppRequest {
     StartPrint(vellum_core::print::PrintSettings),
     StartFindReplace { pattern: regex::Regex, replacement: String },
     StartFormMerge(FormMergeJob),
+    /// Show another dialog (on top of the one asking).
+    OpenDialog(Box<Dialog>),
     ShowRedactionCheck(vellum_core::redaction_check::RedactionCheck),
     StartFolderSearch(FolderQuery),
+    /// Turn to a page and outline a box there (display points from the top left).
+    ShowOnPage { page_index: usize, display_rect: [f32; 4] },
     StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf> },
     /// A step just applied, for the action being recorded (ignored otherwise).
     Record(vellum_core::batch::Step),
@@ -145,6 +149,8 @@ pub enum Dialog {
     RedactionCheck(vellum_core::redaction_check::RedactionCheck),
     FolderSearch { folder: Option<PathBuf>, text: String, use_regex: bool, match_case: bool, whole_words: bool, subfolders: bool },
     FolderResults(Box<FolderResults>),
+    QrCode(vellum_core::qr::FoundCode),
+    QrResults(Vec<vellum_core::qr::FoundCode>),
     Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
     CheckForText { texts: String },
 }
@@ -221,6 +227,8 @@ impl Dialog {
             Dialog::RedactionCheck(_) => "Redaction check",
             Dialog::FolderSearch { .. } => "Search a folder",
             Dialog::FolderResults(_) => "Folder search results",
+            Dialog::QrCode(code) => code.kind.describe(),
+            Dialog::QrResults(_) => "QR codes",
             Dialog::Watch { .. } => "Watch a folder",
             Dialog::CheckForText { .. } => "Check for leftover text",
         };
@@ -328,6 +336,105 @@ pub fn show(ctx: &egui::Context, dialog: &mut Dialog, tab: Option<&mut DocumentT
         outcome.keep_open = false;
     }
     outcome
+}
+
+/// A QR code's contents, sorted by kind, with what can be done with it:
+/// links open only after their real destination is shown, and anything
+/// else can be copied (or saved, for a contact card).
+fn qr_code_body(ui: &mut egui::Ui, code: &vellum_core::qr::FoundCode, outcome: &mut DialogOutcome) {
+    use vellum_core::qr::CodeKind;
+    ui.set_min_width(440.0);
+    let colors = crate::theme::palette(ui.ctx());
+    ui.weak(format!("Found on page {}", code.page_index + 1));
+    ui.add_space(4.0);
+    let field = |ui: &mut egui::Ui, name: &str, value: &str| {
+        ui.horizontal(|ui| {
+            ui.weak(format!("{name}:"));
+            ui.add(egui::Label::new(egui::RichText::new(value).strong()).selectable(true));
+            if !value.is_empty() && ui.small_button("Copy").clicked() {
+                ui.ctx().copy_text(value.to_string());
+            }
+        });
+    };
+    // What opening means for this kind, if anything.
+    let mut open_target: Option<String> = None;
+    match &code.kind {
+        CodeKind::WebAddress { url } => {
+            let (host, warnings) = vellum_core::qr::link_warnings(url);
+            ui.label("Opens this site in your browser:");
+            ui.label(egui::RichText::new(&host).size(18.0).strong());
+            ui.add(egui::Label::new(egui::RichText::new(url).monospace()).selectable(true).wrap());
+            for warning in &warnings {
+                ui.colored_label(colors.warning, format!("⚠ {warning}"));
+            }
+            open_target = Some(url.clone());
+        }
+        CodeKind::Email { address, subject, body } => {
+            field(ui, "To", address);
+            field(ui, "Subject", subject);
+            if !body.is_empty() {
+                field(ui, "Message", body);
+            }
+            open_target = Some(if code.content.to_ascii_lowercase().starts_with("mailto:") { code.content.clone() } else { format!("mailto:{address}") });
+        }
+        CodeKind::Phone { number } => {
+            field(ui, "Number", number);
+            open_target = Some(format!("tel:{number}"));
+        }
+        CodeKind::TextMessage { number, message } => {
+            field(ui, "To", number);
+            field(ui, "Message", message);
+        }
+        CodeKind::Wifi { network, security, password, hidden } => {
+            field(ui, "Network", network);
+            field(ui, "Security", if security.is_empty() { "none" } else { security });
+            field(ui, "Password", password);
+            if *hidden {
+                ui.weak("The network is hidden, so you may need to type its name.");
+            }
+        }
+        CodeKind::Location { latitude, longitude } => {
+            field(ui, "Latitude", latitude);
+            field(ui, "Longitude", longitude);
+            open_target = Some(format!("https://www.openstreetmap.org/?mlat={latitude}&mlon={longitude}#map=16/{latitude}/{longitude}"));
+        }
+        CodeKind::Contact | CodeKind::Text => {}
+    }
+    ui.add_space(6.0);
+    egui::CollapsingHeader::new("Everything the code holds").default_open(matches!(code.kind, CodeKind::Contact | CodeKind::Text)).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(&code.content).monospace()).selectable(true).wrap());
+        });
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        if let Some(target) = &open_target {
+            let label = match code.kind {
+                CodeKind::WebAddress { .. } => "Open in browser",
+                CodeKind::Email { .. } => "Write email",
+                CodeKind::Phone { .. } => "Call",
+                _ => "Open map",
+            };
+            if crate::theme::primary_button(ui, label).clicked() {
+                outcome.requests.push(AppRequest::OpenUrlConfirmed(target.clone()));
+                outcome.keep_open = false;
+            }
+        }
+        if ui.button("Copy all").clicked() {
+            ui.ctx().copy_text(code.content.clone());
+        }
+        if matches!(code.kind, CodeKind::Contact) && code.content.to_ascii_lowercase().starts_with("begin:vcard") && ui.button("Save contact…").clicked() {
+            if let Some(path) = rfd::FileDialog::new().add_filter("Contact", &["vcf"]).set_file_name("contact.vcf").save_file() {
+                let _ = std::fs::write(path, code.content.as_bytes());
+            }
+        }
+        if ui.button("Show on page").clicked() {
+            outcome.requests.push(AppRequest::ShowOnPage { page_index: code.page_index, display_rect: code.display_rect });
+        }
+        if ui.button("Close").clicked() {
+            outcome.keep_open = false;
+        }
+    });
 }
 
 /// Matches grouped by file; clicking one opens that file at the page.
@@ -730,6 +837,37 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         }
         Dialog::FolderResults(results) => {
             folder_results_body(ui, results, outcome);
+            return Ok(());
+        }
+        Dialog::QrCode(code) => {
+            qr_code_body(ui, code, outcome);
+            return Ok(());
+        }
+        Dialog::QrResults(codes) => {
+            ui.set_min_width(460.0);
+            ui.label(format!("{} QR code{} in this document. Each is outlined on its page; click it there to open it.", codes.len(), if codes.len() == 1 { "" } else { "s" }));
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                egui::Grid::new("qr results").num_columns(4).striped(true).show(ui, |ui| {
+                    for code in codes.iter() {
+                        ui.weak(format!("p. {}", code.page_index + 1));
+                        ui.label(code.kind.describe());
+                        let preview: String = code.content.chars().take(48).collect();
+                        ui.add(egui::Label::new(preview.replace('\n', " ")).truncate());
+                        ui.horizontal(|ui| {
+                            if ui.small_button("Show").clicked() {
+                                outcome.requests.push(AppRequest::ShowOnPage { page_index: code.page_index, display_rect: code.display_rect });
+                            }
+                            if ui.small_button("Details").clicked() {
+                                outcome.requests.push(AppRequest::OpenDialog(Box::new(Dialog::QrCode(code.clone()))));
+                            }
+                        });
+                        ui.end_row();
+                    }
+                });
+            });
+            if ui.button("Close").clicked() {
+                outcome.keep_open = false;
+            }
             return Ok(());
         }
         Dialog::TextResult { text, .. } => {

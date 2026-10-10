@@ -31,9 +31,11 @@ csv = "1.4.0"
 calamine = { version = "0.36.1", features = ["chrono"] }
 rustybuzz = "0.20.1"
 unicode-bidi = "0.3.18"
+rqrr = "0.11.0"
 
 [dev-dependencies]
 image = "0.25"
+qrcode = "0.14.1"
 regex = "1"
 rust_xlsxwriter = "0.99.1"
 

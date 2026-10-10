@@ -150,6 +150,13 @@ saves a picture of the window and exits (setup options are documented on
   a landing-style welcome screen. "Classic" keeps the original menu bar and
   toolbar. Chosen in Preferences or View, stored in the settings. Overlay
   outlines use `theme::highlight()`.
+- QR codes (`qr.rs`, rqrr): pages are rendered at 200 DPI (400 when
+  nothing is found) and scanned; each code is sorted as a web address,
+  email, phone, text message, Wi-Fi login, contact card, map location or
+  text. Tools ▸ Find QR codes outlines them on the page; clicking one shows
+  its contents, warnings for suspicious links (user name before "@", bare
+  number address, look-alike letters, plain http), and Open / Copy / Save
+  contact. CLI: `vellum qr file.pdf [--json]`.
 - Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).

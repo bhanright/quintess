@@ -111,6 +111,8 @@ pub struct DocumentTab {
     pub selected_annotation: Option<(u32, u16)>,
     /// A box outlined on a page (the inspector's chosen object).
     pub highlight: Option<(usize, [f32; 4])>,
+    /// QR codes found by the last scan, and the document version scanned.
+    pub qr_codes: Option<(u64, Vec<vellum_core::qr::FoundCode>)>,
     /// Pages chosen in the organizer, by index.
     pub organizer_selection: std::collections::BTreeSet<usize>,
     pub error: Option<String>,
@@ -163,6 +165,7 @@ impl DocumentTab {
             selection: None,
             selected_annotation: None,
             highlight: None,
+            qr_codes: None,
             organizer_selection: Default::default(),
             error: None,
             protection: None,
@@ -361,6 +364,14 @@ impl DocumentTab {
         let (start, end) = if selection.anchor <= selection.focus { (selection.anchor, selection.focus) } else { (selection.focus, selection.anchor) };
         let indices: Vec<usize> = (start..=end.min(text.chars.len().saturating_sub(1))).collect();
         text.line_rects(&indices)
+    }
+
+    /// The QR codes found for the document as it is now.
+    pub fn current_qr_codes(&self) -> &[vellum_core::qr::FoundCode] {
+        match &self.qr_codes {
+            Some((version, codes)) if *version == self.version => codes,
+            _ => &[],
+        }
     }
 
     pub fn display_title(&self) -> String {

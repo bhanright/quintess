@@ -189,6 +189,21 @@ impl VellumApp {
                     }
                 }
                 "palette" => self.open_palette_with(value),
+                "qr" => {
+                    // Scans now, without a background job, for the screenshot.
+                    if let Some(tab) = self.tabs.get_mut(self.active) {
+                        if let Ok(document) = vellum_core::engine::open_document(tab.bytes.to_vec(), tab.password.as_deref()) {
+                            if let Ok(codes) = vellum_core::qr::find_in_document(&document, &|_, _| {}) {
+                                tab.qr_codes = Some((tab.version, codes.clone()));
+                                if value == "details" {
+                                    if let Some(first) = codes.first() {
+                                        self.dialogs.push(Dialog::QrCode(first.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 "watch" => {
                     // folder;action
                     if let Some((folder, action)) = value.split_once(';') {
@@ -740,6 +755,19 @@ impl VellumApp {
             JobOutcome::Comparison { summary, report_path } => self.dialogs.push(Dialog::ComparisonResult { summary, report_path }),
             JobOutcome::Message(message) => self.info(message),
             JobOutcome::FolderSearch(results) => self.dialogs.push(Dialog::FolderResults(results)),
+            JobOutcome::QrCodes { tab_id, version, codes } => {
+                let count = codes.len();
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    tab.qr_codes = Some((version, codes.clone()));
+                }
+                match count {
+                    0 => self.info("No QR codes found in this document."),
+                    _ => {
+                        self.info(format!("Found {count} QR code{}. Click one on the page to open it.", if count == 1 { "" } else { "s" }));
+                        self.dialogs.push(Dialog::QrResults(codes));
+                    }
+                }
+            }
         }
     }
 
@@ -1011,6 +1039,17 @@ impl VellumApp {
             }
             viewer::go_to_page(tab, page_index);
         }
+    }
+
+    /// Scans every page for QR codes in the background.
+    fn start_qr_scan(&mut self, ctx: &egui::Context) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let (tab_id, version, bytes, password) = (tab.id, tab.version, tab.bytes.clone(), tab.password.clone());
+        self.start_job(ctx, "Looking for QR codes", move |progress| {
+            let document = vellum_core::engine::open_document(bytes.to_vec(), password.as_deref())?;
+            let codes = vellum_core::qr::find_in_document(&document, progress)?;
+            Ok(JobOutcome::QrCodes { tab_id, version, codes })
+        });
     }
 
     fn open_form_merge(&mut self) {
@@ -1389,6 +1428,7 @@ impl VellumApp {
                 ViewerAction::DeleteParagraph(paragraph) => self.edit_page_text("Delete paragraph", |bytes, password| vellum_core::edit_text::delete_paragraph(bytes, password, &paragraph)),
                 ViewerAction::AddPageText { page, x, y, text, style } => self.edit("Add text", |pdf| vellum_core::edit_text::add_text(pdf, page as usize - 1, x, y, &text, &style)),
                 ViewerAction::Inspect { page_index, x, y } => self.inspect_at(page_index, x, y),
+                ViewerAction::ShowCode(code) => self.dialogs.push(Dialog::QrCode(code)),
                 ViewerAction::GoToPage(index) => {
                     if let Some(tab) = self.tab() {
                         viewer::go_to_page(tab, index);
@@ -1450,7 +1490,7 @@ impl VellumApp {
                     }
                 }
                 AppRequest::OpenUrlConfirmed(url) => {
-                    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+                    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") || url.starts_with("tel:") {
                         // `explorer` hands the address to the default browser without a shell.
                         let _ = std::process::Command::new("explorer").arg(&url).spawn();
                     } else {
@@ -1487,6 +1527,17 @@ impl VellumApp {
                 }
                 AppRequest::ShowRedactionCheck(check) => self.dialogs.push(Dialog::RedactionCheck(check)),
                 AppRequest::Record(step) => self.record(step),
+                AppRequest::OpenDialog(dialog) => self.dialogs.push(*dialog),
+                AppRequest::ShowOnPage { page_index, display_rect } => {
+                    if let Some(tab) = self.tab() {
+                        if let Some(geometry) = tab.pages.get(page_index) {
+                            let a = geometry.top_left_to_page(display_rect[0], display_rect[1]);
+                            let b = geometry.top_left_to_page(display_rect[2], display_rect[3]);
+                            tab.highlight = Some((page_index, [a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)]));
+                        }
+                        viewer::go_to_page(tab, page_index);
+                    }
+                }
                 AppRequest::StartWatch { folder, action, output } => self.start_watch(folder, action, output),
                 AppRequest::StartFolderSearch(query) => {
                     let ctx = self.worker_context.clone();

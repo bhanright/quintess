@@ -32,6 +32,7 @@ pub mod pages;
 pub mod preflight;
 #[cfg(windows)]
 pub mod print;
+pub mod qr;
 pub mod ranges;
 pub mod redact;
 pub mod redaction_check;

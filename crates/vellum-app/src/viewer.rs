@@ -108,6 +108,8 @@ impl Default for ToolSettings {
 
 /// Edits the viewer asks the app to make.
 pub enum ViewerAction {
+    /// Show a QR code's contents and what can be done with it.
+    ShowCode(vellum_core::qr::FoundCode),
     /// Show what is drawn at a point (the Inspect tool).
     Inspect { page_index: usize, x: f32, y: f32 },
     AddAnnotation { page: u32, annotation: NewAnnotation },
@@ -531,6 +533,16 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
             }
         }
     }
+    // QR codes found by a scan, each outlined with a small tag.
+    for code in tab.current_qr_codes().iter().filter(|c| c.page_index == page_index) {
+        let [left, top, right, bottom] = code.display_rect;
+        let shown = Rect::from_min_max(page_rect.min + vec2(left, top) * zoom, page_rect.min + vec2(right, bottom) * zoom).expand(3.0);
+        painter.rect_stroke(shown, 4.0, Stroke::new(2.0, crate::theme::highlight()), StrokeKind::Outside);
+        let tag = painter.layout_no_wrap("QR · click to open".to_string(), egui::FontId::proportional(11.0), Color32::WHITE);
+        let tag_rect = Rect::from_min_size(shown.left_bottom() + vec2(0.0, 4.0), tag.size() + vec2(10.0, 4.0));
+        painter.rect_filled(tag_rect, 4.0, crate::theme::highlight());
+        painter.galley(tag_rect.min + vec2(5.0, 2.0), tag, Color32::WHITE);
+    }
     if let Some((page, rect)) = tab.highlight {
         if page == page_index {
             painter.rect_stroke(screen_rect_of(geometry, page_rect, zoom, rect).expand(1.5), 1.0, Stroke::new(2.0, Color32::from_rgb(255, 120, 0)), StrokeKind::Outside);
@@ -845,6 +857,20 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
     }
 }
 
+/// The QR code under a point (page space) on a page, if a scan found one there.
+fn code_at(tab: &DocumentTab, page_index: usize, point: (f32, f32)) -> Option<vellum_core::qr::FoundCode> {
+    let geometry = tab.pages.get(page_index)?;
+    tab.current_qr_codes().iter().find(|code| {
+        if code.page_index != page_index {
+            return false;
+        }
+        let [left, top, right, bottom] = code.display_rect;
+        let corners = [geometry.top_left_to_page(left, top), geometry.top_left_to_page(right, bottom)];
+        let rect = [corners[0].0.min(corners[1].0), corners[0].1.min(corners[1].1), corners[0].0.max(corners[1].0), corners[0].1.max(corners[1].1)];
+        inside(rect, point)
+    }).cloned()
+}
+
 fn inside(rect: [f32; 4], (x, y): (f32, f32)) -> bool {
     x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]
 }
@@ -853,6 +879,11 @@ fn click(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &
     let page = page_index as u32 + 1;
     match tool {
         Tool::Inspect => actions.push(ViewerAction::Inspect { page_index, x: point.0, y: point.1 }),
+        Tool::Select | Tool::Hand if code_at(tab, page_index, point).is_some() => {
+            if let Some(code) = code_at(tab, page_index, point) {
+                actions.push(ViewerAction::ShowCode(code));
+            }
+        }
         Tool::Select => {
             tab.selection = None;
             // Form fields first: they sit above the page.

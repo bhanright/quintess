@@ -193,6 +193,7 @@ pub(super) const COMMANDS: &[Command] = &[
         .hint("Find words in every PDF in a folder")
         .always(),
     command("Tools", "Inspect objects", |app, _| app.tool = Tool::Inspect).hint("Click the page to see what is drawn there: fonts, sizes, colors, image details"),
+    command("Tools", "Find QR codes", |app, ctx| app.start_qr_scan(ctx)).hint("Read the QR codes printed on the pages, to open or copy what they hold"),
     command("Tools", "Recognize text (OCR)", |app, ctx| {
         app.start_ocr(ctx);
         app.record(Step::Ocr { dpi: None });

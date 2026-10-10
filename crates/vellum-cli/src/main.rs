@@ -499,6 +499,14 @@ enum Command {
         #[arg(long, default_value_t = 2.0)]
         interval: f32,
     },
+    /// Find and read the QR codes printed on the pages.
+    Qr {
+        #[command(flatten)]
+        input: Input,
+        /// Print the results as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Search every PDF in a folder (and its subfolders).
     SearchFolder {
         folder: PathBuf,
@@ -1112,6 +1120,18 @@ fn run(cli: Cli) -> Result<()> {
                     }
                 }
                 std::thread::sleep(std::time::Duration::from_secs_f32(interval.max(0.2)));
+            }
+        }
+        Command::Qr { input, json } => {
+            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let codes = vellum_core::qr::find_in_document(&document, &|_, _| {})?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&codes)?);
+            } else {
+                for code in &codes {
+                    println!("page {:>3}  {:<14} {}", code.page_index + 1, code.kind.describe(), code.content.replace(['\n', '\r'], " "));
+                }
+                println!("{} QR code{} found", codes.len(), if codes.len() == 1 { "" } else { "s" });
             }
         }
         Command::SearchFolder { folder, query, regex, match_case, whole_words, no_subfolders } => {

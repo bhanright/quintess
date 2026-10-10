@@ -14,6 +14,7 @@ pub enum JobOutcome {
     Comparison { summary: String, report_path: std::path::PathBuf },
     Message(String),
     FolderSearch(Box<crate::dialogs::FolderResults>),
+    QrCodes { tab_id: u64, version: u64, codes: Vec<vellum_core::qr::FoundCode> },
 }
 
 pub struct Job {
