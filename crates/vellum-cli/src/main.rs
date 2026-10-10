@@ -454,8 +454,24 @@ enum Command {
         /// List what would be redacted without changing anything.
         #[arg(long)]
         dry_run: bool,
+        /// Save the check of the result (what was searched and where) to this file.
+        #[arg(long)]
+        report: Option<PathBuf>,
         #[command(flatten)]
         output: Output,
+    },
+    /// Check a file for text that should have been redacted: page text,
+    /// properties, comments, fields, bookmarks, attachments, hidden entries
+    /// and earlier versions kept inside the file.
+    CheckRedaction {
+        #[command(flatten)]
+        input: Input,
+        /// A word or phrase that must not appear; repeat for several.
+        #[arg(long, required = true)]
+        text: Vec<String>,
+        /// Also save the report to this file.
+        #[arg(long)]
+        report: Option<PathBuf>,
     },
     /// Find text, printing each match with its page.
     Search {
@@ -652,6 +668,21 @@ fn main() {
         }
         Err(_) => std::process::exit(101),
     }
+}
+
+/// Prints the redaction check (in full unless all clear) and saves it when asked.
+fn print_redaction_check(check: &vellum_core::redaction_check::RedactionCheck, report: Option<&Path>) -> Result<()> {
+    let text = check.to_text();
+    if check.verdict() == vellum_core::redaction_check::Verdict::Clear {
+        println!("redaction check: nothing redacted was found anywhere in the file");
+    } else {
+        println!("{text}");
+    }
+    if let Some(path) = report {
+        std::fs::write(path, &text)?;
+        println!("wrote {}", path.display());
+    }
+    Ok(())
 }
 
 fn open(input: &Input) -> Result<Pdf> {
@@ -969,7 +1000,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Form { action } => form(action)?,
-        Command::Redact { input, pattern, text, sensitive, marked, label, strip_metadata, dry_run, output } => {
+        Command::Redact { input, pattern, text, sensitive, marked, label, strip_metadata, dry_run, report: report_path, output } => {
             let mut patterns: Vec<regex::Regex> = pattern.iter().map(|p| regex::Regex::new(p)).collect::<Result<_, _>>()?;
             for phrase in &text {
                 patterns.push(engine::search_pattern(phrase, false, false, false)?);
@@ -998,9 +1029,25 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{} areas", areas.len());
                 return Ok(());
             }
-            let report = redact::apply_redactions(&mut pdf, &areas, &RedactionSettings { overlay_text: label, remove_metadata: strip_metadata, ..Default::default() })?;
+            // What lies under the boxes now, to look for everywhere afterwards.
+            let texts = {
+                let document = engine::open_document(bytes.clone(), input.password.as_deref())?;
+                vellum_core::redaction_check::redacted_texts(&document, &areas)?
+            };
+            let report = redact::apply_redactions(&mut pdf, &areas, &RedactionSettings { overlay_text: label.clone(), remove_metadata: strip_metadata, ..Default::default() })?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             save(&mut pdf, &input.input, &output)?;
+            let saved = std::fs::read(output.output.as_ref().unwrap_or(&input.input))?;
+            let check = vellum_core::redaction_check::check_redaction(&saved, input.password.as_deref(), &areas, &texts, &label)?;
+            print_redaction_check(&check, report_path.as_deref())?;
+        }
+        Command::CheckRedaction { input, text, report } => {
+            let bytes = std::fs::read(&input.input)?;
+            let check = vellum_core::redaction_check::check_redaction(&bytes, input.password.as_deref(), &[], &text, "")?;
+            print_redaction_check(&check, report.as_deref())?;
+            if check.verdict() == vellum_core::redaction_check::Verdict::Found {
+                std::process::exit(2);
+            }
         }
         Command::Search { input, query, regex, match_case, whole_words } => {
             let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;

@@ -236,7 +236,7 @@ pub fn shift_content(pdf: &mut Pdf, page_number: u32, region: [f32; 4], offset: 
     Ok((moved, lowest))
 }
 
-fn glyph_is_covered(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
+pub(crate) fn glyph_is_covered(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
     let center = ((glyph[0] + glyph[2]) / 2.0, (glyph[1] + glyph[3]) / 2.0);
     let glyph_area = ((glyph[2] - glyph[0]) * (glyph[3] - glyph[1])).max(0.0001);
     areas.iter().any(|area| {

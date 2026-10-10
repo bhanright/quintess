@@ -131,6 +131,14 @@ impl VellumApp {
                         viewer::set_text_being_edited(self.viewer_states.entry(tab.id).or_default(), text, key == "show-result");
                     }
                 }
+                "check-text" => {
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        let wanted: Vec<String> = value.split(';').map(String::from).collect();
+                        if let Ok(check) = vellum_core::redaction_check::check_redaction(&tab.bytes, tab.password.as_deref(), &[], &wanted, "") {
+                            self.dialogs.push(Dialog::RedactionCheck(check));
+                        }
+                    }
+                }
                 "merge-data" => {
                     self.open_form_merge();
                     let fields = self.tabs.get(self.active).map(|t| t.fields.clone()).unwrap_or_default();
@@ -927,6 +935,9 @@ impl VellumApp {
             if ui.button("Find and redact…").clicked() {
                 self.dialogs.push(Dialog::redact());
             }
+            if ui.button("Check for leftover text…").on_hover_text("Search every part of the file for words that should be gone").clicked() {
+                self.dialogs.push(Dialog::CheckForText { texts: String::new() });
+            }
         });
         ui.menu_button("Protect", |ui| {
             if ui.button("Protect with password…").clicked() {
@@ -1579,6 +1590,7 @@ impl VellumApp {
                         Ok(JobOutcome::ShowText { title: "Action results".into(), text })
                     });
                 }
+                AppRequest::ShowRedactionCheck(check) => self.dialogs.push(Dialog::RedactionCheck(check)),
                 AppRequest::StartFormMerge(job) => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Filling copies", move |progress| {

@@ -71,6 +71,29 @@ saves a picture of the window and exits (setup options are documented on
   possible. The app's paragraph editor shows the styles and applies B, I,
   color and family to the selection. Standard-font width tables are checked
   against PDFium's rendering (`standard_font_widths_match_the_renderer`).
+- Edit preview: while a paragraph is being edited, the edit is worked out
+  in the background after a pause in typing (`update_preview` in
+  `viewer.rs`). The page shows the paragraph's new extent, the column content
+  that moves down and where it lands, what it would overlap, and the footer
+  zone when that stopped the push; the style bar names each font standing in
+  for an original (`ParagraphReport::stand_ins`). "Result" shows the finished
+  page; applying reuses the preview's bytes when they match the edit.
+- Filling a form from a spreadsheet (`form_merge.rs`): one copy per row of a
+  CSV, Excel/OpenDocument (first sheet, via calamine) or JSON table. Columns
+  match fields by exact name, then ignoring case and punctuation, then by
+  tooltip; the app lets each column be reassigned. File names come from a
+  pattern (`{Column}`, `{row}`); copies can be flattened or combined into one
+  PDF with a bookmark each. Values a field can't take and empty required
+  fields are reported per row. CLI: `vellum form merge`.
+- Redaction check (`redaction_check.rs`): after redacting, the saved file is
+  searched for the text that was under the boxes: under the boxes, elsewhere
+  on the pages, properties and XMP, annotations (including their
+  appearances), form fields, bookmarks, attachments (PDF and text files are
+  read; other kinds are listed as not checked), every other string and data
+  stream (tags' alternate text, scripts), and earlier versions kept by
+  incremental saves (each opened on its own). Also runs on any file for given
+  words (Redact ▸ Check for leftover text; `vellum check-redaction`, exit code
+  2 when found). `vellum redact --report` saves it.
 - Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).
@@ -81,6 +104,12 @@ saves a picture of the window and exits (setup options are documented on
   Print dialog (Ctrl+P), Edit text tool with a style bar, find and replace (Ctrl+H).
 
 ## Ideas for next
+
+The ChatGPT feature list William shared on 2026-10-10 was reviewed; the
+three picks above came from it. Still worth doing from it: record app
+actions into a batch, a watched folder that runs a batch, reading position
+per file, split view, a command palette, search across a folder, and an
+object inspector.
 
 1. Reusing bare CFF fonts (InDesign's usual embedding) when editing text.
 2. Underline and strikethrough as character styles (drawn as lines).

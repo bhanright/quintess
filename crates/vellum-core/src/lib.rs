@@ -30,6 +30,7 @@ pub mod preflight;
 pub mod print;
 pub mod ranges;
 pub mod redact;
+pub mod redaction_check;
 pub mod rich_text;
 pub mod security;
 pub mod settings;

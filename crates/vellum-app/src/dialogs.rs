@@ -39,6 +39,7 @@ pub enum AppRequest {
     StartPrint(vellum_core::print::PrintSettings),
     StartFindReplace { pattern: regex::Regex, replacement: String },
     StartFormMerge(FormMergeJob),
+    ShowRedactionCheck(vellum_core::redaction_check::RedactionCheck),
 }
 
 /// Everything a spreadsheet fill needs, handed to a background job.
@@ -116,6 +117,8 @@ pub enum Dialog {
     Print(PrintDialog),
     FindReplace { find: String, replace: String, use_regex: bool, match_case: bool },
     FormMerge(Box<FormMergeDialog>),
+    RedactionCheck(vellum_core::redaction_check::RedactionCheck),
+    CheckForText { texts: String },
 }
 
 /// Choices in the Print dialog.
@@ -187,6 +190,8 @@ impl Dialog {
             Dialog::Print(_) => "Print",
             Dialog::FindReplace { .. } => "Find and replace text",
             Dialog::FormMerge(_) => "Fill from spreadsheet",
+            Dialog::RedactionCheck(_) => "Redaction check",
+            Dialog::CheckForText { .. } => "Check for leftover text",
         };
         title.to_string()
     }
@@ -292,6 +297,67 @@ pub fn show(ctx: &egui::Context, dialog: &mut Dialog, tab: Option<&mut DocumentT
         outcome.keep_open = false;
     }
     outcome
+}
+
+/// The redaction check, place by place, with a way to save it.
+fn redaction_check_body(ui: &mut egui::Ui, check: &vellum_core::redaction_check::RedactionCheck, outcome: &mut DialogOutcome) {
+    use vellum_core::redaction_check::Verdict;
+    let green = egui::Color32::from_rgb(40, 150, 70);
+    let amber = egui::Color32::from_rgb(200, 130, 20);
+    let red = egui::Color32::from_rgb(200, 50, 50);
+    ui.set_min_width(560.0);
+    let (headline, color) = match check.verdict() {
+        Verdict::Clear => ("Nothing redacted was found anywhere in the file.", green),
+        Verdict::Review => ("No redacted text survives in the file, but some items need a look.", amber),
+        _ => ("Text that should be gone is still in the file.", red),
+    };
+    ui.colored_label(color, RichText::new(headline).strong());
+    if check.texts.is_empty() {
+        ui.weak("The boxes covered no text, so only the areas themselves were checked.");
+    } else {
+        let shown: Vec<String> = check.texts.iter().take(6).map(|t| format!("\"{t}\"")).collect();
+        ui.weak(format!("Searched for {}{}.", shown.join(", "), if check.texts.len() > 6 { format!(" and {} more", check.texts.len() - 6) } else { String::new() }));
+    }
+    ui.add_space(4.0);
+    let height = ui.ctx().content_rect().height() * 0.6;
+    egui::ScrollArea::vertical().max_height(height).show(ui, |ui| {
+        for place in &check.places {
+            let (mark, color) = match place.verdict {
+                Verdict::Clear => ("✔", green),
+                Verdict::NotChecked => ("–", egui::Color32::GRAY),
+                Verdict::Review => ("?", amber),
+                Verdict::Found => ("✘", red),
+            };
+            ui.horizontal(|ui| {
+                ui.colored_label(color, RichText::new(mark).strong());
+                ui.label(place.place);
+            });
+            for detail in &place.details {
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(22.0);
+                    ui.weak(detail);
+                });
+            }
+        }
+    });
+    if check.verdict() == Verdict::Found {
+        ui.add_space(4.0);
+        ui.label("Redact ▸ Find and redact removes text from the pages (tick \"Remove document properties and metadata too\" for the properties); the Comments, Fields, Bookmarks and Files panels remove the rest. Run the check again afterwards with Redact ▸ Check for leftover text.");
+    }
+    ui.separator();
+    ui.horizontal(|ui| {
+        if ui.button("Save report…").clicked() {
+            if let Some(path) = rfd::FileDialog::new().add_filter("Text", &["txt"]).set_file_name("Redaction check.txt").save_file() {
+                let _ = std::fs::write(path, check.to_text());
+            }
+        }
+        if ui.button("Copy").clicked() {
+            ui.ctx().copy_text(check.to_text());
+        }
+        if ui.button("Close").clicked() {
+            outcome.keep_open = false;
+        }
+    });
 }
 
 /// Choosing a spreadsheet, checking which column fills which field, naming
@@ -485,6 +551,10 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 outcome.requests.push(AppRequest::StartBatch { action, inputs: inputs.clone() });
                 outcome.keep_open = false;
             }
+            return Ok(());
+        }
+        Dialog::RedactionCheck(check) => {
+            redaction_check_body(ui, check, outcome);
             return Ok(());
         }
         Dialog::TextResult { text, .. } => {
@@ -973,6 +1043,11 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     anyhow::bail!("press Find matches first, or nothing matched");
                 }
                 let settings = RedactionSettings { overlay_text: label.clone(), remove_metadata: *strip_metadata, ..Default::default() };
+                // What lies under the boxes now, to look for everywhere afterwards.
+                let texts = match tab.pdfium_document() {
+                    Some(document) => vellum_core::redaction_check::redacted_texts(document, &areas)?,
+                    None => Vec::new(),
+                };
                 let mut report = None;
                 tab.apply("Redact", |pdf| {
                     report = Some(redact::apply_redactions(pdf, &areas, &settings)?);
@@ -985,6 +1060,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     }
                     outcome.requests.push(AppRequest::Status(message));
                 }
+                let check = vellum_core::redaction_check::check_redaction(&tab.bytes, tab.password.as_deref(), &areas, &texts, label)?;
+                outcome.requests.push(AppRequest::ShowRedactionCheck(check));
                 outcome.keep_open = false;
             }
         }
@@ -1333,6 +1410,20 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             }
         }
         Dialog::FormMerge(merge) => form_merge_body(ui, merge, tab, outcome)?,
+        Dialog::CheckForText { texts } => {
+            ui.label("Looks for words that should be gone (for example after redacting in another program) in every part of the file: page text, properties, comments, fields, bookmarks, attachments, hidden entries and earlier versions kept inside it.");
+            ui.label("One word or phrase per line:");
+            ui.add(egui::TextEdit::multiline(texts).desired_rows(4).desired_width(f32::INFINITY));
+            if buttons(ui, "Check", outcome) {
+                let wanted: Vec<String> = texts.lines().map(str::trim).filter(|line| !line.is_empty()).map(String::from).collect();
+                if wanted.is_empty() {
+                    anyhow::bail!("enter at least one word or phrase");
+                }
+                let check = vellum_core::redaction_check::check_redaction(&tab.bytes, tab.password.as_deref(), &[], &wanted, "")?;
+                outcome.requests.push(AppRequest::ShowRedactionCheck(check));
+                outcome.keep_open = false;
+            }
+        }
         Dialog::GoToPage { text } => {
             let response = ui.add(egui::TextEdit::singleline(text).hint_text(format!("1 to {}, or a page label", tab.pages.len())));
             response.request_focus();
