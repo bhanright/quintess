@@ -22,6 +22,7 @@ use crate::tab::{DocumentTab, FitMode};
 use crate::viewer::{self, Tool, ToolSettings, ViewerAction, ViewerState};
 
 mod commands;
+mod inspector;
 mod split;
 
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
@@ -55,6 +56,7 @@ pub struct VellumApp {
     split_view: bool,
     right_pane_active: bool,
     other_panes: HashMap<u64, split::OtherPane>,
+    inspector: Option<inspector::Inspector>,
 }
 
 /// A developer aid: with `VELLUM_SCREENSHOT=<file.png>` the app sets itself
@@ -101,6 +103,7 @@ impl VellumApp {
             split_view: false,
             right_pane_active: false,
             other_panes: HashMap::new(),
+            inspector: None,
         };
         app.tool_settings.author = app.settings.author.clone();
         if let Err(error) = vellum_core::engine::pdfium() {
@@ -173,6 +176,15 @@ impl VellumApp {
                 }
                 "palette" => self.open_palette_with(value),
                 "split" => self.split_view = true,
+                "inspect" => {
+                    // x;y on the current page
+                    let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
+                    if let (Some(tab), [x, y]) = (self.tabs.get(self.active), numbers.as_slice()) {
+                        let page = tab.current_page;
+                        self.tool = Tool::Inspect;
+                        self.inspect_at(page, *x, *y);
+                    }
+                }
                 "other-page" => {
                     if let Ok(page) = value.parse::<usize>() {
                         self.set_other_pane_page(page.saturating_sub(1));
@@ -1316,6 +1328,7 @@ impl VellumApp {
                 }
                 ViewerAction::DeleteParagraph(paragraph) => self.edit_page_text("Delete paragraph", |bytes, password| vellum_core::edit_text::delete_paragraph(bytes, password, &paragraph)),
                 ViewerAction::AddPageText { page, x, y, text, style } => self.edit("Add text", |pdf| vellum_core::edit_text::add_text(pdf, page as usize - 1, x, y, &text, &style)),
+                ViewerAction::Inspect { page_index, x, y } => self.inspect_at(page_index, x, y),
                 ViewerAction::GoToPage(index) => {
                     if let Some(tab) = self.tab() {
                         viewer::go_to_page(tab, index);
@@ -1662,6 +1675,10 @@ impl eframe::App for VellumApp {
                     sidebar_actions = sidebar::show(ui, tab, &mut self.sidebar, &self.worker, self.night_mode);
                 });
             }
+        }
+
+        if self.inspector.is_some() && !self.tabs.is_empty() {
+            egui::Panel::right("inspector").resizable(true).default_size(300.0).min_size(220.0).show(ui, |ui| self.inspector_panel(ui));
         }
 
         let mut viewer_actions = Vec::new();

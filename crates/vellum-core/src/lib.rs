@@ -18,6 +18,7 @@ pub mod fonts;
 pub mod form_merge;
 pub mod forms;
 pub mod images;
+pub mod inspect;
 pub mod stamp;
 pub mod document;
 pub mod edit_text;

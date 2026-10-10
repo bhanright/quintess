@@ -190,6 +190,7 @@ pub(super) const COMMANDS: &[Command] = &[
         .shortcut("Ctrl+Shift+F")
         .hint("Find words in every PDF in a folder")
         .always(),
+    command("Tools", "Inspect objects", |app, _| app.tool = Tool::Inspect).hint("Click the page to see what is drawn there: fonts, sizes, colors, image details"),
     command("Tools", "Recognize text (OCR)", |app, ctx| app.start_ocr(ctx)),
     command("Tools", "Compare with another version…", |app, ctx| app.start_compare(ctx)),
     command("Tools ▸ Accessibility", "Check accessibility", |app, _| app.check_accessibility()),
@@ -208,8 +209,9 @@ pub(super) const COMMANDS: &[Command] = &[
 ];
 
 /// Tools offered in the palette, besides the commands.
-const PALETTE_TOOLS: [Tool; 22] = [
+const PALETTE_TOOLS: [Tool; 23] = [
     Tool::Select,
+    Tool::Inspect,
     Tool::Hand,
     Tool::EditText,
     Tool::Highlight,

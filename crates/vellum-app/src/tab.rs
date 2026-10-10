@@ -107,6 +107,8 @@ pub struct DocumentTab {
     pub search: SearchState,
     pub selection: Option<TextSelection>,
     pub selected_annotation: Option<(u32, u16)>,
+    /// A box outlined on a page (the inspector's chosen object).
+    pub highlight: Option<(usize, [f32; 4])>,
     /// Pages chosen in the organizer, by index.
     pub organizer_selection: std::collections::BTreeSet<usize>,
     pub error: Option<String>,
@@ -157,6 +159,7 @@ impl DocumentTab {
             search: SearchState::default(),
             selection: None,
             selected_annotation: None,
+            highlight: None,
             organizer_selection: Default::default(),
             error: None,
             protection: None,

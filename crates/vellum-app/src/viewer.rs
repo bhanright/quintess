@@ -45,6 +45,8 @@ pub enum Tool {
     Sign,
     /// Change, restyle, move or delete existing text; click empty space to add text.
     EditText,
+    /// Click to see what is drawn there (font, size, colors, image details).
+    Inspect,
 }
 
 impl Tool {
@@ -72,6 +74,7 @@ impl Tool {
             Tool::SignatureField => "Signature field",
             Tool::Sign => "Sign here",
             Tool::EditText => "Edit text",
+            Tool::Inspect => "Inspect",
         }
     }
 
@@ -105,6 +108,8 @@ impl Default for ToolSettings {
 
 /// Edits the viewer asks the app to make.
 pub enum ViewerAction {
+    /// Show what is drawn at a point (the Inspect tool).
+    Inspect { page_index: usize, x: f32, y: f32 },
     AddAnnotation { page: u32, annotation: NewAnnotation },
     FillField { name: String, value: String },
     AddField(NewField),
@@ -517,6 +522,11 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
             }
         }
     }
+    if let Some((page, rect)) = tab.highlight {
+        if page == page_index {
+            painter.rect_stroke(screen_rect_of(geometry, page_rect, zoom, rect).expand(1.5), 1.0, Stroke::new(2.0, Color32::from_rgb(255, 120, 0)), StrokeKind::Outside);
+        }
+    }
     if tool == Tool::EditText {
         let hover = ui.input(|i| i.pointer.hover_pos());
         for paragraph in tab.editable_paragraphs(page_index).iter() {
@@ -830,6 +840,7 @@ fn inside(rect: [f32; 4], (x, y): (f32, f32)) -> bool {
 fn click(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &ToolSettings, page_index: usize, point: (f32, f32), actions: &mut Vec<ViewerAction>) {
     let page = page_index as u32 + 1;
     match tool {
+        Tool::Inspect => actions.push(ViewerAction::Inspect { page_index, x: point.0, y: point.1 }),
         Tool::Select => {
             tab.selection = None;
             // Form fields first: they sit above the page.
