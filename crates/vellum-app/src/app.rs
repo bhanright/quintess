@@ -21,6 +21,8 @@ use crate::sidebar::{self, SidebarAction, SidebarState};
 use crate::tab::{DocumentTab, FitMode};
 use crate::viewer::{self, Tool, ToolSettings, ViewerAction, ViewerState};
 
+mod commands;
+
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
 /// never collides with the viewer's resolutions).
 const ORGANIZER_DPI: u32 = 30;
@@ -46,6 +48,8 @@ pub struct VellumApp {
     /// For starting jobs from code paths that have no `egui::Context` at hand.
     worker_context: egui::Context,
     settings: vellum_core::settings::Settings,
+    /// The command palette, while open (Ctrl+K).
+    palette: Option<commands::Palette>,
 }
 
 /// A developer aid: with `VELLUM_SCREENSHOT=<file.png>` the app sets itself
@@ -88,6 +92,7 @@ impl VellumApp {
             jobs: Vec::new(),
             worker_context: cc.egui_ctx.clone(),
             settings: vellum_core::settings::Settings::load(),
+            palette: None,
         };
         app.tool_settings.author = app.settings.author.clone();
         if let Err(error) = vellum_core::engine::pdfium() {
@@ -147,6 +152,7 @@ impl VellumApp {
                         merge.name_pattern = "{Name}".into();
                     }
                 }
+                "palette" => self.open_palette_with(value),
                 "wait" => {
                     if let (Some(check), Ok(seconds)) = (self.self_check.as_mut(), value.parse::<f32>()) {
                         check.not_before = std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
@@ -390,6 +396,9 @@ impl VellumApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let shortcut = |modifiers: Modifiers, key: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, key)));
+        if shortcut(Modifiers::COMMAND, Key::K) || shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::P) {
+            self.open_palette();
+        }
         if shortcut(Modifiers::COMMAND, Key::O) {
             self.menu_open();
         }
@@ -669,73 +678,8 @@ impl VellumApp {
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("Open…  Ctrl+O").clicked() {
-                    self.menu_open();
-                }
-                ui.menu_button("Create", |ui| {
-                    if ui.button("Blank document").clicked() {
-                        if let Some(mut pdf) = self.report(blank_document(1, (612.0, 792.0))) {
-                            if let Some(bytes) = self.report(pdf.to_bytes(&SaveSettings::default())) {
-                                self.open_new_document("Untitled.pdf".into(), bytes);
-                            }
-                        }
-                    }
-                    if ui.button("From images…").clicked() {
-                        if let Some(images) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff"]).pick_files() {
-                            let result = images_to_pdf(&images, &ImagePageSettings::default()).and_then(|mut pdf| pdf.to_bytes(&SaveSettings::default()));
-                            if let Some(bytes) = self.report(result) {
-                                self.open_new_document("Images.pdf".into(), bytes);
-                            }
-                        }
-                    }
-                    if ui.button("From text or Markdown…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("Text", &["txt", "md", "markdown"]).pick_file() {
-                            let result = std::fs::read_to_string(&path).map_err(anyhow::Error::from).and_then(|text| {
-                                let markdown = path.extension().is_some_and(|e| e == "md" || e == "markdown");
-                                let mut pdf = if markdown { markdown_to_pdf(&text, &TextPageSettings::default())? } else { text_to_pdf(&text, &TextPageSettings::default())? };
-                                pdf.to_bytes(&SaveSettings::default())
-                            });
-                            if let Some(bytes) = self.report(result) {
-                                let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                                self.open_new_document(format!("{name}.pdf"), bytes);
-                            }
-                        }
-                    }
-                    if ui.button("Combine files…").clicked() {
-                        if let Some(paths) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_title("Choose files to combine, in order").pick_files() {
-                            let result = paths
-                                .iter()
-                                .map(|p| Ok((p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), Pdf::open(p, None)?)))
-                                .collect::<anyhow::Result<Vec<_>>>()
-                                .and_then(|sources| merge_documents(&sources, true))
-                                .and_then(|mut pdf| pdf.to_bytes(&SaveSettings::default()));
-                            if let Some(bytes) = self.report(result) {
-                                self.open_new_document("Combined.pdf".into(), bytes);
-                            }
-                        }
-                    }
-                });
-                ui.separator();
-                let has_tab = !self.tabs.is_empty();
-                if ui.add_enabled(has_tab, egui::Button::new("Save  Ctrl+S")).clicked() {
-                    self.save(false);
-                }
-                if ui.add_enabled(has_tab, egui::Button::new("Save as…  Ctrl+Shift+S")).clicked() {
-                    self.save(true);
-                }
-                if ui.add_enabled(has_tab, egui::Button::new("Save compressed copy…")).clicked() {
-                    self.save_compressed();
-                }
-                if ui.add_enabled(has_tab, egui::Button::new("Reduce file size…")).clicked() {
-                    self.dialogs.push(Dialog::Optimize { preset: 1, dpi: 150.0, quality: 80, grayscale: false, remove_metadata: false });
-                }
-                ui.menu_button("Export as", |ui| {
-                    for (label, format) in [("Word document (.docx)…", "docx"), ("Markdown (.md)…", "md"), ("Web page (.html)…", "html")] {
-                        if ui.add_enabled(has_tab, egui::Button::new(label)).clicked() {
-                            self.start_export(ui.ctx(), format);
-                        }
-                    }
-                });
+                self.command_button(ui, "File", "Open…");
+                ui.menu_button("Create", |ui| self.command_buttons(ui, "File ▸ Create"));
                 if !self.settings.recent_files.is_empty() {
                     ui.menu_button("Open recent", |ui| {
                         for path in self.settings.recent_files.clone() {
@@ -745,20 +689,13 @@ impl VellumApp {
                         }
                     });
                 }
-                ui.menu_button("Export", |ui| self.export_menu(ui));
-                if ui.add_enabled(has_tab, egui::Button::new("Print…  Ctrl+P")).clicked() {
-                    self.open_print_dialog();
-                }
                 ui.separator();
-                if ui.add_enabled(has_tab, egui::Button::new("Properties…")).clicked() {
-                    self.dialogs.push(Dialog::Properties { info: Default::default(), loaded: false });
-                }
-                if ui.add_enabled(has_tab, egui::Button::new("Close  Ctrl+W")).clicked() {
-                    self.close_tab(self.active, false);
-                }
-                if ui.button("Quit").clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
+                self.command_buttons_except(ui, "File", &["Open…", "Close", "Quit"]);
+                ui.menu_button("Export as", |ui| self.command_buttons(ui, "File ▸ Export as"));
+                ui.menu_button("Export", |ui| self.export_menu(ui));
+                ui.separator();
+                self.command_button(ui, "File", "Close");
+                self.command_button(ui, "File", "Quit");
             });
             ui.menu_button("Edit", |ui| {
                 let undo = self.tabs.get(self.active).and_then(|t| t.undo_label().map(str::to_string));
@@ -770,56 +707,10 @@ impl VellumApp {
                     self.redo();
                 }
                 ui.separator();
-                if ui.button("Copy selected text  Ctrl+C").clicked() {
-                    if let Some(text) = self.tab().and_then(|t| t.selected_text()) {
-                        ui.ctx().copy_text(text);
-                    }
-                }
-                if ui.button("Copy text of this page").clicked() {
-                    if let Some(tab) = self.tab() {
-                        if let Some(text) = tab.page_text(tab.current_page) {
-                            ui.ctx().copy_text(text.as_string().0);
-                        }
-                    }
-                }
-                if ui.button("Edit page text").on_hover_text("Click a line to change, restyle or delete it; drag to move it; click empty space to add text").clicked() {
-                    self.tool = Tool::EditText;
-                }
-                if ui.button("Find and replace text…  Ctrl+H").clicked() {
-                    self.dialogs.push(Dialog::FindReplace { find: String::new(), replace: String::new(), use_regex: false, match_case: false });
-                }
-                if ui.button("Find…  Ctrl+F").clicked() {
-                    self.show_sidebar = true;
-                    self.sidebar.page = sidebar::SidebarPage::Search;
-                }
-                ui.separator();
-                if ui.button("Preferences…").clicked() {
-                    self.dialogs.push(Dialog::Preferences(self.settings.clone()));
-                }
+                self.command_buttons(ui, "Edit");
             });
             ui.menu_button("View", |ui| {
-                if ui.button("Zoom in  Ctrl++").clicked() {
-                    self.zoom(true);
-                }
-                if ui.button("Zoom out  Ctrl+-").clicked() {
-                    self.zoom(false);
-                }
-                if ui.button("Actual size").clicked() {
-                    if let Some(tab) = self.tab() {
-                        tab.zoom = 1.0;
-                        tab.fit = FitMode::None;
-                    }
-                }
-                if ui.button("Fit width  Ctrl+0").clicked() {
-                    if let Some(tab) = self.tab() {
-                        tab.fit = FitMode::Width;
-                    }
-                }
-                if ui.button("Fit page").clicked() {
-                    if let Some(tab) = self.tab() {
-                        tab.fit = FitMode::Page;
-                    }
-                }
+                self.command_buttons(ui, "View");
                 ui.separator();
                 ui.checkbox(&mut self.organizer, "Organize pages");
                 ui.checkbox(&mut self.show_sidebar, "Sidebar");
@@ -827,20 +718,9 @@ impl VellumApp {
                 if ui.checkbox(&mut self.dark_interface, "Dark interface").changed() {
                     ui.ctx().set_visuals(if self.dark_interface { egui::Visuals::dark() } else { egui::Visuals::light() });
                 }
-                if ui.button("Go to page…  Ctrl+G").clicked() {
-                    self.dialogs.push(Dialog::GoToPage { text: String::new() });
-                }
-                if ui.button("Full screen  F11").clicked() {
-                    let full = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
-                }
             });
             ui.menu_button("Tools", |ui| self.tools_menu(ui));
-            ui.menu_button("Help", |ui| {
-                if ui.button("About Vellum").clicked() {
-                    self.dialogs.push(Dialog::About);
-                }
-            });
+            ui.menu_button("Help", |ui| self.command_buttons(ui, "Help"));
         });
     }
 
@@ -852,190 +732,39 @@ impl VellumApp {
                 }
             }
             ui.separator();
-            if ui.button("Flatten all comments into the page").clicked() {
-                self.edit("Flatten comments", |pdf| forms::flatten(pdf, false).map(|_| ()));
-            }
-            if ui.button("Remove all comments").clicked() {
-                self.edit("Remove comments", |pdf| remove_annotations(pdf, &[]).map(|_| ()));
-            }
-            if ui.button("Copy comment summary").clicked() {
-                if let Some(pdf) = self.tabs.get(self.active).map(|t| t.load_pdf()) {
-                    if let Some(pdf) = self.report(pdf) {
-                        ui.ctx().copy_text(vellum_core::annotations::comments_summary(&pdf));
-                        self.info("Comment summary copied to the clipboard.");
-                    }
-                }
-            }
+            self.command_buttons(ui, "Tools ▸ Comment");
         });
         ui.menu_button("Stamp and number", |ui| {
-            if ui.button("Watermark…").clicked() {
-                self.dialogs.push(Dialog::watermark());
-            }
-            if ui.button("Header and footer…").clicked() {
-                self.dialogs.push(Dialog::HeaderFooter { settings: HeaderFooter::default(), pages: "all".into() });
-            }
-            if ui.button("Bates numbering…").clicked() {
-                self.dialogs.push(Dialog::Bates { settings: HeaderFooter { footer_center: String::new(), size: 10.0, ..HeaderFooter::default() }, position: vellum_core::stamp::Anchor::BottomRight });
-            }
-            if ui.button("Image stamp…").clicked() {
-                self.dialogs.push(Dialog::ImageStamp { path: None, settings: vellum_core::stamp::ImageStamp { width: 120.0, anchor: vellum_core::stamp::Anchor::BottomRight, margin: 36.0, opacity: 1.0, behind_content: false }, pages: "all".into() });
-            }
-            if ui.button("Background color…").clicked() {
-                self.dialogs.push(Dialog::Background { color: [1.0, 0.98, 0.9], pages: "all".into() });
-            }
+            self.command_buttons(ui, "Tools ▸ Stamp and number");
             ui.horizontal(|ui| {
                 ui.label("Stamp tool label");
                 ui.text_edit_singleline(&mut self.tool_settings.stamp_label);
             });
         });
-        ui.menu_button("Pages", |ui| {
-            if ui.button("Organize pages").clicked() {
-                self.organizer = true;
-            }
-            if ui.button("Rotate…").clicked() {
-                self.dialogs.push(Dialog::RotatePages { pages: "all".into(), degrees: 90 });
-            }
-            if ui.button("Delete…").clicked() {
-                self.dialogs.push(Dialog::DeletePages { pages: String::new() });
-            }
-            if ui.button("Extract…").clicked() {
-                self.dialogs.push(Dialog::ExtractPages { pages: String::new() });
-            }
-            if ui.button("Insert blank pages…").clicked() {
-                let after = self.tabs.get(self.active).map(|t| t.current_page as u32 + 1).unwrap_or(0);
-                self.dialogs.push(Dialog::InsertBlank { after, count: 1 });
-            }
-            if ui.button("Insert from file…").clicked() {
-                let after = self.tabs.get(self.active).map(|t| t.pages.len() as u32).unwrap_or(0);
-                self.dialogs.push(Dialog::InsertFile { path: None, after, pages: "all".into() });
-            }
-            if ui.button("Split…").clicked() {
-                self.dialogs.push(Dialog::Split { mode: 0, every: 1, ranges: String::new(), folder: None });
-            }
-            if ui.button("Crop…").clicked() {
-                self.dialogs.push(Dialog::Crop { margins: Default::default(), pages: "all".into() });
-            }
-            if ui.button("Resize to paper size…").clicked() {
-                self.dialogs.push(Dialog::Resize { size: "letter".into(), landscape: false, pages: "all".into() });
-            }
-            if ui.button("Several pages per sheet…").clicked() {
-                self.dialogs.push(Dialog::NUp { columns: 2, rows: 1, sheet: "letter".into(), frames: false });
-            }
-            if ui.button("Page labels…").clicked() {
-                self.dialogs.push(Dialog::PageLabels { first_page: 1, style: "roman".into(), prefix: String::new(), start: 1 });
-            }
-            if ui.button("Reverse order").clicked() {
-                self.edit("Reverse pages", pages::reverse_pages);
-            }
-            if ui.button("Remove blank pages").clicked() {
-                self.edit("Remove blank pages", |pdf| pages::remove_blank_pages(pdf).map(|_| ()));
-            }
-        });
+        ui.menu_button("Pages", |ui| self.command_buttons(ui, "Tools ▸ Pages"));
         ui.menu_button("Forms", |ui| {
-            if ui.button("Detect fields automatically").clicked() {
-                self.detect_fields();
-            }
             for tool in [Tool::TextField, Tool::CheckBox, Tool::SignatureField] {
                 if ui.button(format!("Add {}", tool.label().to_lowercase())).clicked() {
                     self.tool = tool;
                 }
             }
             ui.separator();
-            if ui.button("Import data…").clicked() {
-                self.import_form_data();
-            }
-            if ui.button("Fill from spreadsheet…").on_hover_text("One filled copy of this form for every row of a spreadsheet").clicked() {
-                self.open_form_merge();
-            }
-            if ui.button("Clear all fields").clicked() {
-                self.edit("Clear form", forms::reset_form);
-            }
-            if ui.button("Flatten fields into the page").clicked() {
-                self.edit("Flatten form", |pdf| forms::flatten(pdf, true).map(|_| ()));
-            }
+            self.command_buttons(ui, "Tools ▸ Forms");
         });
         ui.menu_button("Redact", |ui| {
-            if ui.button("Mark text for redaction").clicked() {
-                self.tool = Tool::RedactText;
-            }
-            if ui.button("Mark area for redaction").clicked() {
-                self.tool = Tool::RedactArea;
-            }
-            if ui.button("Find and redact…").clicked() {
-                self.dialogs.push(Dialog::redact());
-            }
-            if ui.button("Check for leftover text…").on_hover_text("Search every part of the file for words that should be gone").clicked() {
-                self.dialogs.push(Dialog::CheckForText { texts: String::new() });
-            }
-        });
-        ui.menu_button("Protect", |ui| {
-            if ui.button("Protect with password…").clicked() {
-                self.dialogs.push(Dialog::protect());
-            }
-            if ui.button("Remove protection").clicked() {
-                if let Some(tab) = self.tab() {
-                    tab.protection = None;
-                    // Re-writing the bytes stores them without encryption.
-                    let result = tab.apply("Remove protection", |_| Ok(()));
-                    if self.report(result).is_some() {
-                        self.info("Protection removed. Save to write the unprotected file.");
-                    }
+            for tool in [Tool::RedactText, Tool::RedactArea] {
+                if ui.button(tool.label()).clicked() {
+                    self.tool = tool;
                 }
             }
-            if ui.button("Remove metadata").clicked() {
-                self.edit("Remove metadata", vellum_core::metadata::strip_metadata);
-            }
+            self.command_buttons(ui, "Tools ▸ Redact");
         });
-        ui.menu_button("Sign", |ui| {
-            if ui.button("Sign here (draw a box)").clicked() {
-                self.tool = Tool::Sign;
-                self.info("Drag a box where the signature should appear.");
-            }
-            if ui.button("Check signatures").clicked() {
-                if let Some(tab) = self.tabs.get(self.active) {
-                    let result = vellum_core::signatures::verify(&tab.bytes);
-                    if let Some(checks) = self.report(result) {
-                        self.dialogs.push(Dialog::SignatureResults(checks));
-                    }
-                }
-            }
-            if ui.button("Create signing identity…").clicked() {
-                self.dialogs.push(Dialog::CreateIdentity { name: self.settings.author.clone(), email: String::new(), organization: String::new() });
-            }
-        });
+        ui.menu_button("Protect", |ui| self.command_buttons(ui, "Tools ▸ Protect"));
+        ui.menu_button("Sign", |ui| self.command_buttons(ui, "Tools ▸ Sign"));
         ui.separator();
-        if ui.button("Recognize text (OCR)").clicked() {
-            self.start_ocr(ui.ctx());
-        }
-        if ui.button("Compare with another version…").clicked() {
-            self.start_compare(ui.ctx());
-        }
-        ui.menu_button("Accessibility", |ui| {
-            if ui.button("Check accessibility").clicked() {
-                self.check_accessibility();
-            }
-            if ui.button("Fix automatically").clicked() {
-                self.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes]);
-            }
-        });
-        ui.menu_button("PDF/A (archiving)", |ui| {
-            if ui.button("Check").clicked() {
-                if let Some(pdf) = self.tabs.get(self.active).map(|t| t.load_pdf()) {
-                    if let Some(pdf) = self.report(pdf) {
-                        self.dialogs.push(Dialog::PreflightResults(vellum_core::preflight::check_pdfa(&pdf)));
-                    }
-                }
-            }
-            if ui.button("Convert to PDF/A-2b").clicked() {
-                self.apply_app_requests(vec![AppRequest::ConvertToPdfA]);
-            }
-        });
-        if ui.button("Attach a file…").clicked() {
-            self.apply_sidebar_actions(vec![SidebarAction::AddAttachment]);
-        }
-        if ui.button("Run an action on files…").clicked() {
-            self.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new() });
-        }
+        self.command_buttons(ui, "Tools");
+        ui.menu_button("Accessibility", |ui| self.command_buttons(ui, "Tools ▸ Accessibility"));
+        ui.menu_button("PDF/A (archiving)", |ui| self.command_buttons(ui, "Tools ▸ PDF/A (archiving)"));
     }
 
     fn export_menu(&mut self, ui: &mut egui::Ui) {
@@ -1800,6 +1529,8 @@ impl eframe::App for VellumApp {
                 Err(error) => self.error(format!("{label} failed: {error:#}")),
             }
         }
+        // The palette goes first, so its Enter, arrows and Esc reach it before the shortcuts.
+        self.show_palette(&ctx);
         self.shortcuts(&ctx);
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F11)) {
             let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
