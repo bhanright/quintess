@@ -5130,6 +5130,7 @@ dependencies = [
  "subsetter",
  "ttf-parser",
  "ureq",
+ "windows",
  "x509-parser",
 ]
 

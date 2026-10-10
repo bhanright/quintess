@@ -25,6 +25,8 @@ pub mod ocr;
 pub mod optimize;
 pub mod pages;
 pub mod preflight;
+#[cfg(windows)]
+pub mod print;
 pub mod ranges;
 pub mod redact;
 pub mod security;
