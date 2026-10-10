@@ -22,6 +22,7 @@ use crate::tab::{DocumentTab, FitMode};
 use crate::viewer::{self, Tool, ToolSettings, ViewerAction, ViewerState};
 
 mod commands;
+mod studio;
 mod inspector;
 mod recording;
 mod watching;
@@ -46,6 +47,7 @@ pub struct VellumApp {
     status_is_error: bool,
     night_mode: bool,
     dark_interface: bool,
+    look: crate::theme::Look,
     organizer: bool,
     self_check: Option<SelfCheck>,
     jobs: Vec<Job>,
@@ -84,9 +86,12 @@ struct SelfCheck {
 
 impl VellumApp {
     pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::light());
-        install_system_fonts(&cc.egui_ctx);
+        crate::theme::install_fonts(&cc.egui_ctx);
+        let settings = vellum_core::settings::Settings::load();
+        let (look, dark) = (crate::theme::Look::from_name(&settings.look), settings.dark_interface);
+        crate::theme::apply(&cc.egui_ctx, look, dark);
         let mut app = Self {
+            look,
             tabs: Vec::new(),
             active: 0,
             next_tab_id: 1,
@@ -100,7 +105,7 @@ impl VellumApp {
             status: "Open a PDF with File ▸ Open, or drop files onto the window.".into(),
             status_is_error: false,
             night_mode: false,
-            dark_interface: false,
+            dark_interface: dark,
             organizer: false,
             self_check: None,
             jobs: Vec::new(),
@@ -216,10 +221,10 @@ impl VellumApp {
                     }
                 }
                 "night" => self.night_mode = true,
-                "dark" => {
-                    self.dark_interface = true;
-                    ctx.set_visuals(egui::Visuals::dark());
-                }
+                "dark" => self.set_theme(ctx, self.look, true),
+                "light" => self.set_theme(ctx, self.look, false),
+                "classic" => self.set_theme(ctx, crate::theme::Look::Classic, self.dark_interface),
+                "studio" => self.set_theme(ctx, crate::theme::Look::Studio, self.dark_interface),
                 "zoom" => {
                     if let (Some(tab), Ok(zoom)) = (self.tab(), value.parse::<f32>()) {
                         tab.zoom = zoom;
@@ -749,8 +754,25 @@ impl VellumApp {
         }
     }
 
+    /// Switches look and brightness, and remembers the choice.
+    fn set_theme(&mut self, ctx: &egui::Context, look: crate::theme::Look, dark: bool) {
+        self.look = look;
+        self.dark_interface = dark;
+        crate::theme::apply(ctx, look, dark);
+        self.settings.look = look.name().to_string();
+        self.settings.dark_interface = dark;
+        if self.self_check.is_none() {
+            let _ = self.settings.save();
+        }
+    }
+
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
-        egui::MenuBar::new().ui(ui, |ui| {
+        egui::MenuBar::new().ui(ui, |ui| self.menus(ui));
+    }
+
+    /// The File, Edit, View, Tools and Help menus.
+    fn menus(&mut self, ui: &mut egui::Ui) {
+        {
             ui.menu_button("File", |ui| {
                 self.command_button(ui, "File", "Open…");
                 ui.menu_button("Create", |ui| self.command_buttons(ui, "File ▸ Create"));
@@ -793,13 +815,18 @@ impl VellumApp {
                     self.toggle_split_view();
                 }
                 ui.checkbox(&mut self.night_mode, "Night reading (inverted pages)");
-                if ui.checkbox(&mut self.dark_interface, "Dark interface").changed() {
-                    ui.ctx().set_visuals(if self.dark_interface { egui::Visuals::dark() } else { egui::Visuals::light() });
+                let mut dark = self.dark_interface;
+                if ui.checkbox(&mut dark, "Dark interface").changed() {
+                    self.set_theme(ui.ctx(), self.look, dark);
+                }
+                let mut studio = self.look == crate::theme::Look::Studio;
+                if ui.checkbox(&mut studio, "Studio look").on_hover_text("Off: the classic menu bar and toolbar").changed() {
+                    self.set_theme(ui.ctx(), if studio { crate::theme::Look::Studio } else { crate::theme::Look::Classic }, self.dark_interface);
                 }
             });
             ui.menu_button("Tools", |ui| self.tools_menu(ui));
             ui.menu_button("Help", |ui| self.command_buttons(ui, "Help"));
-        });
+        }
     }
 
     fn tools_menu(&mut self, ui: &mut egui::Ui) {
@@ -1187,7 +1214,7 @@ impl VellumApp {
                             self.worker.request(crate::render::RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index: index, dpi: ORGANIZER_DPI as f32, night_mode: false });
                         }
                         if is_selected {
-                            painter.rect_stroke(page_rect.expand(3.0), 3.0, egui::Stroke::new(3.0, Color32::from_rgb(40, 110, 255)), egui::StrokeKind::Outside);
+                            painter.rect_stroke(page_rect.expand(3.0), 3.0, egui::Stroke::new(3.0, crate::theme::highlight()), egui::StrokeKind::Outside);
                         }
                         painter.text(egui::pos2(rect.center().x, rect.max.y - 8.0), egui::Align2::CENTER_CENTER, &label, egui::FontId::proportional(13.0), ui.visuals().text_color());
                     });
@@ -1500,7 +1527,10 @@ impl VellumApp {
                 }
                 AppRequest::SettingsChanged(settings) => {
                     self.tool_settings.author = settings.author.clone();
+                    let (look, dark) = (crate::theme::Look::from_name(&settings.look), settings.dark_interface);
                     self.settings = settings;
+                    let ctx = self.worker_context.clone();
+                    self.set_theme(&ctx, look, dark);
                     let result = self.settings.save();
                     if self.report(result).is_some() {
                         self.info("Preferences saved.");
@@ -1574,27 +1604,6 @@ impl VellumApp {
 
 /// Uses Segoe UI for text and Segoe UI Symbol and Emoji for the toolbar
 /// icons when Windows provides them; egui's built-in fonts lack many symbols.
-fn install_system_fonts(ctx: &egui::Context) {
-    let folder = std::path::Path::new(&std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
-    let mut fonts = egui::FontDefinitions::default();
-    // A bold family, so the rich text editor can show bold words as bold.
-    if let Ok(bytes) = std::fs::read(folder.join("segoeuib.ttf")) {
-        fonts.font_data.insert("Segoe UI Bold".to_owned(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
-        fonts.families.insert(egui::FontFamily::Name("bold".into()), vec!["Segoe UI Bold".to_owned()]);
-    }
-    for (name, file, primary) in [("Segoe UI", "segoeui.ttf", true), ("Segoe UI Symbol", "seguisym.ttf", false), ("Segoe UI Emoji", "seguiemj.ttf", false)] {
-        let Ok(bytes) = std::fs::read(folder.join(file)) else { continue };
-        fonts.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
-        let family = fonts.families.entry(egui::FontFamily::Proportional).or_default();
-        if primary {
-            family.insert(0, name.to_owned());
-        } else {
-            family.push(name.to_owned());
-            fonts.families.entry(egui::FontFamily::Monospace).or_default().push(name.to_owned());
-        }
-    }
-    ctx.set_fonts(fonts);
-}
 
 enum OrganizerRequest {
     Rotate(i64),
@@ -1679,14 +1688,28 @@ impl eframe::App for VellumApp {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui));
-        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
-        if !self.tabs.is_empty() {
-            egui::Panel::top("tabs").show(ui, |ui| self.tab_bar(ui));
+        let colors = crate::theme::palette(&ctx);
+        let studio = self.look == crate::theme::Look::Studio;
+        if studio {
+            let bar = egui::Frame::new().fill(colors.panel).inner_margin(egui::Margin::symmetric(8, 0));
+            egui::Panel::top("header").exact_size(48.0).frame(bar).show(ui, |ui| self.studio_header(ui));
+            if !self.tabs.is_empty() {
+                egui::Panel::top("tabs").exact_size(38.0).frame(bar).show(ui, |ui| self.studio_tabs(ui));
+            }
+        } else {
+            egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui));
+            egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
+            if !self.tabs.is_empty() {
+                egui::Panel::top("tabs").show(ui, |ui| self.tab_bar(ui));
+            }
         }
         if self.recording.is_some() {
             egui::Panel::top("recording").show(ui, |ui| self.recording_bar(ui));
         }
+        if studio {
+            let bar = egui::Frame::new().fill(colors.panel).inner_margin(egui::Margin::symmetric(12, 0)).stroke(egui::Stroke::new(1.0, colors.border));
+            egui::Panel::bottom("status").exact_size(26.0).frame(bar).show(ui, |ui| self.studio_status(ui));
+        } else {
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 let color = if self.status_is_error { Color32::from_rgb(200, 60, 60) } else { ui.visuals().weak_text_color() };
@@ -1707,11 +1730,13 @@ impl eframe::App for VellumApp {
                 });
             });
         });
+        }
 
         let mut sidebar_actions = Vec::new();
         if self.show_sidebar && !self.organizer {
             if let Some(tab) = self.tabs.get_mut(self.active) {
-                egui::Panel::left("sidebar").resizable(true).default_size(230.0).min_size(160.0).show(ui, |ui| {
+                let side = if studio { egui::Frame::new().fill(colors.panel).inner_margin(egui::Margin::same(10)).stroke(egui::Stroke::new(1.0, colors.border)) } else { egui::Frame::side_top_panel(ui.style()) };
+                egui::Panel::left("sidebar").resizable(true).default_size(230.0).min_size(160.0).frame(side).show(ui, |ui| {
                     sidebar_actions = sidebar::show(ui, tab, &mut self.sidebar, &self.worker, self.night_mode);
                 });
             }
@@ -1722,8 +1747,10 @@ impl eframe::App for VellumApp {
         }
 
         let mut viewer_actions = Vec::new();
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(if self.dark_interface { Color32::from_gray(38) } else { Color32::from_gray(214) })).show(ui, |ui| {
-            if self.tabs.is_empty() {
+        let central = egui::CentralPanel::default().frame(egui::Frame::new().fill(colors.canvas)).show(ui, |ui| {
+            if self.tabs.is_empty() && studio {
+                self.studio_welcome(ui);
+            } else if self.tabs.is_empty() {
                 self.welcome(ui);
             } else if self.organizer {
                 egui::Frame::new().inner_margin(10.0).show(ui, |ui| self.organizer_view(ui));
@@ -1742,6 +1769,10 @@ impl eframe::App for VellumApp {
                 }
             }
         });
+
+        if studio {
+            self.studio_dock(&ctx, central.response.rect);
+        }
 
         self.apply_sidebar_actions(sidebar_actions);
         self.apply_viewer_actions(viewer_actions);

@@ -404,10 +404,13 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
         tops.push(y);
         y += page.display_size.1 * zoom + PAGE_GAP;
     }
-    let content_height = y;
+    // Room below the last page, so the Studio dock doesn't cover it.
+    let content_height = y + if crate::theme::is_studio(ui.ctx()) { 64.0 } else { 0.0 };
 
     let mut scroll = egui::ScrollArea::both().auto_shrink([false, false]).id_salt(("viewer", tab.id, pane));
-    if let Some(page) = tab.scroll_to_page.take() {
+    // Wait for the first layout, so a fitted zoom is settled before the page is found.
+    let scroll_target = if state.last_viewport_width > 0.0 { tab.scroll_to_page.take() } else { None };
+    if let Some(page) = scroll_target {
         if let Some(top) = tops.get(page) {
             scroll = scroll.vertical_scroll_offset((top - PAGE_GAP).max(0.0));
         }
@@ -458,7 +461,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
 
 fn draw_page(ui: &mut egui::Ui, tab: &mut DocumentTab, worker: &RenderWorker, page_index: usize, rect: Rect, resolution: u32, night_mode: bool) {
     let painter = ui.painter();
-    painter.rect_filled(rect.translate(vec2(2.0, 3.0)), 2.0, Color32::from_black_alpha(50));
+    crate::theme::page_shadow(painter, rect, &crate::theme::palette(ui.ctx()));
     painter.rect_filled(rect, 0.0, if night_mode { Color32::from_gray(28) } else { Color32::WHITE });
     let key = (page_index, resolution);
     let texture = tab.textures.get(&key).cloned().or_else(|| {
@@ -507,12 +510,12 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
     }
     if tab.selection.is_some_and(|s| s.page_index == page_index) {
         for rect in tab.selection_rects() {
-            painter.rect_filled(screen_rect_of(geometry, page_rect, zoom, rect), 0.0, Color32::from_rgba_unmultiplied(40, 110, 255, 70));
+            painter.rect_filled(screen_rect_of(geometry, page_rect, zoom, rect), 0.0, crate::theme::highlight_alpha(70));
         }
     }
     if let Some(selected) = tab.selected_annotation {
         if let Some(annotation) = tab.annotations.iter().find(|a| a.id == selected && a.page as usize == page_index + 1) {
-            painter.rect_stroke(screen_rect_of(geometry, page_rect, zoom, annotation.rect).expand(2.0), 2.0, Stroke::new(1.5, Color32::from_rgb(40, 110, 255)), StrokeKind::Outside);
+            painter.rect_stroke(screen_rect_of(geometry, page_rect, zoom, annotation.rect).expand(2.0), 2.0, Stroke::new(1.5, crate::theme::highlight()), StrokeKind::Outside);
         }
     }
     if let (Some((drag_page, start)), Some(now)) = (state.drag_start, state.drag_now) {
@@ -522,9 +525,9 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
             if matches!(tool, Tool::Line | Tool::Arrow) {
                 let a = geometry.page_to_top_left(start.0, start.1);
                 let b = geometry.page_to_top_left(now.0, now.1);
-                painter.line_segment([page_rect.min + vec2(a.0, a.1) * zoom, page_rect.min + vec2(b.0, b.1) * zoom], Stroke::new(2.0, Color32::from_rgb(40, 110, 255)));
+                painter.line_segment([page_rect.min + vec2(a.0, a.1) * zoom, page_rect.min + vec2(b.0, b.1) * zoom], Stroke::new(2.0, crate::theme::highlight()));
             } else {
-                painter.rect_stroke(shown, 0.0, Stroke::new(1.5, Color32::from_rgb(40, 110, 255)), StrokeKind::Middle);
+                painter.rect_stroke(shown, 0.0, Stroke::new(1.5, crate::theme::highlight()), StrokeKind::Middle);
             }
         }
     }
@@ -542,7 +545,7 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
             if editing {
                 continue;
             }
-            let color = if hovered { Color32::from_rgb(40, 110, 255) } else { Color32::from_rgba_unmultiplied(40, 110, 255, 90) };
+            let color = if hovered { crate::theme::highlight() } else { crate::theme::highlight_alpha(90) };
             painter.rect_stroke(rect, 2.0, Stroke::new(if hovered { 1.5 } else { 0.75 }, color), StrokeKind::Outside);
         }
         if let (Some(bounds), Some((drag_page, start)), Some(now)) = (state.moving_bounds, state.drag_start, state.drag_now) {
@@ -1101,7 +1104,7 @@ fn update_preview(ctx: &egui::Context, tab: &DocumentTab, editing: &mut TextEdit
 /// page (`on_result`), only where things landed is marked.
 fn draw_preview(ui: &egui::Ui, geometry: &PageGeometry, page_rect: Rect, zoom: f32, report: &ParagraphReport, on_result: bool) {
     let painter = ui.painter_at(page_rect);
-    let blue = Color32::from_rgb(40, 110, 255);
+    let blue = crate::theme::highlight();
     let orange = Color32::from_rgb(230, 120, 0);
     let red = Color32::from_rgb(220, 40, 40);
     if report.lines_after != report.lines_before || report.scale < 0.999 {
@@ -1239,6 +1242,11 @@ fn rich_style_controls(ui: &mut egui::Ui, editing: &mut TextEditing, editor_id: 
 }
 
 /// Opens the line editor on a line, as clicking it with the Edit text tool does.
+/// Whether a line or paragraph is open for editing.
+pub fn is_editing_text(state: &ViewerState) -> bool {
+    state.editing_text.is_some()
+}
+
 pub fn begin_text_edit(state: &mut ViewerState, line: EditableLine) {
     state.editing_text = Some(TextEditing::start(line));
 }

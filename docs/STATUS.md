@@ -141,6 +141,15 @@ saves a picture of the window and exits (setup options are documented on
   crate's `build.rs` and set as the window icon. `installer/vellum.iss` is
   an Inno Setup script (per-user install, Open with registration, Default
   Programs capabilities, optional PATH entry); it has not been compiled.
+- Looks (`theme.rs`, `app/studio.rs`): "Studio" (default) is a dark or
+  light interface with an electric violet accent, hairline borders, Segoe
+  UI Variable text, Bahnschrift headings, Cascadia Mono numbers and Segoe
+  Fluent Icons; a slim header with a command field (opens the palette), tab
+  pills with unsaved dots, a floating dock (pages, zoom, tools, "more"
+  tools, markup color), icon tabs in the sidebar, a quiet status line, and
+  a landing-style welcome screen. "Classic" keeps the original menu bar and
+  toolbar. Chosen in Preferences or View, stored in the settings. Overlay
+  outlines use `theme::highlight()`.
 - Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).

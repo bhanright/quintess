@@ -73,7 +73,7 @@ impl VellumApp {
                 actions.extend(viewer::show(column, tab, state, self.tool, &self.tool_settings, &self.worker, self.night_mode, pane));
                 if active {
                     // A thin outline marks the pane that commands act on.
-                    column.painter().rect_stroke(column.max_rect().shrink(1.0), 0.0, egui::Stroke::new(1.5, Color32::from_rgba_unmultiplied(40, 110, 255, 120)), egui::StrokeKind::Inside);
+                    column.painter().rect_stroke(column.max_rect().shrink(1.0), 0.0, egui::Stroke::new(1.5, crate::theme::highlight_alpha(140)), egui::StrokeKind::Inside);
                 } else {
                     other.swap_with(tab, state);
                 }

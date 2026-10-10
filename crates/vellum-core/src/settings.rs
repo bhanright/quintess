@@ -19,6 +19,10 @@ pub struct Settings {
     pub signing_identity: Option<PathBuf>,
     /// Where each file was left, most recent first, so it reopens there.
     pub reading_positions: Vec<ReadingPosition>,
+    /// The app's look: "studio" or "classic".
+    pub look: String,
+    /// A dark interface (pages stay as they are unless night reading is on).
+    pub dark_interface: bool,
 }
 
 /// The page a file was left at, and its zoom (`None` when it was fitted to
@@ -42,6 +46,8 @@ impl Default for Settings {
             recent_files: Vec::new(),
             signing_identity: None,
             reading_positions: Vec::new(),
+            look: "studio".into(),
+            dark_interface: true,
         }
     }
 }

@@ -9,6 +9,7 @@ mod jobs;
 mod render;
 mod sidebar;
 mod tab;
+mod theme;
 mod viewer;
 
 fn main() -> eframe::Result {

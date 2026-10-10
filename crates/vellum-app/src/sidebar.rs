@@ -49,19 +49,43 @@ pub struct SidebarState {
 
 pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, worker: &RenderWorker, night_mode: bool) -> Vec<SidebarAction> {
     let mut actions = Vec::new();
-    ui.horizontal_wrapped(|ui| {
-        for (page, label) in [
-            (SidebarPage::Thumbnails, "Pages"),
-            (SidebarPage::Bookmarks, "Bookmarks"),
-            (SidebarPage::Comments, "Comments"),
-            (SidebarPage::Fields, "Fields"),
-            (SidebarPage::Search, "Search"),
-            (SidebarPage::Attachments, "Files"),
-        ] {
-            ui.selectable_value(&mut state.page, page, label);
-        }
-    });
-    ui.separator();
+    let sections = [
+        (SidebarPage::Thumbnails, "Pages", crate::theme::icon::PAGES),
+        (SidebarPage::Bookmarks, "Bookmarks", crate::theme::icon::BOOKMARKS),
+        (SidebarPage::Comments, "Comments", crate::theme::icon::COMMENTS),
+        (SidebarPage::Fields, "Fields", crate::theme::icon::FORM),
+        (SidebarPage::Search, "Search", crate::theme::icon::SEARCH),
+        (SidebarPage::Attachments, "Files", crate::theme::icon::ATTACHMENT),
+    ];
+    if crate::theme::is_studio(ui.ctx()) {
+        // Icons in a segmented row, and the section's name in small capitals.
+        let colors = crate::theme::palette(ui.ctx());
+        egui::Frame::new().fill(colors.surface).stroke(egui::Stroke::new(1.0, colors.border)).corner_radius(9).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let width = (ui.available_width() / sections.len() as f32).floor();
+                for (page, label, glyph) in sections {
+                    let selected = state.page == page;
+                    let text = crate::theme::icon_text(ui.ctx(), glyph, &label[..1], 14.0).color(if selected { colors.on_accent } else { colors.text_muted });
+                    let button = egui::Button::new(text).min_size(egui::vec2(width, 26.0)).corner_radius(7).fill(if selected { colors.accent } else { egui::Color32::TRANSPARENT }).stroke(egui::Stroke::NONE);
+                    if ui.add(button).on_hover_text(label).clicked() {
+                        state.page = page;
+                    }
+                }
+            });
+        });
+        ui.add_space(8.0);
+        let title = sections.iter().find(|(page, _, _)| *page == state.page).map(|(_, label, _)| label.to_uppercase()).unwrap_or_default();
+        ui.label(egui::RichText::new(title).size(11.0).color(colors.text_faint).extra_letter_spacing(1.5));
+        ui.add_space(4.0);
+    } else {
+        ui.horizontal_wrapped(|ui| {
+            for (page, label, _) in sections {
+                ui.selectable_value(&mut state.page, page, label);
+            }
+        });
+        ui.separator();
+    }
     match state.page {
         SidebarPage::Thumbnails => thumbnails(ui, tab, worker, night_mode),
         SidebarPage::Bookmarks => bookmarks(ui, tab, state, &mut actions),
@@ -95,7 +119,7 @@ fn thumbnails(ui: &mut egui::Ui, tab: &mut DocumentTab, worker: &RenderWorker, n
                     worker.request(RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index, dpi: THUMBNAIL_DPI as f32, night_mode });
                 }
                 let current = page_index == tab.current_page;
-                painter.rect_stroke(rect, 0.0, Stroke::new(if current { 2.5 } else { 0.5 }, if current { Color32::from_rgb(40, 110, 255) } else { Color32::GRAY }), StrokeKind::Outside);
+                painter.rect_stroke(rect, 0.0, Stroke::new(if current { 2.5 } else { 0.5 }, if current { crate::theme::highlight() } else { Color32::GRAY }), StrokeKind::Outside);
                 painter.text(rect.center_bottom() + vec2(0.0, 11.0), egui::Align2::CENTER_CENTER, &tab.labels[page_index], egui::FontId::proportional(12.0), ui.visuals().text_color());
                 if ui.interact(rect, ui.id().with(("thumb", page_index)), Sense::click()).clicked() {
                     clicked = Some(page_index);
@@ -189,7 +213,7 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
                 last_page = comment.page;
             }
             let selected = tab.selected_annotation == Some(comment.id);
-            let frame = egui::Frame::group(ui.style()).stroke(if selected { Stroke::new(1.5, Color32::from_rgb(40, 110, 255)) } else { ui.visuals().widgets.noninteractive.bg_stroke });
+            let frame = egui::Frame::group(ui.style()).stroke(if selected { Stroke::new(1.5, crate::theme::highlight()) } else { ui.visuals().widgets.noninteractive.bg_stroke });
             frame.show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {

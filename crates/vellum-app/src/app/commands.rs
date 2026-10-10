@@ -104,9 +104,10 @@ pub(super) const COMMANDS: &[Command] = &[
     command("View", "Organize pages (on or off)", |app, _| app.organizer = !app.organizer),
     command("View", "Sidebar (on or off)", |app, _| app.show_sidebar = !app.show_sidebar).always(),
     command("View", "Night reading (on or off)", |app, _| app.night_mode = !app.night_mode).always(),
-    command("View", "Dark interface (on or off)", |app, ctx| {
-        app.dark_interface = !app.dark_interface;
-        ctx.set_visuals(if app.dark_interface { egui::Visuals::dark() } else { egui::Visuals::light() });
+    command("View", "Dark interface (on or off)", |app, ctx| app.set_theme(ctx, app.look, !app.dark_interface)).always(),
+    command("View", "Studio or classic look", |app, ctx| {
+        let look = if app.look == crate::theme::Look::Studio { crate::theme::Look::Classic } else { crate::theme::Look::Studio };
+        app.set_theme(ctx, look, app.dark_interface);
     })
     .always(),
     command("View", "Go to page…", |app, _| app.dialogs.push(Dialog::GoToPage { text: String::new() })).shortcut("Ctrl+G"),

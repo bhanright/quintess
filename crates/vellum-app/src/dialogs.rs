@@ -540,7 +540,7 @@ fn buttons(ui: &mut egui::Ui, ok_label: &str, outcome: &mut DialogOutcome) -> bo
     ui.separator();
     let mut ok = false;
     ui.horizontal(|ui| {
-        if ui.button(RichText::new(ok_label).strong()).clicked() {
+        if crate::theme::primary_button(ui, ok_label).clicked() {
             ok = true;
         }
         if ui.button("Cancel").clicked() {
@@ -569,6 +569,13 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 ui.end_row();
                 ui.label("Document language");
                 ui.text_edit_singleline(&mut settings.language);
+                ui.end_row();
+                ui.label("Look");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut settings.look, "studio".to_string(), "Studio");
+                    ui.selectable_value(&mut settings.look, "classic".to_string(), "Classic");
+                    ui.checkbox(&mut settings.dark_interface, "Dark");
+                });
                 ui.end_row();
                 ui.label("Signing identity");
                 ui.horizontal(|ui| {
