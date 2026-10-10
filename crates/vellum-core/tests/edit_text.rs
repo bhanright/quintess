@@ -230,6 +230,11 @@ mod paragraphs {
         let (edited, report) = replace_paragraph(&bytes, None, &paragraph, LONGER, &ParagraphStyle::of(&paragraph)).unwrap();
         assert!(report.moved_below >= 2 && !report.overlaps, "{report:?}");
         let growth = (report.lines_after - report.lines_before) as f32 * paragraph.leading;
+        // The preview's account of the move matches what happened.
+        assert!((report.moved_by - growth).abs() < 0.05, "{report:?}");
+        let region = report.moved_region.expect("a moved region");
+        assert!(before.iter().all(|b| b[1] >= region[1] - 0.5 && b[3] <= region[3] + 0.5), "{region:?} misses the moved line");
+        assert!(report.area[1] < paragraph.bounds[1] && report.stand_ins.is_empty(), "{report:?}");
         let after = glyph_boxes(&edited, "Bring your laptop and the printed agenda.");
         for (old, new) in before.iter().zip(&after) {
             assert!((old[0] - new[0]).abs() < 0.01 && (old[2] - new[2]).abs() < 0.01, "moved sideways: {old:?} {new:?}");
@@ -256,7 +261,9 @@ mod paragraphs {
 
         let overlap = ParagraphStyle { overflow: Overflow::Overlap, ..ParagraphStyle::of(&paragraph) };
         let (edited, report) = replace_paragraph(&bytes, None, &paragraph, LONGER, &overlap).unwrap();
-        assert!(report.overlaps && report.moved_below == 0, "{report:?}");
+        assert!(report.overlaps && report.moved_below == 0 && report.moved_region.is_none(), "{report:?}");
+        let covered = report.overlap_region.expect("an overlap region");
+        assert!(covered[1] < paragraph.bounds[1] && (covered[3] - paragraph.bounds[1]).abs() < 0.01, "{covered:?}");
         assert_eq!(glyph_boxes(&bytes, "Bring your laptop")[0], glyph_boxes(&edited, "Bring your laptop")[0], "nothing moved");
     }
 
@@ -277,6 +284,28 @@ mod paragraphs {
         // Text outside the paragraph stays where it was.
         assert_eq!(glyph_boxes(&bytes, "Notice")[0], glyph_boxes(&moved, "Notice")[0]);
         assert_eq!(glyph_boxes(&bytes, "Thank you.")[0], glyph_boxes(&moved, "Thank you.")[0]);
+    }
+
+    #[test]
+    fn content_near_the_footer_stops_the_push_and_says_why() {
+        use lopdf::{Dictionary, Stream, dictionary};
+        let mut pdf = Pdf::new_empty();
+        let font = vellum_core::fonts::StandardFont::Helvetica.add_to(&mut pdf.doc);
+        // A two-line paragraph, and a line just above the footer zone (6% of 792 = 47.5).
+        let content = "BT /F 11 Tf 1 0 0 1 72 120 Tm (A short paragraph that sits near the bottom) Tj 1 0 0 1 72 106 Tm (of the page, above one more line.) Tj 1 0 0 1 72 60 Tm (Closing line) Tj ET";
+        let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), content.as_bytes().to_vec()));
+        let root = pdf.pages_root_id().unwrap();
+        let page = pdf.doc.add_object(dictionary! { "Type" => "Page", "Parent" => root, "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()], "Resources" => dictionary! { "Font" => dictionary! { "F" => font } }, "Contents" => content_id });
+        pdf.set_page_order(&[page]).unwrap();
+        let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+        let document = engine::open_document(bytes.clone(), None).unwrap();
+        let paragraph = editable_paragraphs(&document, 0).unwrap().remove(0);
+        drop(document);
+        assert_eq!(paragraph.lines.len(), 2, "{}", paragraph.text);
+        let (_, report) = replace_paragraph(&bytes, None, &paragraph, &format!("{} It now runs on for a good deal longer than it did, so it needs another line or two of space.", paragraph.text), &ParagraphStyle::of(&paragraph)).unwrap();
+        assert!(report.would_leave_page && report.scale < 1.0, "{report:?}");
+        assert!(report.footer_line.is_some_and(|y| (y - 47.52).abs() < 0.1), "{report:?}");
+        assert!(report.moved_region.is_none());
     }
 
     /// A paragraph of plain, bold, italic and red words across lines.
@@ -331,7 +360,7 @@ mod paragraphs {
         assert!(paragraph.lines.len() == 3, "one paragraph of three lines: {:?}", paragraph.text);
         let new_text = "Payment of the full balance is due on receipt, and a small late fee applies after thirty days. Please contact the billing office immediately with any questions.";
         let (edited, report) = replace_paragraph(&bytes, None, &paragraph, new_text, &ParagraphStyle::of(&paragraph)).unwrap();
-        assert!(report.reused_font || !report.reused_font);
+        assert!(report.stand_ins.is_empty(), "standard fonts are drawn as themselves: {report:?}");
         std::fs::write(folder().join("mixed.pdf"), &edited).unwrap();
         let after = runs(&edited);
         assert_eq!(styled(&after, |r| r.1), "due on receipt", "{after:?}");

@@ -52,12 +52,16 @@ pub struct VellumApp {
 /// up as `VELLUM_SETUP` describes, saves a picture of its window once every
 /// visible page has rendered, and exits. `VELLUM_SETUP` is a comma-separated
 /// list of `organizer`, `night`, `dark`, `zoom=1.5`, `page=3`, `tool=Ink`,
-/// `search=text`, `dialog=name`, `tool=edit-text`, `edit-line=N` and
+/// `search=text`, `dialog=name`, `tool=edit-text`, `edit-line=N`,
+/// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
+/// `edit-paragraph`), `show-result`, `wait=seconds` and
 /// `sidebar=comments|fields|bookmarks|search`.
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
     requested: bool,
+    /// No picture before this, for work that finishes in the background.
+    not_before: std::time::Instant,
 }
 
 impl VellumApp {
@@ -93,7 +97,7 @@ impl VellumApp {
             app.open_path(file);
         }
         if let Ok(path) = std::env::var("VELLUM_SCREENSHOT") {
-            app.self_check = Some(SelfCheck { path: path.into(), frames: 0, requested: false });
+            app.self_check = Some(SelfCheck { path: path.into(), frames: 0, requested: false, not_before: std::time::Instant::now() });
             app.apply_setup(&std::env::var("VELLUM_SETUP").unwrap_or_default(), &cc.egui_ctx);
         }
         app
@@ -108,7 +112,7 @@ impl VellumApp {
                 "edit-paragraph" => {
                     self.tool = Tool::EditText;
                     if let (Some(tab), Ok(number)) = (self.tabs.get(self.active), value.parse::<usize>()) {
-                        if let Some(paragraph) = tab.editable_paragraphs(0).get(number.saturating_sub(1)).cloned() {
+                        if let Some(paragraph) = tab.editable_paragraphs(tab.current_page).get(number.saturating_sub(1)).cloned() {
                             viewer::begin_paragraph_edit(self.viewer_states.entry(tab.id).or_default(), paragraph);
                         }
                     }
@@ -116,9 +120,20 @@ impl VellumApp {
                 "edit-line" => {
                     self.tool = Tool::EditText;
                     if let (Some(tab), Ok(number)) = (self.tabs.get(self.active), value.parse::<usize>()) {
-                        if let Some(line) = tab.editable_lines(0).get(number.saturating_sub(1)).cloned() {
+                        if let Some(line) = tab.editable_lines(tab.current_page).get(number.saturating_sub(1)).cloned() {
                             viewer::begin_text_edit(self.viewer_states.entry(tab.id).or_default(), line);
                         }
+                    }
+                }
+                "edit-text" | "show-result" => {
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        let text = (key == "edit-text").then(|| value.replace(';', ","));
+                        viewer::set_text_being_edited(self.viewer_states.entry(tab.id).or_default(), text, key == "show-result");
+                    }
+                }
+                "wait" => {
+                    if let (Some(check), Ok(seconds)) = (self.self_check.as_mut(), value.parse::<f32>()) {
+                        check.not_before = std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
                     }
                 }
                 "night" => self.night_mode = true,
@@ -187,7 +202,7 @@ impl VellumApp {
             return;
         }
         let busy = self.tabs.iter().any(|t| !t.pending.is_empty()) || !self.jobs.is_empty();
-        if !check.requested && check.frames > 20 && (!busy || check.frames > 4000) {
+        if !check.requested && check.frames > 20 && std::time::Instant::now() >= check.not_before && (!busy || check.frames > 4000) {
             check.requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
@@ -1405,10 +1420,15 @@ impl VellumApp {
                 ViewerAction::ReplaceText { line, text, style } => self.edit_page_text("Edit text", |bytes, password| vellum_core::edit_text::replace_line(bytes, password, &line, &text, &style)),
                 ViewerAction::DeleteText(line) => self.edit_page_text("Delete text", |bytes, password| vellum_core::edit_text::delete_line(bytes, password, &line)),
                 ViewerAction::MoveText { page_index, bounds, offset } => self.edit_page_text("Move text", |bytes, password| vellum_core::edit_text::move_text(bytes, password, page_index, bounds, offset)),
-                ViewerAction::ReplaceParagraph { paragraph, rich, style } => {
+                ViewerAction::ReplaceParagraph { paragraph, rich, style, precomputed } => {
                     let Some(tab) = self.tabs.get_mut(self.active) else { continue };
                     let was_signed = tab.signed;
-                    let result = vellum_core::edit_text::replace_paragraph_rich(&tab.bytes, tab.password.as_deref(), &paragraph, &rich, &style).and_then(|(bytes, report)| {
+                    // The preview already did the work when it matches this edit.
+                    let edited = match precomputed {
+                        Some(done) => Ok(done),
+                        None => vellum_core::edit_text::replace_paragraph_rich(&tab.bytes, tab.password.as_deref(), &paragraph, &rich, &style),
+                    };
+                    let result = edited.and_then(|(bytes, report)| {
                         tab.replace_bytes("Edit paragraph", bytes)?;
                         Ok(report)
                     });
@@ -1427,8 +1447,8 @@ impl VellumApp {
                         } else {
                             message.push_str(" Ctrl+Z undoes it.");
                         }
-                        if !report.reused_font {
-                            message.push_str(" (Some original fonts could not be reused, so matching ones stand in.)");
+                        for stand_in in &report.stand_ins {
+                            message.push_str(&format!(" {} stands in for {}.", stand_in.stand_in, stand_in.original));
                         }
                         if was_signed {
                             message.push_str(" This invalidated the document's signatures.");

@@ -9,7 +9,7 @@ use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use vellum_core::annotations::{AnnotationKind, LinkTarget, NewAnnotation};
 use vellum_core::forms::{FieldInfo, FieldType, NewField, NewFieldKind};
 
-use vellum_core::edit_text::{Alignment, EditableLine, EditableParagraph, LineStyle, Overflow, ParagraphStyle};
+use vellum_core::edit_text::{Alignment, EditableLine, EditableParagraph, LineStyle, Overflow, ParagraphReport, ParagraphStyle};
 use vellum_core::fonts::StandardFont;
 use vellum_core::rich_text::{RichText, carry_styles};
 
@@ -118,7 +118,8 @@ pub enum ViewerAction {
     DeleteText(EditableLine),
     /// Move existing text (a line or paragraph) by an offset, unchanged in look.
     MoveText { page_index: usize, bounds: [f32; 4], offset: (f32, f32) },
-    ReplaceParagraph { paragraph: EditableParagraph, rich: RichText, style: ParagraphStyle },
+    /// `precomputed` is the preview's result when it matches the edit.
+    ReplaceParagraph { paragraph: EditableParagraph, rich: RichText, style: ParagraphStyle, precomputed: Option<(Vec<u8>, ParagraphReport)> },
     DeleteParagraph(EditableParagraph),
     AddPageText { page: u32, x: f32, y: f32, text: String, style: LineStyle },
 }
@@ -182,7 +183,34 @@ struct TextEditing {
     size: f32,
     color: [f32; 3],
     focus_requested: bool,
+    preview: EditPreview,
 }
+
+/// A paragraph edit worked out in the background while typing, so what it
+/// will do (lines moved, overlaps, fonts substituted) shows before applying.
+#[derive(Default)]
+struct EditPreview {
+    /// The edit as of last frame, and when it last changed: work starts
+    /// only after a pause in typing.
+    seen: String,
+    changed_at: Option<std::time::Instant>,
+    /// The edit the running or latest request is for.
+    requested: String,
+    running: Option<std::sync::mpsc::Receiver<(String, Result<PreviewResult, String>)>>,
+    latest: Option<(String, Result<PreviewResult, String>)>,
+    texture: Option<egui::TextureHandle>,
+    /// Shows the finished page in place of the editor.
+    show_page: bool,
+}
+
+struct PreviewResult {
+    bytes: Vec<u8>,
+    report: ParagraphReport,
+    page_image: egui::ColorImage,
+}
+
+/// How long typing must pause before the preview is worked out.
+const PREVIEW_PAUSE: std::time::Duration = std::time::Duration::from_millis(350);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FontFamilyChoice {
@@ -222,6 +250,7 @@ impl TextEditing {
             overflow: Overflow::PushDown,
             rich: None,
             focus_requested: false,
+            preview: EditPreview::default(),
         }
     }
 
@@ -281,6 +310,19 @@ impl TextEditing {
             leading: paragraph.leading * self.size / paragraph.first().apparent_size.max(0.1),
             ..ParagraphStyle::of(paragraph)
         }
+    }
+
+    /// The paragraph edit as it stands: the paragraph, its rich text and style.
+    fn paragraph_edit(&self) -> Option<(EditableParagraph, RichText, ParagraphStyle)> {
+        let paragraph = self.editing_paragraph()?.clone();
+        let rich = self.rich.clone().unwrap_or_else(|| carry_styles(&paragraph.rich, &self.text));
+        let style = self.paragraph_style(&paragraph);
+        Some((paragraph, rich, style))
+    }
+
+    /// The finished preview for exactly this edit of this document version.
+    fn current_preview(&self, key: &str) -> Option<&Result<PreviewResult, String>> {
+        self.preview.latest.as_ref().filter(|(done, _)| done == key).map(|(_, result)| result)
     }
 
     fn style(&self) -> LineStyle {
@@ -565,6 +607,24 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
             }
         }
         let editor_id = response.id;
+        let preview_key = if is_paragraph { update_preview(ui.ctx(), tab, editing, (72.0 * zoom * ui.ctx().pixels_per_point()).min(300.0)) } else { String::new() };
+        if is_paragraph && editing.changed() {
+            if let Some(Ok(result)) = editing.preview.latest.as_ref().map(|(_, result)| result) {
+                if !editing.preview.show_page {
+                    draw_preview(ui, geometry, page_rect, zoom, &result.report, false);
+                }
+            }
+            let preview = &mut editing.preview;
+            if preview.show_page {
+                if let Some((_, Ok(result))) = preview.latest.as_ref().filter(|(done, _)| *done == preview_key) {
+                    let texture = preview.texture.get_or_insert_with(|| ui.ctx().load_texture("edit preview", result.page_image.clone(), egui::TextureOptions::LINEAR)).clone();
+                    let painter = ui.painter_at(page_rect);
+                    painter.rect_filled(page_rect, 0.0, Color32::WHITE);
+                    painter.image(texture.id(), page_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    draw_preview(ui, geometry, page_rect, zoom, &result.report, true);
+                }
+            }
+        }
         if !editing.focus_requested {
             response.request_focus();
             editing.focus_requested = true;
@@ -636,7 +696,9 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                         cancel = true;
                     }
                 });
-                if editing.rich.is_some() {
+                if is_paragraph && editing.changed() {
+                    preview_summary(ui, editing, &preview_key);
+                } else if editing.rich.is_some() {
                     ui.weak("Select words, then B, I or the color to restyle them. Ctrl+Enter applies.");
                 } else {
                     ui.weak(format!("Original font: {}", editing.line.font_name));
@@ -655,9 +717,13 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                 if editing.text.trim().is_empty() {
                     actions.push(ViewerAction::DeleteParagraph(paragraph));
                 } else if editing.changed() {
-                    let style = editing.paragraph_style(&paragraph);
-                    let rich = editing.rich.clone().unwrap_or_else(|| carry_styles(&paragraph.rich, &editing.text));
-                    actions.push(ViewerAction::ReplaceParagraph { paragraph, rich, style });
+                    let precomputed = match editing.current_preview(&preview_key) {
+                        Some(Ok(result)) => Some((result.bytes.clone(), result.report.clone())),
+                        _ => None,
+                    };
+                    if let Some((paragraph, rich, style)) = editing.paragraph_edit() {
+                        actions.push(ViewerAction::ReplaceParagraph { paragraph, rich, style, precomputed });
+                    }
                 }
             } else if editing.text.trim().is_empty() {
                 actions.push(ViewerAction::DeleteText(editing.line));
@@ -954,6 +1020,147 @@ pub fn complete_pending_text(pending: &PendingText, settings: &ToolSettings) -> 
     })
 }
 
+/// Keeps the background preview in step with the edit: collects a finished
+/// result and, after a pause in typing, starts work on the latest edit.
+/// Returns the key naming the edit as it stands.
+fn update_preview(ctx: &egui::Context, tab: &DocumentTab, editing: &mut TextEditing, dpi: f32) -> String {
+    let Some((paragraph, rich, style)) = editing.paragraph_edit() else { return String::new() };
+    // The document version is part of the key, so a result for older bytes is never applied.
+    let key = format!("{}|{rich:?}|{style:?}", tab.version);
+    let changed = editing.changed();
+    let preview = &mut editing.preview;
+    if let Some(running) = &preview.running {
+        match running.try_recv() {
+            Ok(finished) => {
+                preview.running = None;
+                preview.texture = None;
+                preview.latest = Some(finished);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => preview.running = None,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+    if key != preview.seen {
+        preview.seen = key.clone();
+        preview.changed_at = Some(std::time::Instant::now());
+    }
+    if !changed || key == preview.requested || preview.running.is_some() {
+        return key;
+    }
+    let paused = preview.changed_at.is_none_or(|at| at.elapsed() >= PREVIEW_PAUSE);
+    if !paused {
+        ctx.request_repaint_after(PREVIEW_PAUSE);
+        return key;
+    }
+    preview.requested = key.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    preview.running = Some(receiver);
+    let (bytes, password, ctx, request_key) = (tab.bytes.clone(), tab.password.clone(), ctx.clone(), key.clone());
+    std::thread::spawn(move || {
+        let work = || -> anyhow::Result<PreviewResult> {
+            let (bytes, report) = vellum_core::edit_text::replace_paragraph_rich(&bytes, password.as_deref(), &paragraph, &rich, &style)?;
+            let document = vellum_core::engine::open_document(bytes.clone(), password.as_deref())?;
+            let rgba = vellum_core::engine::render_page(&document, paragraph.page_index, &vellum_core::engine::RenderOptions { dpi, ..Default::default() })?;
+            let page_image = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
+            Ok(PreviewResult { bytes, report, page_image })
+        };
+        let _ = sender.send((request_key, work().map_err(|error| format!("{error:#}"))));
+        ctx.request_repaint();
+    });
+    key
+}
+
+/// Marks on the page showing what the edit will do: the paragraph's new
+/// extent, the content that moves down, what it would overlap, and the
+/// footer zone when that is what stopped content moving. Over the result
+/// page (`on_result`), only where things landed is marked.
+fn draw_preview(ui: &egui::Ui, geometry: &PageGeometry, page_rect: Rect, zoom: f32, report: &ParagraphReport, on_result: bool) {
+    let painter = ui.painter_at(page_rect);
+    let blue = Color32::from_rgb(40, 110, 255);
+    let orange = Color32::from_rgb(230, 120, 0);
+    let red = Color32::from_rgb(220, 40, 40);
+    if report.lines_after != report.lines_before || report.scale < 0.999 {
+        let area = screen_rect_of(geometry, page_rect, zoom, report.area).expand(2.0);
+        let corners = [area.left_top(), area.right_top(), area.right_bottom(), area.left_bottom(), area.left_top()];
+        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.0, blue), 5.0, 3.0));
+    }
+    if let Some(region) = report.moved_region {
+        let shown = screen_rect_of(geometry, page_rect, zoom, region);
+        if !on_result {
+            painter.rect_filled(shown, 2.0, Color32::from_rgba_unmultiplied(230, 120, 0, 30));
+        }
+        // Where the moved content ends up.
+        let landing = shown.translate(vec2(0.0, report.moved_by * zoom)).expand(1.0);
+        let corners = [landing.left_top(), landing.right_top(), landing.right_bottom(), landing.left_bottom(), landing.left_top()];
+        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.0, orange), 4.0, 3.0));
+        let x = shown.right() - 10.0;
+        let length = (report.moved_by * zoom).max(8.0);
+        painter.arrow(pos2(x, shown.top() + 4.0), vec2(0.0, length), Stroke::new(2.0, orange));
+        preview_label(&painter, pos2(x - 6.0, shown.top() + 4.0), egui::Align2::RIGHT_TOP, &format!("moves down {:.0} pt", report.moved_by), orange);
+    }
+    if let Some(region) = report.overlap_region {
+        let shown = screen_rect_of(geometry, page_rect, zoom, region);
+        painter.rect_filled(shown, 1.0, Color32::from_rgba_unmultiplied(220, 40, 40, 45));
+        preview_label(&painter, shown.right_bottom() + vec2(-4.0, 2.0), egui::Align2::RIGHT_TOP, "overlaps the text below", red);
+    }
+    if let Some(footer) = report.footer_line {
+        let y = screen_rect_of(geometry, page_rect, zoom, [0.0, footer, 1.0, footer]).top();
+        painter.extend(egui::Shape::dashed_line(&[pos2(page_rect.left(), y), pos2(page_rect.right(), y)], Stroke::new(1.0, red), 6.0, 4.0));
+        preview_label(&painter, pos2(page_rect.left() + 6.0, y - 2.0), egui::Align2::LEFT_BOTTOM, "footer zone: nothing is pushed below this line", red);
+    }
+}
+
+/// Small text on a pale backing, readable over any page.
+fn preview_label(painter: &egui::Painter, position: Pos2, anchor: egui::Align2, text: &str, color: Color32) {
+    let galley = painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(11.0), color);
+    let rect = anchor.anchor_size(position, galley.size()).expand(2.0);
+    painter.rect_filled(rect, 2.0, Color32::from_rgba_unmultiplied(255, 255, 255, 220));
+    painter.galley(rect.min + vec2(2.0, 2.0), galley, color);
+}
+
+/// One line under the style bar saying what applying the edit will do.
+fn preview_summary(ui: &mut egui::Ui, editing: &mut TextEditing, key: &str) {
+    let warning = Color32::from_rgb(220, 110, 0);
+    ui.horizontal_wrapped(|ui| {
+        let stale = editing.current_preview(key).is_none();
+        match editing.preview.latest.as_ref().map(|(_, result)| result) {
+            None => {
+                ui.weak("Working out the result…");
+            }
+            Some(Err(error)) => {
+                ui.colored_label(Color32::from_rgb(220, 40, 40), format!("This edit can't be applied: {error}"));
+            }
+            Some(Ok(result)) => {
+                let report = &result.report;
+                let lines = if report.lines_after == report.lines_before { format!("{} lines", report.lines_after) } else { format!("{} → {} lines", report.lines_before, report.lines_after) };
+                ui.label(lines);
+                if report.moved_below > 0 {
+                    ui.label(format!("· the text below moves down {:.0} pt", report.moved_by));
+                }
+                if report.would_leave_page {
+                    ui.colored_label(warning, format!("· no room below, so it shrinks to {:.0}%", report.scale * 100.0));
+                } else if report.scale < 0.999 {
+                    ui.label(format!("· shrinks to {:.0}%", report.scale * 100.0));
+                }
+                if report.overlaps {
+                    ui.colored_label(warning, "· overlaps what follows");
+                }
+                for stand_in in &report.stand_ins {
+                    ui.colored_label(warning, format!("· {} stands in for {}", stand_in.stand_in, stand_in.original))
+                        .on_hover_text(format!("The original font can't draw the new text, so \"{}…\" uses {}.", stand_in.sample, stand_in.stand_in));
+                }
+                if stale {
+                    ui.weak("(updating…)");
+                }
+            }
+        }
+        let can_show = matches!(editing.current_preview(key), Some(Ok(_)));
+        ui.add_enabled_ui(can_show, |ui| {
+            ui.toggle_value(&mut editing.preview.show_page, "👁 Result").on_hover_text("Show the page as it will look after applying");
+        });
+    });
+}
+
 /// Bold, italic, color, family and size controls for rich paragraph editing.
 /// Each acts on the selected characters, or the whole paragraph when nothing
 /// is selected; bold and italic turn off when the whole range already has them.
@@ -1008,6 +1215,20 @@ pub fn begin_paragraph_edit(state: &mut ViewerState, paragraph: EditableParagrap
 }
 
 /// Zoom steps used by the zoom buttons.
+/// Sets the open editor's text and whether it shows the result page
+/// (for the app's self-check pictures).
+pub fn set_text_being_edited(state: &mut ViewerState, text: Option<String>, show_result: bool) {
+    if let Some(editing) = state.editing_text.as_mut() {
+        if let Some(text) = text {
+            if let Some(rich) = editing.rich.as_mut() {
+                *rich = carry_styles(rich, &text);
+            }
+            editing.text = text;
+        }
+        editing.preview.show_page |= show_result;
+    }
+}
+
 pub fn next_zoom(zoom: f32, larger: bool) -> f32 {
     const STEPS: [f32; 14] = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0];
     if larger {
@@ -1019,5 +1240,7 @@ pub fn next_zoom(zoom: f32, larger: bool) -> f32 {
 
 /// The scroll position is owned by egui; this marks a page to jump to.
 pub fn go_to_page(tab: &mut DocumentTab, page_index: usize) {
-    tab.scroll_to_page = Some(page_index.min(tab.pages.len().saturating_sub(1)));
+    let page_index = page_index.min(tab.pages.len().saturating_sub(1));
+    tab.scroll_to_page = Some(page_index);
+    tab.current_page = page_index;
 }

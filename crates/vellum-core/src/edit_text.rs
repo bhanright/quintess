@@ -591,6 +591,26 @@ pub struct ParagraphReport {
     pub would_leave_page: bool,
     /// Size applied relative to the requested one (below 1 when shrunk to fit).
     pub scale: f32,
+    /// The box the new paragraph occupies, in page space.
+    pub area: [f32; 4],
+    /// The content below that moves down (where it was), and how far.
+    pub moved_region: Option<[f32; 4]>,
+    pub moved_by: f32,
+    /// What the paragraph runs over when it overlaps the content below.
+    pub overlap_region: Option<[f32; 4]>,
+    /// The top of the page's footer zone, when it kept content from moving.
+    pub footer_line: Option<f32>,
+    /// Fonts standing in for original fonts that could not be reused.
+    pub stand_ins: Vec<FontStandIn>,
+}
+
+/// A font used in place of an original that could not draw the new text.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct FontStandIn {
+    pub original: String,
+    pub stand_in: String,
+    /// The start of the text drawn this way, to show which words it affects.
+    pub sample: String,
 }
 
 /// A word made of runs that may differ in style.
@@ -668,9 +688,10 @@ fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], 
 
 /// Fonts for each style in use: the original program when it can draw all
 /// of that style's characters, otherwise the closest system or standard font.
-/// Returns the setters (by palette index) and whether every one reused its original.
-fn setters_for(rich: &RichText, programs: &std::collections::HashMap<usize, Vec<u8>>) -> (Vec<Option<TextSetter>>, bool) {
-    let mut reused_all = true;
+/// Returns the setters (by palette index) and the fonts standing in for
+/// originals that could not be reused.
+fn setters_for(rich: &RichText, programs: &std::collections::HashMap<usize, Vec<u8>>) -> (Vec<Option<TextSetter>>, Vec<FontStandIn>) {
+    let mut stand_ins: Vec<FontStandIn> = Vec::new();
     let setters = (0..rich.palette.len())
         .map(|index| {
             let text: String = rich.text.chars().zip(&rich.styles).filter(|(_, s)| **s == index).map(|(c, _)| c).collect();
@@ -679,13 +700,32 @@ fn setters_for(rich: &RichText, programs: &std::collections::HashMap<usize, Vec<
             }
             let style = &rich.palette[index];
             let original = style.sample_object.and_then(|object| programs.get(&object)).and_then(|program| TextSetter::with_font_program(style.standard_font(), program.clone(), &style.font_name, &text));
-            if original.is_none() && !text.trim().is_empty() {
-                reused_all = false;
-            }
-            Some(original.unwrap_or_else(|| TextSetter::for_texts(style.standard_font(), [text.as_str()])))
+            let setter = original.unwrap_or_else(|| {
+                let stand_in = TextSetter::for_texts(style.standard_font(), [text.as_str()]);
+                // A standard font that was never embedded, drawn again as itself, is no substitution.
+                let same_standard_font = !stand_in.uses_embedded_fonts() && StandardFont::from_name(without_subset_tag(&style.font_name)) == Some(style.standard_font());
+                if !text.trim().is_empty() && !same_standard_font {
+                    let original = without_subset_tag(&style.font_name).to_string();
+                    let stand_in_name = stand_in.font_name();
+                    if !stand_ins.iter().any(|s| s.original == original && s.stand_in == stand_in_name) {
+                        let sample: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(30).collect();
+                        stand_ins.push(FontStandIn { original, stand_in: stand_in_name, sample });
+                    }
+                }
+                stand_in
+            });
+            Some(setter)
         })
         .collect();
-    (setters, reused_all)
+    (setters, stand_ins)
+}
+
+/// A font name without the "ABCDEF+" tag that marks an embedded subset.
+fn without_subset_tag(name: &str) -> &str {
+    match name.split_once('+') {
+        Some((tag, rest)) if tag.len() == 6 && tag.chars().all(|c| c.is_ascii_uppercase()) => rest,
+        _ => name,
+    }
 }
 
 /// Replaces a paragraph's text, re-wrapping it to the paragraph's width at
@@ -726,8 +766,10 @@ pub fn replace_paragraph_rich(bytes: &[u8], password: Option<&str>, paragraph: &
     let (edited, report) = replace_paragraph_once(bytes, password, paragraph, rich, style)?;
     if style.overflow == Overflow::PushDown && report.would_leave_page {
         let shrink = ParagraphStyle { overflow: Overflow::ShrinkToFit, ..style.clone() };
+        let footer_line = report.footer_line;
         let (edited, mut report) = replace_paragraph_once(bytes, password, paragraph, rich, &shrink)?;
         report.would_leave_page = true;
+        report.footer_line = footer_line;
         return Ok((edited, report));
     }
     Ok((edited, report))
@@ -737,7 +779,7 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
     let objects: Vec<usize> = rich.palette.iter().filter_map(|s| s.sample_object).collect();
     let (mut pdf, programs) = take_out_lines_keeping_fonts(bytes, password, &paragraph.lines, &objects)?;
     let first = paragraph.first();
-    let (setters, reused_font) = setters_for(rich, &programs);
+    let (setters, stand_ins) = setters_for(rich, &programs);
     let indent = paragraph.first_line_indent;
     let before = paragraph.lines.len();
     // The style bar's size scales every run, keeping their proportions.
@@ -764,6 +806,10 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
     let mut moved_below = 0;
     let mut would_leave_page = false;
     let mut overlaps = false;
+    let mut moved_region = None;
+    let mut footer_zone = None;
+    let largest_size = sizes.iter().copied().fold(0.0, f32::max);
+    let area = [left, new_bottom_baseline - largest_size * 0.25, left + style.width, first_baseline + largest_size * 0.8];
     if growth > 0.5 {
         let page_id = pdf.page_id(paragraph.page_index as u32 + 1)?;
         let page_box = pdf.page_box(page_id)?;
@@ -779,9 +825,11 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
             if count > 0 && lowest - growth < footer_line {
                 would_leave_page = true;
                 overlaps = true;
+                footer_zone = Some(footer_line);
             } else if count > 0 {
                 pdf = trial;
                 moved_below = count;
+                moved_region = Some([region[0], lowest, region[2], region[3]]);
             }
         } else {
             let (count, _) = crate::redact::shift_content(&mut Pdf { doc: pdf.doc.clone() }, paragraph.page_index as u32 + 1, region, (0.0, -growth))?;
@@ -834,7 +882,23 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
     }
     add_fonts_to_page(&mut pdf, page_id, &fonts)?;
     pdf.add_page_content(page_id, content.into_bytes(), true)?;
-    let report = ParagraphReport { lines_before: before, lines_after: laid_out.iter().filter(|l| !l.words.is_empty()).count(), reused_font, moved_below, overlaps, would_leave_page, scale };
+    // What the paragraph covers that it did not before.
+    let overlap_region = overlaps.then(|| [area[0], area[1], area[2], paragraph.bounds[1] + style.offset.1]);
+    let report = ParagraphReport {
+        lines_before: before,
+        lines_after: laid_out.iter().filter(|l| !l.words.is_empty()).count(),
+        reused_font: stand_ins.is_empty(),
+        moved_below,
+        overlaps,
+        would_leave_page,
+        scale,
+        area,
+        moved_region,
+        moved_by: if moved_below > 0 { growth } else { 0.0 },
+        overlap_region,
+        footer_line: footer_zone,
+        stand_ins,
+    };
     Ok((pdf.to_bytes(&crate::SaveSettings::default())?, report))
 }
 

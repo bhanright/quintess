@@ -480,8 +480,8 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     "{} lines → {} lines; {}{}{}",
                     report.lines_before,
                     report.lines_after,
-                    if report.reused_font { "original font reused" } else { "matching font substituted" },
-                    if report.moved_below > 0 { format!("; moved {} items below", report.moved_below) } else { String::new() },
+                    if report.reused_font { "original fonts reused".to_string() } else { report.stand_ins.iter().map(|s| format!("{} stands in for {}", s.stand_in, s.original)).collect::<Vec<_>>().join(", ") },
+                    if report.moved_below > 0 { format!("; moved {} items below down {:.1} pt", report.moved_below, report.moved_by) } else { String::new() },
                     if report.would_leave_page { format!("; the text below had no room to move, so the paragraph was set at {:.0}% size{}", report.scale * 100.0, if report.overlaps { " and still overlaps what follows" } else { "" }) } else if report.overlaps { "; overlaps what follows".to_string() } else { String::new() }
                 );
                 let target_path = output.output.clone().unwrap_or_else(|| input.input.clone());

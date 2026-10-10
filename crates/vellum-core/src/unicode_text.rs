@@ -414,6 +414,13 @@ impl TextSetter {
         self.unicode.is_some()
     }
 
+    /// The name of the font that draws most text: the original program, the
+    /// first system font in the fallback chain, or the standard font.
+    pub fn font_name(&self) -> String {
+        let embedded = self.unicode.as_ref().and_then(|unicode| unicode.preferred.as_ref().map(|face| face.postscript_name.clone()).or_else(|| faces(unicode.style).first().map(|face| face.postscript_name.clone())));
+        embedded.unwrap_or_else(|| self.standard.base_font_name().to_string())
+    }
+
     pub fn width(&self, text: &str, size: f32) -> f32 {
         match &self.unicode {
             Some(unicode) => unicode.measure(text) * size,
