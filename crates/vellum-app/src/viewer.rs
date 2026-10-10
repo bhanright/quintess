@@ -163,6 +163,8 @@ pub struct ViewerState {
     moving_bounds: Option<[f32; 4]>,
     last_viewport_width: f32,
     last_viewport_height: f32,
+    /// Which split-view pane this state was last drawn in.
+    pane: usize,
 }
 
 /// An existing line of page text open for editing.
@@ -358,8 +360,11 @@ fn resolution_for(zoom: f32, pixels_per_point: f32) -> u32 {
 }
 
 /// Draws the document and handles the tools. Returns the edits to apply.
-pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &ToolSettings, worker: &RenderWorker, night_mode: bool) -> Vec<ViewerAction> {
+/// `pane` tells the two halves of split view apart (0 otherwise).
+#[allow(clippy::too_many_arguments)]
+pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &ToolSettings, worker: &RenderWorker, night_mode: bool, pane: usize) -> Vec<ViewerAction> {
     let mut actions = Vec::new();
+    state.pane = pane;
     let pixels_per_point = ui.ctx().pixels_per_point();
     if tab.texture_night_mode != night_mode {
         tab.textures.clear();
@@ -390,7 +395,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
     }
     let content_height = y;
 
-    let mut scroll = egui::ScrollArea::both().auto_shrink([false, false]).id_salt(("viewer", tab.id));
+    let mut scroll = egui::ScrollArea::both().auto_shrink([false, false]).id_salt(("viewer", tab.id, pane));
     if let Some(page) = tab.scroll_to_page.take() {
         if let Some(top) = tops.get(page) {
             scroll = scroll.vertical_scroll_offset((top - PAGE_GAP).max(0.0));
@@ -737,7 +742,7 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         return;
     }
 
-    let id = ui.id().with(("page", tab.id, page_index));
+    let id = ui.id().with(("page", tab.id, page_index, state.pane));
     let sense = if tool == Tool::Hand { Sense::hover() } else { Sense::click_and_drag() };
     let response = ui.interact(page_rect, id, sense);
     let pointer = response.interact_pointer_pos().or(response.hover_pos());

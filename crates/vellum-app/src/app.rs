@@ -22,6 +22,7 @@ use crate::tab::{DocumentTab, FitMode};
 use crate::viewer::{self, Tool, ToolSettings, ViewerAction, ViewerState};
 
 mod commands;
+mod split;
 
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
 /// never collides with the viewer's resolutions).
@@ -50,6 +51,10 @@ pub struct VellumApp {
     settings: vellum_core::settings::Settings,
     /// The command palette, while open (Ctrl+K).
     palette: Option<commands::Palette>,
+    /// Two panes side by side (see `split.rs`).
+    split_view: bool,
+    right_pane_active: bool,
+    other_panes: HashMap<u64, split::OtherPane>,
 }
 
 /// A developer aid: with `VELLUM_SCREENSHOT=<file.png>` the app sets itself
@@ -93,6 +98,9 @@ impl VellumApp {
             worker_context: cc.egui_ctx.clone(),
             settings: vellum_core::settings::Settings::load(),
             palette: None,
+            split_view: false,
+            right_pane_active: false,
+            other_panes: HashMap::new(),
         };
         app.tool_settings.author = app.settings.author.clone();
         if let Err(error) = vellum_core::engine::pdfium() {
@@ -153,6 +161,12 @@ impl VellumApp {
                     }
                 }
                 "palette" => self.open_palette_with(value),
+                "split" => self.split_view = true,
+                "other-page" => {
+                    if let Ok(page) = value.parse::<usize>() {
+                        self.set_other_pane_page(page.saturating_sub(1));
+                    }
+                }
                 "wait" => {
                     if let (Some(check), Ok(seconds)) = (self.self_check.as_mut(), value.parse::<f32>()) {
                         check.not_before = std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
@@ -349,6 +363,7 @@ impl VellumApp {
         }
         let tab = self.tabs.remove(index);
         self.viewer_states.remove(&tab.id);
+        self.other_panes.remove(&tab.id);
         let _ = self.settings.save();
         if self.active >= self.tabs.len() {
             self.active = self.tabs.len().saturating_sub(1);
@@ -389,7 +404,9 @@ impl VellumApp {
         for tab in &mut self.tabs {
             if tab.textures.len() > 80 {
                 let current = tab.current_page;
-                tab.textures.retain(|(page, dpi), _| *dpi <= ORGANIZER_DPI || page.abs_diff(current) <= 6);
+                // In split view, the other pane's pages are in view too.
+                let other = self.other_panes.get(&tab.id).map(|pane| pane.current_page()).unwrap_or(current);
+                tab.textures.retain(|(page, dpi), _| *dpi <= ORGANIZER_DPI || page.abs_diff(current) <= 6 || page.abs_diff(other) <= 6);
             }
         }
     }
@@ -714,6 +731,10 @@ impl VellumApp {
                 ui.separator();
                 ui.checkbox(&mut self.organizer, "Organize pages");
                 ui.checkbox(&mut self.show_sidebar, "Sidebar");
+                let mut split = self.split_view;
+                if ui.checkbox(&mut split, "Split view").on_hover_text("Two panes side by side, each with its own page and zoom; click a pane to make zoom and page keys act on it").changed() {
+                    self.toggle_split_view();
+                }
                 ui.checkbox(&mut self.night_mode, "Night reading (inverted pages)");
                 if ui.checkbox(&mut self.dark_interface, "Dark interface").changed() {
                     ui.ctx().set_visuals(if self.dark_interface { egui::Visuals::dark() } else { egui::Visuals::light() });
@@ -1598,9 +1619,14 @@ impl eframe::App for VellumApp {
             } else if self.organizer {
                 egui::Frame::new().inner_margin(10.0).show(ui, |ui| self.organizer_view(ui));
             } else {
+                if self.split_view {
+                    viewer_actions = self.split_viewer(ui);
+                } else {
+                    let tab = &mut self.tabs[self.active];
+                    let state = self.viewer_states.entry(tab.id).or_default();
+                    viewer_actions = viewer::show(ui, tab, state, self.tool, &self.tool_settings, &self.worker, self.night_mode, 0);
+                }
                 let tab = &mut self.tabs[self.active];
-                let state = self.viewer_states.entry(tab.id).or_default();
-                viewer_actions = viewer::show(ui, tab, state, self.tool, &self.tool_settings, &self.worker, self.night_mode);
                 if let Some(error) = tab.error.take() {
                     self.status = format!("Rendering problem: {error}");
                     self.status_is_error = true;

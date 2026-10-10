@@ -99,6 +99,7 @@ pub(super) const COMMANDS: &[Command] = &[
             tab.fit = FitMode::Page;
         }
     }),
+    command("View", "Split view (on or off)", |app, _| app.toggle_split_view()),
     command("View", "Organize pages (on or off)", |app, _| app.organizer = !app.organizer),
     command("View", "Sidebar (on or off)", |app, _| app.show_sidebar = !app.show_sidebar).always(),
     command("View", "Night reading (on or off)", |app, _| app.night_mode = !app.night_mode).always(),
