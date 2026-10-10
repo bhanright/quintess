@@ -23,6 +23,10 @@ similar = "3.2.0"
 ocrs = "0.13"
 rten = "0.26"
 ureq = "3.4.2"
+rcgen = "0.14"
+x509-parser = "0.18.1"
+sha2 = "0.11.0"
+ring = "0.17"
 
 [dev-dependencies]
 image = "0.25"

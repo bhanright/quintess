@@ -10,6 +10,7 @@ pub mod bookmarks;
 pub mod compare;
 pub mod convert;
 pub mod create;
+pub mod der;
 pub mod fonts;
 pub mod forms;
 pub mod images;
@@ -23,6 +24,7 @@ pub mod pages;
 pub mod ranges;
 pub mod redact;
 pub mod security;
+pub mod signatures;
 pub mod strings;
 pub mod unicode_text;
 
