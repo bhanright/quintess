@@ -1,7 +1,7 @@
 //! Preferences shared by the app and the command line, stored as JSON in
 //! the user's application data folder (`%APPDATA%\Vellum\settings.json`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,22 @@ pub struct Settings {
     pub recent_files: Vec<PathBuf>,
     /// Path of the signing identity file used by default.
     pub signing_identity: Option<PathBuf>,
+    /// Where each file was left, most recent first, so it reopens there.
+    pub reading_positions: Vec<ReadingPosition>,
 }
+
+/// The page a file was left at, and its zoom (`None` when it was fitted to
+/// the window rather than zoomed by hand).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ReadingPosition {
+    pub path: PathBuf,
+    /// 0-based page index.
+    pub page: usize,
+    pub zoom: Option<f32>,
+}
+
+/// How many files' positions are kept.
+const REMEMBERED_POSITIONS: usize = 200;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -26,6 +41,7 @@ impl Default for Settings {
             language: "en-US".into(),
             recent_files: Vec::new(),
             signing_identity: None,
+            reading_positions: Vec::new(),
         }
     }
 }
@@ -54,9 +70,42 @@ impl Settings {
         Ok(())
     }
 
+    pub fn reading_position(&self, path: &Path) -> Option<&ReadingPosition> {
+        self.reading_positions.iter().find(|p| p.path == path)
+    }
+
+    /// Records where a file is being read; returns false when nothing changed.
+    pub fn remember_position(&mut self, path: &Path, page: usize, zoom: Option<f32>) -> bool {
+        let position = ReadingPosition { path: path.to_path_buf(), page, zoom };
+        if self.reading_positions.first() == Some(&position) {
+            return false;
+        }
+        self.reading_positions.retain(|p| p.path != path);
+        self.reading_positions.insert(0, position);
+        self.reading_positions.truncate(REMEMBERED_POSITIONS);
+        true
+    }
+
     pub fn remember_file(&mut self, path: PathBuf) {
         self.recent_files.retain(|p| p != &path);
         self.recent_files.insert(0, path);
         self.recent_files.truncate(12);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reading_positions_keep_the_latest_per_file() {
+        let mut settings = Settings::default();
+        assert!(settings.remember_position(Path::new("a.pdf"), 3, None));
+        assert!(!settings.remember_position(Path::new("a.pdf"), 3, None), "unchanged");
+        settings.remember_position(Path::new("b.pdf"), 7, Some(1.5));
+        settings.remember_position(Path::new("a.pdf"), 9, None);
+        assert_eq!(settings.reading_positions.len(), 2);
+        assert_eq!(settings.reading_position(Path::new("a.pdf")).map(|p| p.page), Some(9));
+        assert_eq!(settings.reading_position(Path::new("b.pdf")).and_then(|p| p.zoom), Some(1.5));
     }
 }

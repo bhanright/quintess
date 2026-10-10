@@ -261,7 +261,35 @@ impl VellumApp {
         }
         self.settings.remember_file(path.clone());
         let _ = self.settings.save();
-        self.add_tab(Some(path), bytes, None);
+        let position = self.settings.reading_position(&path).cloned();
+        if self.add_tab(Some(path), bytes, None) {
+            // Reopen where the file was left.
+            if let (Some(position), Some(tab)) = (position, self.tabs.last_mut()) {
+                if position.page > 0 && position.page < tab.pages.len() {
+                    viewer::go_to_page(tab, position.page);
+                    let message = format!("Opened {} at page {}, where you left off.", tab.title, position.page + 1);
+                    self.info(message);
+                }
+                if let (Some(zoom), Some(tab)) = (position.zoom, self.tabs.last_mut()) {
+                    tab.zoom = zoom.clamp(0.1, 8.0);
+                    tab.fit = FitMode::None;
+                }
+            }
+        }
+    }
+
+    /// Notes the page and zoom of each open file, saving them when a file
+    /// closes or the window does.
+    fn remember_reading_positions(&mut self, ctx: &egui::Context) {
+        for tab in &self.tabs {
+            if let Some(path) = &tab.path {
+                let zoom = (tab.fit == FitMode::None).then_some(tab.zoom);
+                self.settings.remember_position(path, tab.current_page, zoom);
+            }
+        }
+        if ctx.input(|i| i.viewport().close_requested()) {
+            let _ = self.settings.save();
+        }
     }
 
     fn add_tab(&mut self, path: Option<PathBuf>, bytes: Vec<u8>, password: Option<String>) -> bool {
@@ -315,6 +343,7 @@ impl VellumApp {
         }
         let tab = self.tabs.remove(index);
         self.viewer_states.remove(&tab.id);
+        let _ = self.settings.save();
         if self.active >= self.tabs.len() {
             self.active = self.tabs.len().saturating_sub(1);
         }
@@ -1754,6 +1783,9 @@ impl eframe::App for VellumApp {
         let ctx = ui.ctx().clone();
         self.receive_rendered_pages(&ctx);
         self.run_self_check(&ctx);
+        if self.self_check.is_none() {
+            self.remember_reading_positions(&ctx);
+        }
         let mut finished = Vec::new();
         self.jobs.retain(|job| match job.poll() {
             Some(result) => {
