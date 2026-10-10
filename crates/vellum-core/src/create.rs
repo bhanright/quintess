@@ -10,7 +10,7 @@ use crate::document::{Pdf, rectangle_to_object};
 use crate::fonts::{StandardFont, wrap_text};
 use crate::images::{draw_image_operator, embed_image_file};
 use crate::pages::number;
-use crate::strings::encode_win_ansi;
+use crate::strings::{encode_win_ansi, hex_string};
 
 /// How each image is laid onto its page.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -264,17 +264,6 @@ fn typeset(blocks: &[Block], settings: &TextPageSettings) -> Result<Pdf> {
     }
     pdf.set_page_order(&page_ids)?;
     Ok(pdf)
-}
-
-/// A hexadecimal string operand, safe for any byte values.
-fn hex_string(bytes: &[u8]) -> String {
-    let mut text = String::with_capacity(bytes.len() * 2 + 2);
-    text.push('<');
-    for byte in bytes {
-        text.push_str(&format!("{byte:02X}"));
-    }
-    text.push('>');
-    text
 }
 
 /// A blank document of `count` pages.

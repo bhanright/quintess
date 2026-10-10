@@ -119,6 +119,18 @@ pub fn literal_string_bytes(bytes: &[u8]) -> Vec<u8> {
     escaped
 }
 
+/// A hexadecimal string operand such as `<48656C6C6F>`, safe for any bytes
+/// and for building content streams in a UTF-8 `String`.
+pub fn hex_string(bytes: &[u8]) -> String {
+    let mut text = String::with_capacity(bytes.len() * 2 + 2);
+    text.push('<');
+    for byte in bytes {
+        text.push_str(&format!("{byte:02X}"));
+    }
+    text.push('>');
+    text
+}
+
 /// A PDF date string for now, such as `D:20261010143000+02'00'`.
 pub fn pdf_date_now() -> String {
     pdf_date(chrono::Local::now())

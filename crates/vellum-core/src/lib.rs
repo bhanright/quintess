@@ -4,9 +4,11 @@
 //! metadata) works on the `lopdf` object model through [`document::Pdf`].
 //! Rendering and positioned text come from PDFium through [`engine`].
 
+pub mod annotations;
 pub mod bookmarks;
 pub mod create;
 pub mod fonts;
+pub mod forms;
 pub mod images;
 pub mod stamp;
 pub mod document;

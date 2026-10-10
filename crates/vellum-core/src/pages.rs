@@ -471,3 +471,15 @@ pub fn display_to_page_point(bounds: [f32; 4], rotation: i64, x: f32, y: f32) ->
 pub fn displayed_page_size(pdf: &Pdf, page_id: ObjectId) -> Result<(f32, f32)> {
     Ok(displayed_size(pdf.page_box(page_id)?, pdf.page_rotation(page_id)?))
 }
+
+/// Converts a point from page space to displayed-page coordinates (the
+/// inverse of [`display_to_page_point`]).
+pub fn page_to_display_point(bounds: [f32; 4], rotation: i64, x: f32, y: f32) -> (f32, f32) {
+    let [left, bottom, right, top] = bounds;
+    match rotation.rem_euclid(360) {
+        90 => (y - bottom, right - x),
+        180 => (right - x, top - y),
+        270 => (top - y, x - left),
+        _ => (x - left, y - bottom),
+    }
+}
