@@ -423,14 +423,11 @@ impl VellumApp {
         let Some(tab) = self.tabs.get_mut(self.active) else { return false };
         let was_signed = tab.signed;
         let result = tab.apply(label, change);
+        let kept = tab.last_edit_kept_signatures;
         if self.report(result).is_none() {
             return false;
         }
-        if was_signed {
-            self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it."));
-        } else {
-            self.info(format!("{label} done. Ctrl+Z undoes it."));
-        }
+        self.report_edit(label, was_signed, kept);
         true
     }
 
@@ -685,12 +682,18 @@ impl VellumApp {
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let was_signed = tab.signed;
         let result = change(&tab.bytes, tab.password.as_deref()).and_then(|bytes| tab.replace_bytes(label, bytes));
+        let kept = tab.last_edit_kept_signatures;
         if self.report(result).is_some() {
-            if was_signed {
-                self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it."));
-            } else {
-                self.info(format!("{label} done. Ctrl+Z undoes it."));
-            }
+            self.report_edit(label, was_signed, kept);
+        }
+    }
+
+    /// The status line after an edit, saying what became of any signatures.
+    fn report_edit(&mut self, label: &str, was_signed: bool, kept_signatures: bool) {
+        match (was_signed, kept_signatures) {
+            (true, true) => self.info(format!("{label} done, saved as an update after the signatures, which stay valid. Ctrl+Z undoes it.")),
+            (true, false) => self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it.")),
+            _ => self.info(format!("{label} done. Ctrl+Z undoes it.")),
         }
     }
 
@@ -1343,10 +1346,13 @@ impl VellumApp {
                         for stand_in in &report.stand_ins {
                             message.push_str(&format!(" {} stands in for {}.", stand_in.stand_in, stand_in.original));
                         }
-                        if was_signed {
+                        let broke_signatures = was_signed && !self.tabs.get(self.active).is_some_and(|t| t.last_edit_kept_signatures);
+                        if broke_signatures {
                             message.push_str(" This invalidated the document's signatures.");
+                        } else if was_signed {
+                            message.push_str(" Saved as an update after the signatures, which stay valid.");
                         }
-                        if report.overlaps || was_signed {
+                        if report.overlaps || broke_signatures {
                             self.error(message);
                         } else {
                             self.info(message);

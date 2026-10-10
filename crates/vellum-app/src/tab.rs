@@ -90,6 +90,8 @@ pub struct DocumentTab {
     pub attachments: Vec<vellum_core::attachments::Attachment>,
     /// The document carries signatures, which a full rewrite would invalidate.
     pub signed: bool,
+    /// The last edit was saved as an update that left the signatures valid.
+    pub last_edit_kept_signatures: bool,
     /// PDFium's view of the current bytes, for text and search on this thread.
     document: Option<PdfDocument<'static>>,
     text_cache: RefCell<HashMap<usize, Rc<PageText>>>,
@@ -145,6 +147,7 @@ impl DocumentTab {
             fields: Vec::new(),
             attachments: Vec::new(),
             signed: false,
+            last_edit_kept_signatures: false,
             document: None,
             text_cache: RefCell::new(HashMap::new()),
             line_cache: RefCell::new(HashMap::new()),
@@ -215,6 +218,17 @@ impl DocumentTab {
 
     /// Swaps in new bytes (from an edit or a whole-document operation).
     pub fn replace_bytes(&mut self, label: &str, new_bytes: Vec<u8>) -> Result<()> {
+        // A signed document takes edits as updates after the signed bytes,
+        // which keeps the signatures valid; failing that, the whole file is
+        // rewritten and the signatures break.
+        let mut new_bytes = new_bytes;
+        self.last_edit_kept_signatures = false;
+        if self.signed {
+            if let Ok(updated) = vellum_core::incremental::update_from_bytes(&self.bytes, &new_bytes, self.password.as_deref()) {
+                new_bytes = updated;
+                self.last_edit_kept_signatures = true;
+            }
+        }
         let previous = std::mem::replace(&mut self.bytes, Arc::new(new_bytes));
         self.undo_stack.push((label.to_string(), previous.clone()));
         if self.undo_stack.len() > UNDO_LIMIT {

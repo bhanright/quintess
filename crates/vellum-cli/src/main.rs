@@ -719,6 +719,19 @@ fn open(input: &Input) -> Result<Pdf> {
 
 fn save(pdf: &mut Pdf, input: &Path, output: &Output) -> Result<PathBuf> {
     let target = output.output.clone().unwrap_or_else(|| input.to_path_buf());
+    // A signed input takes the edit as an update after the signed bytes, so its signatures stay valid.
+    let original = std::fs::read(input).unwrap_or_default();
+    let signed = !original.is_empty() && vellum_core::signatures::verify(&original).is_ok_and(|checks| !checks.is_empty());
+    if signed {
+        let mut plain = Pdf { doc: pdf.doc.clone() };
+        let edited = plain.to_bytes(&SaveSettings::default())?;
+        if let Ok(updated) = vellum_core::incremental::update_from_bytes(&original, &edited, None) {
+            std::fs::write(&target, updated)?;
+            println!("wrote {} (as an update after the signatures, which stay valid)", target.display());
+            return Ok(target);
+        }
+        eprintln!("note: this edit invalidates the document's signatures");
+    }
     pdf.save(&target, &SaveSettings { use_object_streams: output.compact, ..Default::default() })?;
     println!("wrote {}", target.display());
     Ok(target)
