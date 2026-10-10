@@ -42,6 +42,7 @@ pub enum AppRequest {
     StartFormMerge(FormMergeJob),
     ShowRedactionCheck(vellum_core::redaction_check::RedactionCheck),
     StartFolderSearch(FolderQuery),
+    StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf> },
     /// A step just applied, for the action being recorded (ignored otherwise).
     Record(vellum_core::batch::Step),
     /// Open a file (or switch to it) at a page, with the search shown.
@@ -144,6 +145,7 @@ pub enum Dialog {
     RedactionCheck(vellum_core::redaction_check::RedactionCheck),
     FolderSearch { folder: Option<PathBuf>, text: String, use_regex: bool, match_case: bool, whole_words: bool, subfolders: bool },
     FolderResults(Box<FolderResults>),
+    Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
     CheckForText { texts: String },
 }
 
@@ -219,6 +221,7 @@ impl Dialog {
             Dialog::RedactionCheck(_) => "Redaction check",
             Dialog::FolderSearch { .. } => "Search a folder",
             Dialog::FolderResults(_) => "Folder search results",
+            Dialog::Watch { .. } => "Watch a folder",
             Dialog::CheckForText { .. } => "Check for leftover text",
         };
         title.to_string()
@@ -676,6 +679,44 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 }
                 vellum_core::engine::search_pattern(text, *use_regex, *match_case, *whole_words)?;
                 outcome.requests.push(AppRequest::StartFolderSearch(FolderQuery { folder, text: text.clone(), use_regex: *use_regex, match_case: *match_case, whole_words: *whole_words, subfolders: *subfolders }));
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::Watch { folder, action, output, steps } => {
+            ui.label("While Vellum is open, PDFs dropped into the folder are run through an action and saved to the results folder. Originals move to a \"Processed\" folder inside it (or \"Failed\", with a note saying why).");
+            egui::Grid::new("watch").num_columns(2).show(ui, |ui| -> anyhow::Result<()> {
+                if ui.button("Folder to watch…").clicked() {
+                    if let Some(chosen) = rfd::FileDialog::new().set_title("Folder to watch").pick_folder() {
+                        *folder = Some(chosen);
+                    }
+                }
+                ui.label(folder.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "none chosen".into()));
+                ui.end_row();
+                if ui.button("Action…").clicked() {
+                    *action = rfd::FileDialog::new().add_filter("Action", &["json"]).pick_file();
+                    *steps = match action {
+                        Some(path) => vellum_core::batch::Action::load(path)?.steps.iter().map(vellum_core::batch::Step::describe).collect(),
+                        None => Vec::new(),
+                    };
+                }
+                ui.label(action.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "none chosen (record one with Tools ▸ Record an action)".into()));
+                ui.end_row();
+                if ui.button("Results folder…").clicked() {
+                    *output = rfd::FileDialog::new().set_title("Folder for the results").pick_folder();
+                }
+                ui.label(output.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "a \"Done\" folder inside the watched one".into()));
+                ui.end_row();
+                Ok(())
+            })
+            .inner?;
+            for (number, step) in steps.iter().enumerate() {
+                ui.weak(format!("{}. {step}", number + 1));
+            }
+            if buttons(ui, "Start watching", outcome) {
+                let folder = folder.clone().ok_or_else(|| anyhow::anyhow!("choose the folder to watch"))?;
+                let action = action.clone().ok_or_else(|| anyhow::anyhow!("choose the action to run"))?;
+                outcome.requests.push(AppRequest::StartWatch { folder, action, output: output.clone() });
                 outcome.keep_open = false;
             }
             return Ok(());

@@ -39,6 +39,7 @@ pub mod settings;
 pub mod signatures;
 pub mod strings;
 pub mod unicode_text;
+pub mod watch;
 
 pub use document::{Pdf, SaveSettings};
 

@@ -94,6 +94,31 @@ saves a picture of the window and exits (setup options are documented on
   incremental saves (each opened on its own). Also runs on any file for given
   words (Redact ▸ Check for leftover text; `vellum check-redaction`, exit code
   2 when found). `vellum redact --report` saves it.
+- Reading position: each file reopens at the page and zoom it was left at
+  (`Settings::reading_positions`, the last 200 files).
+- Command palette (Ctrl+K or Ctrl+Shift+P, `app/commands.rs`): every
+  command, tool, recent file and page number. The menus draw from the same
+  `COMMANDS` list, so a new command added there appears in both.
+- Split view (`app/split.rs`): two panes of one document, each with its own
+  page, zoom and scroll; the tab's view fields belong to the active pane
+  (last clicked) and the other pane's are swapped in while it draws.
+- Search a folder (`folder_search.rs`, Ctrl+Shift+F, CLI `search-folder`):
+  every PDF in a folder and its subfolders, matches with context; clicking
+  one opens the file at that page with the search shown.
+- Object inspector (`inspect.rs`, Inspect tool, `app/inspector.rs`): objects
+  under a point with font, embedding, program type (TrueType, OpenType CFF,
+  bare CFF, Type 1), whether editing can reuse the font, sizes, colors,
+  image pixels and compression; the chosen object is outlined.
+- Recording actions (`app/recording.rs`): while recording, dialogs and
+  commands report each step they apply as a batch `Step`; Stop and save
+  writes the action and opens the batch dialog. Text edits, comments,
+  signing and form filling aren't recorded. Batch steps now cover full
+  watermark settings and page ranges, background, image stamp, crop,
+  resize, pages per sheet, reverse, blank-page removal, custom optimize and
+  Bates numbers that continue across the files of a batch (`BatchState`).
+- Watched folder (`watch.rs`, Tools ▸ Watch a folder, CLI `watch`): PDFs
+  dropped into a folder are run through an action once their size settles;
+  originals move to Processed (or Failed with a note), results to Done.
 - Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).
@@ -106,10 +131,7 @@ saves a picture of the window and exits (setup options are documented on
 ## Ideas for next
 
 The ChatGPT feature list William shared on 2026-10-10 was reviewed; the
-three picks above came from it. Still worth doing from it: record app
-actions into a batch, a watched folder that runs a batch, reading position
-per file, split view, a command palette, search across a folder, and an
-object inspector.
+three picks above came from it. Everything worth doing from it is now done.
 
 1. Reusing bare CFF fonts (InDesign's usual embedding) when editing text.
 2. Underline and strikethrough as character styles (drawn as lines).

@@ -217,6 +217,10 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools", "Record an action (start or stop)", |app, _| app.toggle_recording())
         .hint("Do page, stamp, redaction, cleanup and conversion steps once, then save them to run on other files")
         .always(),
+    command("Tools", "Watch a folder…", |app, _| app.dialogs.push(Dialog::Watch { folder: None, action: None, output: None, steps: Vec::new() }))
+        .hint("Run an action on every PDF dropped into a folder, while Vellum is open")
+        .always(),
+    command("Tools", "Stop watching the folder", |app, _| app.stop_watch()).always(),
     command("Tools", "Run an action on files…", |app, _| app.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new(), steps: Vec::new() })).always(),
     command("Help", "About Vellum", |app, _| app.dialogs.push(Dialog::About)).always(),
 ];

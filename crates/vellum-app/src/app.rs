@@ -24,6 +24,7 @@ use crate::viewer::{self, Tool, ToolSettings, ViewerAction, ViewerState};
 mod commands;
 mod inspector;
 mod recording;
+mod watching;
 mod split;
 
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
@@ -60,6 +61,8 @@ pub struct VellumApp {
     inspector: Option<inspector::Inspector>,
     /// Steps of the action being recorded, while recording.
     recording: Option<Vec<vellum_core::batch::Step>>,
+    /// A folder being watched (see `watching.rs`).
+    watch: Option<watching::RunningWatch>,
 }
 
 /// A developer aid: with `VELLUM_SCREENSHOT=<file.png>` the app sets itself
@@ -109,6 +112,7 @@ impl VellumApp {
             other_panes: HashMap::new(),
             inspector: None,
             recording: None,
+            watch: None,
         };
         app.tool_settings.author = app.settings.author.clone();
         if let Err(error) = vellum_core::engine::pdfium() {
@@ -180,6 +184,12 @@ impl VellumApp {
                     }
                 }
                 "palette" => self.open_palette_with(value),
+                "watch" => {
+                    // folder;action
+                    if let Some((folder, action)) = value.split_once(';') {
+                        self.start_watch(PathBuf::from(folder), PathBuf::from(action), None);
+                    }
+                }
                 "command" => {
                     if let Some(command) = commands::COMMANDS.iter().find(|c| c.label == value) {
                         (command.run)(self, ctx);
@@ -1444,6 +1454,7 @@ impl VellumApp {
                 }
                 AppRequest::ShowRedactionCheck(check) => self.dialogs.push(Dialog::RedactionCheck(check)),
                 AppRequest::Record(step) => self.record(step),
+                AppRequest::StartWatch { folder, action, output } => self.start_watch(folder, action, output),
                 AppRequest::StartFolderSearch(query) => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Searching the folder", move |progress| {
@@ -1615,6 +1626,7 @@ impl eframe::App for VellumApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.receive_rendered_pages(&ctx);
+        self.receive_watch_events();
         self.run_self_check(&ctx);
         if self.self_check.is_none() {
             self.remember_reading_positions(&ctx);
@@ -1672,6 +1684,7 @@ impl eframe::App for VellumApp {
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 let color = if self.status_is_error { Color32::from_rgb(200, 60, 60) } else { ui.visuals().weak_text_color() };
+                self.watch_status(ui);
                 for job in &self.jobs {
                     ui.spinner();
                     ui.label(job.status_text());

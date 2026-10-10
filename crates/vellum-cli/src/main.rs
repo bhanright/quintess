@@ -485,6 +485,20 @@ enum Command {
         #[arg(long)]
         whole_words: bool,
     },
+    /// Watch a folder: new PDFs in it are run through an action and written
+    /// to an output folder, until stopped with Ctrl+C.
+    Watch {
+        folder: PathBuf,
+        /// The action (JSON) to run on each file.
+        #[arg(long)]
+        action: PathBuf,
+        /// Where results go; a "Done" folder inside the watched one by default.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Seconds between looks at the folder.
+        #[arg(long, default_value_t = 2.0)]
+        interval: f32,
+    },
     /// Search every PDF in a folder (and its subfolders).
     SearchFolder {
         folder: PathBuf,
@@ -1071,6 +1085,21 @@ fn run(cli: Cli) -> Result<()> {
                 println!("page {:>3}  {}", found.page_index + 1, found.text.replace(['\n', '\r'], " "));
             }
             println!("{} matches", matches.len());
+        }
+        Command::Watch { folder, action, out, interval } => {
+            use vellum_core::watch::{FolderWatcher, WatchEvent, WatchSettings};
+            let action = vellum_core::batch::Action::load(&action)?;
+            let mut watcher = FolderWatcher::new(WatchSettings { inbox: folder, action, output: out })?;
+            println!("watching {}; results go to {} (Ctrl+C stops)", watcher.inbox().display(), watcher.output().display());
+            loop {
+                for event in watcher.check() {
+                    match event {
+                        WatchEvent::Processed { input, output } => println!("processed {} -> {}", input.display(), output.display()),
+                        WatchEvent::Failed { input, error } => eprintln!("failed {}: {error}", input.display()),
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs_f32(interval.max(0.2)));
+            }
         }
         Command::SearchFolder { folder, query, regex, match_case, whole_words, no_subfolders } => {
             let pattern = engine::search_pattern(&query, regex, match_case, whole_words)?;
