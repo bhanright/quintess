@@ -37,6 +37,8 @@ pub enum Tool {
     TextField,
     CheckBox,
     SignatureField,
+    /// Draw a box to sign the document digitally there.
+    Sign,
 }
 
 impl Tool {
@@ -62,6 +64,7 @@ impl Tool {
             Tool::TextField => "Text field",
             Tool::CheckBox => "Checkbox",
             Tool::SignatureField => "Signature field",
+            Tool::Sign => "Sign here",
         }
     }
 
@@ -72,7 +75,7 @@ impl Tool {
 
     /// Tools that draw a rectangle by dragging.
     fn drags_a_box(self) -> bool {
-        matches!(self, Tool::TextBox | Tool::Rectangle | Tool::Ellipse | Tool::Link | Tool::RedactArea | Tool::TextField | Tool::CheckBox | Tool::SignatureField | Tool::Line | Tool::Arrow)
+        matches!(self, Tool::TextBox | Tool::Rectangle | Tool::Ellipse | Tool::Link | Tool::RedactArea | Tool::TextField | Tool::CheckBox | Tool::SignatureField | Tool::Line | Tool::Arrow | Tool::Sign)
     }
 }
 
@@ -102,6 +105,8 @@ pub enum ViewerAction {
     AskForText(PendingText),
     OpenLink(String),
     GoToPage(usize),
+    /// Sign digitally with the signature shown in this box.
+    Sign { page: u32, rect: [f32; 4] },
 }
 
 /// Something waiting for the person to type text in a dialog.
@@ -545,6 +550,7 @@ fn finish_drag(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, setti
         Tool::Link if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::LinkAddress, rect, text: "https://".into() })),
         Tool::TextField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Text), rect, text: String::new() })),
         Tool::CheckBox if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::CheckBox), rect, text: String::new() })),
+        Tool::Sign if big_enough => actions.push(ViewerAction::Sign { page, rect }),
         Tool::SignatureField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Signature), rect, text: String::new() })),
         _ => {}
     }

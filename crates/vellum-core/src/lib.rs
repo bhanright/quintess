@@ -5,7 +5,6 @@
 //! Rendering and positioned text come from PDFium through [`engine`].
 
 pub mod accessibility;
-pub mod ai;
 pub mod annotations;
 pub mod attachments;
 pub mod batch;

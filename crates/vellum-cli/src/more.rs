@@ -1,12 +1,12 @@
 //! Commands for optimization, export, attachments, comparison, OCR,
-//! signatures, accessibility, PDF/A, batch actions, AI and settings.
+//! signatures, accessibility, PDF/A, batch actions and settings.
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use vellum_core::settings::Settings;
-use vellum_core::{Pdf, SaveSettings, accessibility, ai, attachments, batch, compare, convert, engine, ocr, optimize, preflight, signatures};
+use vellum_core::{Pdf, SaveSettings, accessibility, attachments, batch, compare, convert, engine, ocr, optimize, preflight, signatures};
 
 use crate::{Input, Output, pages_of, save, write_or_print};
 
@@ -153,40 +153,10 @@ pub enum MoreCommand {
         #[arg(required = true)]
         inputs: Vec<PathBuf>,
     },
-    /// Ask the AI assistant (OpenRouter) about a document.
-    Ai {
-        #[command(flatten)]
-        input: Input,
-        #[command(subcommand)]
-        task: AiTask,
-    },
-    /// Show or change settings, e.g. `vellum settings ai_model=anthropic/claude-sonnet-5.5`.
+    /// Show or change settings, e.g. `vellum settings author="Jane Doe"`.
     Settings {
-        /// key=value pairs: author, language, openrouter_api_key, ai_model, signing_identity.
+        /// key=value pairs: author, language, signing_identity.
         changes: Vec<String>,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum AiTask {
-    /// A summary of the document.
-    Summarize {
-        /// short, medium or detailed.
-        #[arg(long, default_value = "medium")]
-        length: String,
-    },
-    /// Answer a question from the document, citing pages.
-    Ask { question: String },
-    /// Translate the document's text.
-    Translate {
-        language: String,
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
-    /// Build bookmarks from the content and write them into the file.
-    Bookmarks {
-        #[command(flatten)]
-        output: Output,
     },
 }
 
@@ -402,24 +372,6 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 bail!("{failures} files failed");
             }
         }
-        MoreCommand::Ai { input, task } => {
-            let settings = Settings::load();
-            let text = ai::document_text(&document(&input)?)?;
-            match task {
-                AiTask::Summarize { length } => println!("{}", ai::summarize(&settings, &text, &length)?),
-                AiTask::Ask { question } => println!("{}", ai::ask(&settings, &text, &question)?),
-                AiTask::Translate { language, output } => write_or_print(&ai::translate(&settings, &text, &language)?, &output)?,
-                AiTask::Bookmarks { output } => {
-                    let outline = ai::suggest_bookmarks(&settings, &text)?;
-                    for (depth, entry) in vellum_core::bookmarks::flatten_bookmarks(&outline) {
-                        println!("{}{}  (page {})", "  ".repeat(depth), entry.title, entry.page);
-                    }
-                    let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;
-                    vellum_core::bookmarks::set_bookmarks(&mut pdf, &outline)?;
-                    save(&mut pdf, &input.input, &output)?;
-                }
-            }
-        }
         MoreCommand::Settings { changes } => {
             let mut settings = Settings::load();
             for change in &changes {
@@ -427,8 +379,6 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 match key {
                     "author" => settings.author = value.into(),
                     "language" => settings.language = value.into(),
-                    "openrouter_api_key" => settings.openrouter_api_key = value.into(),
-                    "ai_model" => settings.ai_model = value.into(),
                     "signing_identity" => settings.signing_identity = Some(value.into()),
                     other => bail!("unknown setting \"{other}\""),
                 }
@@ -436,11 +386,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             if !changes.is_empty() {
                 settings.save()?;
             }
-            let mut shown = settings.clone();
-            if !shown.openrouter_api_key.is_empty() {
-                shown.openrouter_api_key = format!("…{}", &shown.openrouter_api_key[shown.openrouter_api_key.len().saturating_sub(4)..]);
-            }
-            println!("{}", serde_json::to_string_pretty(&shown)?);
+            println!("{}", serde_json::to_string_pretty(&settings)?);
         }
     }
     Ok(())

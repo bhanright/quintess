@@ -1,4 +1,4 @@
-//! Accessibility fixes, PDF/A conversion, batch actions and the AI assistant.
+//! Accessibility fixes, PDF/A conversion and batch actions.
 
 use std::path::PathBuf;
 
@@ -72,15 +72,4 @@ fn batch_action_runs_steps_over_files() {
         assert!(!text.contains("hr@example.com") && text.contains("INTERNAL"), "{text}");
         assert_eq!(vellum_core::metadata::read_info(&Pdf::from_bytes(&bytes, None).unwrap()).title.as_deref(), Some("Processed"));
     }
-}
-
-#[test]
-#[ignore = "calls OpenRouter; run with OPENROUTER_API_KEY set"]
-fn ai_answers_from_the_document() {
-    let settings = vellum_core::settings::Settings::default();
-    let document = engine::open_document(sample(), None).unwrap();
-    let text = vellum_core::ai::document_text(&document).unwrap();
-    let answer = vellum_core::ai::ask(&settings, &text, "How many days a week may employees work remotely?").unwrap();
-    println!("AI answer: {answer}");
-    assert!(answer.to_lowercase().contains("two") || answer.contains('2'), "{answer}");
 }

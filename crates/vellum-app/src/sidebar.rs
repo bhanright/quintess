@@ -21,6 +21,7 @@ pub enum SidebarPage {
     Comments,
     Fields,
     Search,
+    Attachments,
 }
 
 /// Edits requested from the sidebar.
@@ -30,6 +31,9 @@ pub enum SidebarAction {
     ReplyToAnnotation((u32, u16), String),
     FillField(String, String),
     SetBookmarks(Vec<BookmarkEntry>),
+    AddAttachment,
+    SaveAttachment(String),
+    RemoveAttachment(String),
 }
 
 #[derive(Default)]
@@ -52,6 +56,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
             (SidebarPage::Comments, "Comments"),
             (SidebarPage::Fields, "Fields"),
             (SidebarPage::Search, "Search"),
+            (SidebarPage::Attachments, "Files"),
         ] {
             ui.selectable_value(&mut state.page, page, label);
         }
@@ -63,6 +68,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
         SidebarPage::Comments => comments(ui, tab, state, &mut actions),
         SidebarPage::Fields => fields(ui, tab, state, &mut actions),
         SidebarPage::Search => search(ui, tab),
+        SidebarPage::Attachments => attachments(ui, tab, &mut actions),
     }
     actions
 }
@@ -351,4 +357,37 @@ fn context_around(page_text: &str, start: usize, length: usize) -> String {
     let after_end = page_text[end..].char_indices().nth(30).map(|(i, _)| end + i).unwrap_or(page_text.len());
     let excerpt = page_text[before_start..after_end].replace(['\r', '\n'], " ");
     format!("{}{}{}", if before_start > 0 { "…" } else { "" }, excerpt.trim(), if after_end < page_text.len() { "…" } else { "" })
+}
+
+fn attachments(ui: &mut egui::Ui, tab: &mut DocumentTab, actions: &mut Vec<SidebarAction>) {
+    if ui.button("Attach a file…").clicked() {
+        actions.push(SidebarAction::AddAttachment);
+    }
+    ui.separator();
+    let list = tab.attachments.clone();
+    if list.is_empty() {
+        ui.weak("No files are attached to this document.");
+        return;
+    }
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        for attachment in list {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(&attachment.name).strong());
+                let place = attachment.page.map(|p| format!("on page {p}")).unwrap_or_else(|| "attached to the document".into());
+                ui.weak(format!("{:.1} KB, {place}", attachment.size as f64 / 1024.0));
+                if !attachment.description.is_empty() {
+                    ui.label(&attachment.description);
+                }
+                ui.horizontal(|ui| {
+                    if ui.small_button("Save as…").clicked() {
+                        actions.push(SidebarAction::SaveAttachment(attachment.name.clone()));
+                    }
+                    if attachment.page.is_none() && ui.small_button("Remove").clicked() {
+                        actions.push(SidebarAction::RemoveAttachment(attachment.name.clone()));
+                    }
+                });
+            });
+        }
+    });
 }

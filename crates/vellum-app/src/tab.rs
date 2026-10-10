@@ -87,6 +87,9 @@ pub struct DocumentTab {
     pub bookmarks: Vec<BookmarkEntry>,
     pub annotations: Vec<AnnotationSummary>,
     pub fields: Vec<FieldInfo>,
+    pub attachments: Vec<vellum_core::attachments::Attachment>,
+    /// The document carries signatures, which a full rewrite would invalidate.
+    pub signed: bool,
     /// PDFium's view of the current bytes, for text and search on this thread.
     document: Option<PdfDocument<'static>>,
     text_cache: RefCell<HashMap<usize, Rc<PageText>>>,
@@ -135,6 +138,8 @@ impl DocumentTab {
             bookmarks: Vec::new(),
             annotations: Vec::new(),
             fields: Vec::new(),
+            attachments: Vec::new(),
+            signed: false,
             document: None,
             text_cache: RefCell::new(HashMap::new()),
             textures: HashMap::new(),
@@ -178,6 +183,8 @@ impl DocumentTab {
         self.bookmarks = read_bookmarks(&pdf).unwrap_or_default();
         self.annotations = list_annotations(&pdf);
         self.fields = list_fields(&pdf);
+        self.attachments = vellum_core::attachments::list(&pdf);
+        self.signed = self.fields.iter().any(|f| f.field_type == vellum_core::forms::FieldType::Signature && !f.value.is_empty());
         self.document = None;
         self.document = Some(engine::open_document(self.bytes.as_ref().clone(), self.password.as_deref())?);
         self.text_cache.borrow_mut().clear();

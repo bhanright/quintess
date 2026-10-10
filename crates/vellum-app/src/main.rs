@@ -5,6 +5,7 @@
 
 mod app;
 mod dialogs;
+mod jobs;
 mod render;
 mod sidebar;
 mod tab;

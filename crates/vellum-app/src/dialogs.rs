@@ -30,6 +30,12 @@ pub enum AppRequest {
     OpenUrlConfirmed(String),
     UnlockAndOpen { path: PathBuf, bytes: Vec<u8>, password: String },
     CloseTabDiscarding(usize),
+    StartOptimize(vellum_core::optimize::OptimizeSettings),
+    StartBatch { action: PathBuf, inputs: Vec<PathBuf> },
+    SettingsChanged(vellum_core::settings::Settings),
+    IdentityCreated(PathBuf),
+    ApplyAccessibilityFixes,
+    ConvertToPdfA,
 }
 
 pub enum Dialog {
@@ -57,6 +63,15 @@ pub enum Dialog {
     Password { path: PathBuf, bytes: Vec<u8>, password: String, error: String },
     UnsavedChanges { tab_index: usize, title: String },
     About,
+    Preferences(vellum_core::settings::Settings),
+    Optimize { preset: usize, dpi: f32, quality: u8, grayscale: bool, remove_metadata: bool },
+    Batch { action: Option<PathBuf>, inputs: Vec<PathBuf> },
+    CreateIdentity { name: String, email: String, organization: String },
+    TextResult { title: String, text: String },
+    SignatureResults(Vec<vellum_core::signatures::SignatureCheck>),
+    AccessibilityResults(Vec<vellum_core::accessibility::Check>),
+    PreflightResults(Vec<vellum_core::preflight::PreflightIssue>),
+    ComparisonResult { summary: String, report_path: PathBuf },
 }
 
 pub struct DialogOutcome {
@@ -66,8 +81,8 @@ pub struct DialogOutcome {
 }
 
 impl Dialog {
-    pub fn title(&self) -> &'static str {
-        match self {
+    pub fn title(&self) -> String {
+        let title: &str = match self {
             Dialog::Watermark { .. } => "Watermark",
             Dialog::HeaderFooter { .. } => "Header and footer",
             Dialog::Bates { .. } => "Bates numbering",
@@ -97,7 +112,17 @@ impl Dialog {
             Dialog::Password { .. } => "Password required",
             Dialog::UnsavedChanges { .. } => "Unsaved changes",
             Dialog::About => "About Vellum",
-        }
+            Dialog::Preferences(_) => "Preferences",
+            Dialog::Optimize { .. } => "Reduce file size",
+            Dialog::Batch { .. } => "Run an action on files",
+            Dialog::CreateIdentity { .. } => "Create a signing identity",
+            Dialog::TextResult { title, .. } => title,
+            Dialog::SignatureResults(_) => "Signatures",
+            Dialog::AccessibilityResults(_) => "Accessibility check",
+            Dialog::PreflightResults(_) => "PDF/A check",
+            Dialog::ComparisonResult { .. } => "Comparison",
+        };
+        title.to_string()
     }
 
     pub fn watermark() -> Self {
@@ -228,6 +253,194 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             if ui.button("Close").clicked() {
                 outcome.keep_open = false;
             }
+            return Ok(());
+        }
+        Dialog::Preferences(settings) => {
+            egui::Grid::new("preferences").num_columns(2).show(ui, |ui| {
+                ui.label("Your name");
+                ui.text_edit_singleline(&mut settings.author);
+                ui.end_row();
+                ui.label("Document language");
+                ui.text_edit_singleline(&mut settings.language);
+                ui.end_row();
+                ui.label("Signing identity");
+                ui.horizontal(|ui| {
+                    ui.label(settings.signing_identity.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".into()));
+                    if ui.button("Choose…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().add_filter("Vellum identity", &["json"]).pick_file() {
+                            settings.signing_identity = Some(path);
+                        }
+                    }
+                });
+                ui.end_row();
+            });
+            if buttons(ui, "Save", outcome) {
+                outcome.requests.push(AppRequest::SettingsChanged(settings.clone()));
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::CreateIdentity { name, email, organization } => {
+            ui.label("A self-signed identity lets you sign documents. Readers will show your signature as intact but your identity as unverified, unless they choose to trust it.");
+            egui::Grid::new("identity").num_columns(2).show(ui, |ui| {
+                ui.label("Name");
+                ui.text_edit_singleline(name);
+                ui.end_row();
+                ui.label("Email");
+                ui.text_edit_singleline(email);
+                ui.end_row();
+                ui.label("Organization");
+                ui.text_edit_singleline(organization);
+                ui.end_row();
+            });
+            if buttons(ui, "Create…", outcome) {
+                if name.trim().is_empty() {
+                    anyhow::bail!("enter your name");
+                }
+                if let Some(path) = rfd::FileDialog::new().add_filter("Vellum identity", &["json"]).set_file_name(format!("{} signing identity.json", name.trim())).save_file() {
+                    vellum_core::signatures::SigningIdentity::self_signed(name.trim(), email.trim(), organization.trim())?.save(&path)?;
+                    outcome.requests.push(AppRequest::IdentityCreated(path));
+                    outcome.keep_open = false;
+                }
+            }
+            return Ok(());
+        }
+        Dialog::Batch { action, inputs } => {
+            ui.label("An action is a JSON list of steps, such as OCR, redaction, watermark and optimize, run on every file.");
+            ui.horizontal(|ui| {
+                if ui.button("Choose action…").clicked() {
+                    *action = rfd::FileDialog::new().add_filter("Action", &["json"]).pick_file();
+                }
+                ui.label(action.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "No action chosen".into()));
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Choose files…").clicked() {
+                    if let Some(files) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_files() {
+                        *inputs = files;
+                    }
+                }
+                ui.label(format!("{} files", inputs.len()));
+            });
+            ui.collapsing("Example action", |ui| {
+                ui.monospace("{ \"steps\": [\n  { \"step\": \"ocr\" },\n  { \"step\": \"redact\", \"sensitive\": true },\n  { \"step\": \"watermark\", \"text\": \"DRAFT\" },\n  { \"step\": \"optimize\", \"preset\": \"smallest\" }\n], \"suffix\": \"-processed\" }");
+            });
+            if buttons(ui, "Run", outcome) {
+                let action = action.clone().ok_or_else(|| anyhow::anyhow!("choose an action file"))?;
+                if inputs.is_empty() {
+                    anyhow::bail!("choose files to process");
+                }
+                outcome.requests.push(AppRequest::StartBatch { action, inputs: inputs.clone() });
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::TextResult { text, .. } => {
+            ui.set_min_width(560.0);
+            egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                ui.add(egui::Label::new(text.as_str()).selectable(true));
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Copy").clicked() {
+                    ui.ctx().copy_text(text.clone());
+                }
+                if ui.button("Save as text…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Text", &["txt", "md"]).save_file() {
+                        let _ = std::fs::write(path, text.as_bytes());
+                    }
+                }
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
+            return Ok(());
+        }
+        Dialog::SignatureResults(checks) => {
+            ui.set_min_width(460.0);
+            if checks.is_empty() {
+                ui.label("This document has no digital signatures.");
+            }
+            for check in checks.iter() {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let (verdict, color) = if check.intact { ("Signature is intact", egui::Color32::from_rgb(40, 150, 70)) } else { ("Signature is INVALID", egui::Color32::from_rgb(200, 50, 50)) };
+                    ui.colored_label(color, RichText::new(verdict).strong());
+                    ui.label(format!("Signed by {} ({})", check.signer, check.field_name));
+                    if let Some(date) = vellum_core::metadata::pdf_date_to_iso(&check.signing_time) {
+                        ui.label(format!("When: {date}"));
+                    }
+                    if !check.reason.is_empty() {
+                        ui.label(format!("Reason: {}", check.reason));
+                    }
+                    for problem in &check.problems {
+                        ui.weak(format!("• {problem}"));
+                    }
+                });
+            }
+            if ui.button("Close").clicked() {
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::AccessibilityResults(checks) => {
+            ui.set_min_width(640.0);
+            let height = ui.ctx().content_rect().height() * 0.65;
+            egui::ScrollArea::vertical().max_height(height).show(ui, |ui| egui::Grid::new("accessibility results").num_columns(3).striped(true).min_col_width(20.0).show(ui, |ui| {
+                for check in checks.iter() {
+                    let (mark, color) = match check.status {
+                        vellum_core::accessibility::CheckStatus::Passed => ("✔", egui::Color32::from_rgb(40, 150, 70)),
+                        vellum_core::accessibility::CheckStatus::Failed => ("✘", egui::Color32::from_rgb(200, 50, 50)),
+                        vellum_core::accessibility::CheckStatus::NeedsReview => ("?", egui::Color32::from_rgb(200, 140, 20)),
+                        vellum_core::accessibility::CheckStatus::NotApplicable => ("–", egui::Color32::GRAY),
+                    };
+                    ui.colored_label(color, mark);
+                    ui.label(check.name);
+                    ui.allocate_ui(egui::vec2(420.0, 0.0), |ui| ui.add(egui::Label::new(check.detail.as_str()).wrap()));
+                    ui.end_row();
+                }
+            }));
+            ui.horizontal(|ui| {
+                if checks.iter().any(|c| c.fixable && c.status == vellum_core::accessibility::CheckStatus::Failed) && ui.button("Fix automatically").clicked() {
+                    outcome.requests.push(AppRequest::ApplyAccessibilityFixes);
+                    outcome.keep_open = false;
+                }
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
+            return Ok(());
+        }
+        Dialog::PreflightResults(issues) => {
+            if issues.is_empty() {
+                ui.label("No PDF/A problems were found by this check. A full validator such as veraPDF examines more rules.");
+            }
+            for issue in issues.iter() {
+                ui.label(RichText::new(issue.rule).strong());
+                ui.label(&issue.detail);
+                ui.add_space(4.0);
+            }
+            ui.horizontal(|ui| {
+                if issues.iter().any(|i| i.fixable) && ui.button("Convert to PDF/A-2b").clicked() {
+                    outcome.requests.push(AppRequest::ConvertToPdfA);
+                    outcome.keep_open = false;
+                }
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
+            return Ok(());
+        }
+        Dialog::ComparisonResult { summary, report_path } => {
+            egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+                ui.add(egui::Label::new(summary.as_str()).selectable(true));
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Open visual report").clicked() {
+                    let _ = std::process::Command::new("explorer").arg(report_path.as_os_str()).spawn();
+                }
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
             return Ok(());
         }
         Dialog::ConfirmLink(url) => {
@@ -818,6 +1031,33 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     }
                     metadata::write_page_labels(pdf, &ranges)
                 })?;
+                outcome.keep_open = false;
+            }
+        }
+        Dialog::Optimize { preset, dpi, quality, grayscale, remove_metadata } => {
+            ui.label(format!("Current size: {:.1} MB", tab.bytes.len() as f64 / 1_048_576.0));
+            ui.radio_value(preset, 0, "Keep quality: remove clutter and compress losslessly");
+            ui.radio_value(preset, 1, "Balanced: images at 150 DPI, JPEG quality 80");
+            ui.radio_value(preset, 2, "Smallest: images at 100 DPI, JPEG quality 65, no metadata");
+            ui.radio_value(preset, 3, "Custom");
+            if *preset == 3 {
+                ui.horizontal(|ui| {
+                    ui.label("Image resolution");
+                    ui.add(egui::DragValue::new(dpi).range(36.0..=600.0).suffix(" DPI"));
+                    ui.label("JPEG quality");
+                    ui.add(egui::DragValue::new(quality).range(10..=100));
+                });
+                ui.checkbox(grayscale, "Convert images to grayscale");
+                ui.checkbox(remove_metadata, "Remove document properties and metadata");
+            }
+            if buttons(ui, "Reduce", outcome) {
+                let settings = match preset {
+                    0 => vellum_core::optimize::OptimizeSettings::lossless(),
+                    1 => vellum_core::optimize::OptimizeSettings::default(),
+                    2 => vellum_core::optimize::OptimizeSettings::smallest(),
+                    _ => vellum_core::optimize::OptimizeSettings { target_dpi: Some(*dpi), jpeg_quality: *quality, grayscale_images: *grayscale, remove_metadata: *remove_metadata, ..Default::default() },
+                };
+                outcome.requests.push(AppRequest::StartOptimize(settings));
                 outcome.keep_open = false;
             }
         }

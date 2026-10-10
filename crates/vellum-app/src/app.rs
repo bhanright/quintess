@@ -15,6 +15,7 @@ use vellum_core::stamp::HeaderFooter;
 use vellum_core::{Pdf, SaveSettings};
 
 use crate::dialogs::{self, AppRequest, Dialog};
+use crate::jobs::{Job, JobOutcome};
 use crate::render::RenderWorker;
 use crate::sidebar::{self, SidebarAction, SidebarState};
 use crate::tab::{DocumentTab, FitMode};
@@ -41,13 +42,18 @@ pub struct VellumApp {
     dark_interface: bool,
     organizer: bool,
     self_check: Option<SelfCheck>,
+    jobs: Vec<Job>,
+    /// For starting jobs from code paths that have no `egui::Context` at hand.
+    worker_context: egui::Context,
+    settings: vellum_core::settings::Settings,
 }
 
 /// A developer aid: with `VELLUM_SCREENSHOT=<file.png>` the app sets itself
 /// up as `VELLUM_SETUP` describes, saves a picture of its window once every
 /// visible page has rendered, and exits. `VELLUM_SETUP` is a comma-separated
 /// list of `organizer`, `night`, `dark`, `zoom=1.5`, `page=3`, `tool=Ink`,
-/// `search=text` and `sidebar=comments|fields|bookmarks|search`.
+/// `search=text`, `dialog=name` and
+/// `sidebar=comments|fields|bookmarks|search`.
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -75,7 +81,11 @@ impl VellumApp {
             dark_interface: false,
             organizer: false,
             self_check: None,
+            jobs: Vec::new(),
+            worker_context: cc.egui_ctx.clone(),
+            settings: vellum_core::settings::Settings::load(),
         };
+        app.tool_settings.author = app.settings.author.clone();
         if let Err(error) = vellum_core::engine::pdfium() {
             app.error(format!("{error:#}"));
         }
@@ -130,6 +140,9 @@ impl VellumApp {
                     "watermark" => self.dialogs.push(Dialog::watermark()),
                     "redact" => self.dialogs.push(Dialog::redact()),
                     "protect" => self.dialogs.push(Dialog::protect()),
+                    "optimize" => self.dialogs.push(Dialog::Optimize { preset: 1, dpi: 150.0, quality: 80, grayscale: false, remove_metadata: false }),
+                    "preferences" => self.dialogs.push(Dialog::Preferences(self.settings.clone())),
+                    "accessibility" => self.check_accessibility(),
                     _ => {}
                 },
                 _ => {}
@@ -155,8 +168,8 @@ impl VellumApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
-        let rendering = self.tabs.iter().any(|t| !t.pending.is_empty());
-        if !check.requested && check.frames > 20 && (!rendering || check.frames > 400) {
+        let busy = self.tabs.iter().any(|t| !t.pending.is_empty()) || !self.jobs.is_empty();
+        if !check.requested && check.frames > 20 && (!busy || check.frames > 4000) {
             check.requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
@@ -197,6 +210,8 @@ impl VellumApp {
             self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: String::new() });
             return;
         }
+        self.settings.remember_file(path.clone());
+        let _ = self.settings.save();
         self.add_tab(Some(path), bytes, None);
     }
 
@@ -259,9 +274,14 @@ impl VellumApp {
     /// Runs an edit on the active document as one undoable step.
     fn edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) {
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        let was_signed = tab.signed;
         let result = tab.apply(label, change);
         if self.report(result).is_some() {
-            self.info(format!("{label} done. Ctrl+Z undoes it."));
+            if was_signed {
+                self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it."));
+            } else {
+                self.info(format!("{label} done. Ctrl+Z undoes it."));
+            }
         }
     }
 
@@ -415,6 +435,133 @@ impl VellumApp {
         }
     }
 
+    fn start_job(&mut self, ctx: &egui::Context, label: &str, work: impl FnOnce(&dyn Fn(u32, u32)) -> anyhow::Result<JobOutcome> + Send + 'static) {
+        self.jobs.push(Job::start(label, ctx, work));
+    }
+
+    /// The active tab's id, bytes and password, for handing to a job.
+    fn job_input(&self) -> Option<(u64, std::sync::Arc<Vec<u8>>, Option<String>, String)> {
+        self.tabs.get(self.active).map(|t| (t.id, t.bytes.clone(), t.password.clone(), t.title.clone()))
+    }
+
+    fn start_ocr(&mut self, ctx: &egui::Context) {
+        let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
+        self.start_job(ctx, "Recognizing text", move |progress| {
+            if !vellum_core::ocr::models_present() {
+                vellum_core::ocr::download_models()?;
+            }
+            let document = vellum_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
+            let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
+            let pages: Vec<u32> = (1..=pdf.page_count()).collect();
+            let report = vellum_core::ocr::make_searchable(&mut pdf, &document, &pages, &Default::default(), |done, total| progress(done, total))?;
+            drop(document);
+            if report.pages_recognized.is_empty() {
+                return Ok(JobOutcome::Message("Every page already has text; nothing to recognize.".into()));
+            }
+            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words)", report.words), bytes: pdf.to_bytes(&SaveSettings::default())? })
+        });
+    }
+
+    fn start_optimize(&mut self, ctx: &egui::Context, settings: vellum_core::optimize::OptimizeSettings) {
+        let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
+        self.start_job(ctx, "Reducing file size", move |_| {
+            let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
+            let (optimized, report) = vellum_core::optimize::optimize(&mut pdf, &settings)?;
+            if optimized.len() >= bytes.len() {
+                return Ok(JobOutcome::Message("The file is already as small as these settings can make it.".into()));
+            }
+            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Reduce file size ({:.0} KB → {:.0} KB, {} images resampled)", bytes.len() as f64 / 1024.0, optimized.len() as f64 / 1024.0, report.images_resampled), bytes: optimized })
+        });
+    }
+
+    fn start_compare(&mut self, ctx: &egui::Context) {
+        let Some((_, bytes, password, title)) = self.job_input() else { return };
+        let Some(other) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_title("Compare with which version?").pick_file() else { return };
+        self.start_job(ctx, "Comparing", move |_| {
+            let old_document = vellum_core::engine::open_document(std::fs::read(&other)?, None)?;
+            let new_document = vellum_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
+            let result = vellum_core::compare::compare(&old_document, &new_document, 100.0)?;
+            let other_name = other.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let report_path = std::env::temp_dir().join(format!("vellum-comparison-{}.html", std::process::id()));
+            std::fs::write(&report_path, vellum_core::compare::report_html(&result, &other_name, &title))?;
+            let mut summary = if result.is_identical() { "No differences found.\n".to_string() } else { String::new() };
+            summary.push_str(&format!("Older: {other_name} ({} pages)\nNewer: {title} ({} pages)\n\n", result.old_page_count, result.new_page_count));
+            for change in &result.text_changes {
+                let verb = if change.kind == vellum_core::compare::ChangeKind::Inserted { "added" } else { "removed" };
+                summary.push_str(&format!("Page {}: {verb} \"{}\"\n", change.page, change.text));
+            }
+            for page in result.pages.iter().filter(|p| p.changed_fraction > 0.0) {
+                summary.push_str(&format!("Page {} looks different ({:.1}% of the page)\n", page.page, page.changed_fraction * 100.0));
+            }
+            Ok(JobOutcome::Comparison { summary, report_path })
+        });
+    }
+
+    fn start_export(&mut self, ctx: &egui::Context, format: &'static str) {
+        let Some((_, bytes, password, title)) = self.job_input() else { return };
+        let stem = title.trim_end_matches(".pdf").to_string();
+        let Some(path) = rfd::FileDialog::new().add_filter(format, &[format]).set_file_name(format!("{stem}.{format}")).save_file() else { return };
+        self.start_job(ctx, "Exporting", move |_| {
+            let document = vellum_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
+            let structure = vellum_core::convert::analyze(&document, true)?;
+            match format {
+                "docx" => std::fs::write(&path, vellum_core::convert::to_docx(&structure)?)?,
+                "html" => std::fs::write(&path, vellum_core::convert::to_html(&structure, &stem))?,
+                _ => {
+                    let folder = path.with_file_name(format!("{stem}-images"));
+                    let link = format!("{stem}-images/");
+                    std::fs::write(&path, vellum_core::convert::to_markdown(&structure, Some((folder.as_path(), link.as_str())))?)?
+                }
+            }
+            Ok(JobOutcome::Message(format!("Exported to {}", path.display())))
+        });
+    }
+
+    fn sign_here(&mut self, page: u32, rect: [f32; 4]) {
+        let Some(identity_path) = self.settings.signing_identity.clone() else {
+            self.error("Create or choose a signing identity first.");
+            self.dialogs.push(Dialog::CreateIdentity { name: self.settings.author.clone(), email: String::new(), organization: String::new() });
+            return;
+        };
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        let result = vellum_core::signatures::SigningIdentity::load(&identity_path).and_then(|identity| {
+            let signed = vellum_core::signatures::sign(&tab.bytes, &identity, &vellum_core::signatures::SignOptions { placement: Some((page, rect)), reason: "I approve this document".into(), ..Default::default() })?;
+            tab.replace_bytes("Sign", signed)?;
+            Ok(identity.signer_name())
+        });
+        if let Some(name) = self.report(result) {
+            self.tool = Tool::Select;
+            self.info(format!("Signed by {name}. Save now: further edits would invalidate the signature."));
+        }
+    }
+
+    fn apply_job_outcome(&mut self, outcome: JobOutcome) {
+        match outcome {
+            JobOutcome::ReplaceBytes { tab_id, label, bytes } => {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    let result = tab.replace_bytes(&label, bytes);
+                    if self.report(result).is_some() {
+                        self.info(format!("{label}. Ctrl+Z undoes it."));
+                    }
+                }
+            }
+            JobOutcome::ShowText { title, text } => self.dialogs.push(Dialog::TextResult { title, text }),
+            JobOutcome::Comparison { summary, report_path } => self.dialogs.push(Dialog::ComparisonResult { summary, report_path }),
+            JobOutcome::Message(message) => self.info(message),
+        }
+    }
+
+    fn check_accessibility(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let result = tab.load_pdf().and_then(|pdf| {
+            let document = tab.pdfium_document().ok_or_else(|| anyhow::anyhow!("document not loaded"))?;
+            Ok(vellum_core::accessibility::check(&pdf, document))
+        });
+        if let Some(checks) = self.report(result) {
+            self.dialogs.push(Dialog::AccessibilityResults(checks));
+        }
+    }
+
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
@@ -475,6 +622,25 @@ impl VellumApp {
                 if ui.add_enabled(has_tab, egui::Button::new("Save compressed copy…")).clicked() {
                     self.save_compressed();
                 }
+                if ui.add_enabled(has_tab, egui::Button::new("Reduce file size…")).clicked() {
+                    self.dialogs.push(Dialog::Optimize { preset: 1, dpi: 150.0, quality: 80, grayscale: false, remove_metadata: false });
+                }
+                ui.menu_button("Export as", |ui| {
+                    for (label, format) in [("Word document (.docx)…", "docx"), ("Markdown (.md)…", "md"), ("Web page (.html)…", "html")] {
+                        if ui.add_enabled(has_tab, egui::Button::new(label)).clicked() {
+                            self.start_export(ui.ctx(), format);
+                        }
+                    }
+                });
+                if !self.settings.recent_files.is_empty() {
+                    ui.menu_button("Open recent", |ui| {
+                        for path in self.settings.recent_files.clone() {
+                            if ui.button(path.display().to_string()).clicked() {
+                                self.open_path(path);
+                            }
+                        }
+                    });
+                }
                 ui.menu_button("Export", |ui| self.export_menu(ui));
                 ui.separator();
                 if ui.add_enabled(has_tab, egui::Button::new("Properties…")).clicked() {
@@ -514,10 +680,9 @@ impl VellumApp {
                     self.sidebar.page = sidebar::SidebarPage::Search;
                 }
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Comment author");
-                    ui.text_edit_singleline(&mut self.tool_settings.author);
-                });
+                if ui.button("Preferences…").clicked() {
+                    self.dialogs.push(Dialog::Preferences(self.settings.clone()));
+                }
             });
             ui.menu_button("View", |ui| {
                 if ui.button("Zoom in  Ctrl++").clicked() {
@@ -702,6 +867,56 @@ impl VellumApp {
                 self.edit("Remove metadata", vellum_core::metadata::strip_metadata);
             }
         });
+        ui.menu_button("Sign", |ui| {
+            if ui.button("Sign here (draw a box)").clicked() {
+                self.tool = Tool::Sign;
+                self.info("Drag a box where the signature should appear.");
+            }
+            if ui.button("Check signatures").clicked() {
+                if let Some(tab) = self.tabs.get(self.active) {
+                    let result = vellum_core::signatures::verify(&tab.bytes);
+                    if let Some(checks) = self.report(result) {
+                        self.dialogs.push(Dialog::SignatureResults(checks));
+                    }
+                }
+            }
+            if ui.button("Create signing identity…").clicked() {
+                self.dialogs.push(Dialog::CreateIdentity { name: self.settings.author.clone(), email: String::new(), organization: String::new() });
+            }
+        });
+        ui.separator();
+        if ui.button("Recognize text (OCR)").clicked() {
+            self.start_ocr(ui.ctx());
+        }
+        if ui.button("Compare with another version…").clicked() {
+            self.start_compare(ui.ctx());
+        }
+        ui.menu_button("Accessibility", |ui| {
+            if ui.button("Check accessibility").clicked() {
+                self.check_accessibility();
+            }
+            if ui.button("Fix automatically").clicked() {
+                self.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes]);
+            }
+        });
+        ui.menu_button("PDF/A (archiving)", |ui| {
+            if ui.button("Check").clicked() {
+                if let Some(pdf) = self.tabs.get(self.active).map(|t| t.load_pdf()) {
+                    if let Some(pdf) = self.report(pdf) {
+                        self.dialogs.push(Dialog::PreflightResults(vellum_core::preflight::check_pdfa(&pdf)));
+                    }
+                }
+            }
+            if ui.button("Convert to PDF/A-2b").clicked() {
+                self.apply_app_requests(vec![AppRequest::ConvertToPdfA]);
+            }
+        });
+        if ui.button("Attach a file…").clicked() {
+            self.apply_sidebar_actions(vec![SidebarAction::AddAttachment]);
+        }
+        if ui.button("Run an action on files…").clicked() {
+            self.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new() });
+        }
     }
 
     fn export_menu(&mut self, ui: &mut egui::Ui) {
@@ -898,6 +1113,7 @@ impl VellumApp {
                 (Tool::Stamp, "🔖"),
                 (Tool::Link, "🔗"),
                 (Tool::RedactText, "▇ Redact"),
+                (Tool::Sign, "✍ Sign"),
             ] {
                 ui.selectable_value(&mut self.tool, tool, icon).on_hover_text(tool.label());
             }
@@ -1128,6 +1344,7 @@ impl VellumApp {
                 ViewerAction::AddField(field) => self.edit("Add field", |pdf| forms::add_field(pdf, &field).map(|_| ())),
                 ViewerAction::AskForText(pending) => self.dialogs.push(Dialog::Text(pending)),
                 ViewerAction::OpenLink(url) => self.dialogs.push(Dialog::ConfirmLink(url)),
+                ViewerAction::Sign { page, rect } => self.sign_here(page, rect),
                 ViewerAction::GoToPage(index) => {
                     if let Some(tab) = self.tab() {
                         viewer::go_to_page(tab, index);
@@ -1151,6 +1368,29 @@ impl VellumApp {
                     self.edit("Fill field", |pdf| forms::fill_fields(pdf, &values).map(|_| ()));
                 }
                 SidebarAction::SetBookmarks(entries) => self.edit("Bookmarks", |pdf| set_bookmarks(pdf, &entries)),
+                SidebarAction::AddAttachment => {
+                    if let Some(paths) = rfd::FileDialog::new().set_title("Attach files").pick_files() {
+                        self.edit("Attach files", |pdf| {
+                            for path in &paths {
+                                vellum_core::attachments::attach_file(pdf, path, "")?;
+                            }
+                            Ok(())
+                        });
+                    }
+                }
+                SidebarAction::SaveAttachment(name) => {
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        if let Some(attachment) = tab.attachments.iter().find(|a| a.name == name).cloned() {
+                            if let Some(path) = rfd::FileDialog::new().set_file_name(&name).save_file() {
+                                let result = tab.load_pdf().and_then(|pdf| vellum_core::attachments::read(&pdf, &attachment)).and_then(|data| Ok(std::fs::write(&path, data)?));
+                                if self.report(result).is_some() {
+                                    self.info(format!("Saved {}", path.display()));
+                                }
+                            }
+                        }
+                    }
+                }
+                SidebarAction::RemoveAttachment(name) => self.edit("Remove attachment", |pdf| vellum_core::attachments::remove(pdf, &name).map(|_| ())),
             }
         }
     }
@@ -1181,6 +1421,60 @@ impl VellumApp {
                     }
                 }
                 AppRequest::CloseTabDiscarding(index) => self.close_tab(index, true),
+                AppRequest::StartOptimize(settings) => {
+                    let ctx = self.worker_context.clone();
+                    self.start_optimize(&ctx, settings);
+                }
+                AppRequest::StartBatch { action, inputs } => {
+                    let ctx = self.worker_context.clone();
+                    self.start_job(&ctx, "Running action", move |progress| {
+                        let action = vellum_core::batch::Action::load(&action)?;
+                        let results = vellum_core::batch::run_action(&action, &inputs, |done, total, _| progress(done as u32, total as u32));
+                        let mut text = String::new();
+                        for result in results {
+                            match (result.output, result.error) {
+                                (Some(output), _) => text.push_str(&format!("✔ {} → {}\n", result.input.display(), output.display())),
+                                (_, Some(error)) => text.push_str(&format!("✘ {}: {error}\n", result.input.display())),
+                                _ => {}
+                            }
+                        }
+                        Ok(JobOutcome::ShowText { title: "Action results".into(), text })
+                    });
+                }
+                AppRequest::SettingsChanged(settings) => {
+                    self.tool_settings.author = settings.author.clone();
+                    self.settings = settings;
+                    let result = self.settings.save();
+                    if self.report(result).is_some() {
+                        self.info("Preferences saved.");
+                    }
+                }
+                AppRequest::IdentityCreated(path) => {
+                    self.settings.signing_identity = Some(path.clone());
+                    let _ = self.settings.save();
+                    self.info(format!("Created {}. Keep it private: it holds your signing key. Use Tools ▸ Sign ▸ Sign here.", path.display()));
+                }
+                AppRequest::ApplyAccessibilityFixes => {
+                    let title = self.tabs.get(self.active).map(|t| t.title.trim_end_matches(".pdf").to_string()).unwrap_or_default();
+                    let language = self.settings.language.clone();
+                    let mut fixed = Vec::new();
+                    self.edit("Accessibility fixes", |pdf| {
+                        fixed = vellum_core::accessibility::fix(pdf, &title, &language)?;
+                        Ok(())
+                    });
+                    self.check_accessibility();
+                    if !fixed.is_empty() {
+                        self.info(format!("Fixed: {}", fixed.join("; ")));
+                    }
+                }
+                AppRequest::ConvertToPdfA => {
+                    let mut remaining = Vec::new();
+                    self.edit("Convert to PDF/A-2b", |pdf| {
+                        remaining = vellum_core::preflight::convert_to_pdfa(pdf)?;
+                        Ok(())
+                    });
+                    self.dialogs.push(Dialog::PreflightResults(remaining));
+                }
             }
         }
     }
@@ -1256,6 +1550,20 @@ impl eframe::App for VellumApp {
         let ctx = ui.ctx().clone();
         self.receive_rendered_pages(&ctx);
         self.run_self_check(&ctx);
+        let mut finished = Vec::new();
+        self.jobs.retain(|job| match job.poll() {
+            Some(result) => {
+                finished.push((job.label.clone(), result));
+                false
+            }
+            None => true,
+        });
+        for (label, result) in finished {
+            match result {
+                Ok(outcome) => self.apply_job_outcome(outcome),
+                Err(error) => self.error(format!("{label} failed: {error:#}")),
+            }
+        }
         self.shortcuts(&ctx);
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F11)) {
             let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -1290,6 +1598,11 @@ impl eframe::App for VellumApp {
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 let color = if self.status_is_error { Color32::from_rgb(200, 60, 60) } else { ui.visuals().weak_text_color() };
+                for job in &self.jobs {
+                    ui.spinner();
+                    ui.label(job.status_text());
+                    ui.separator();
+                }
                 ui.colored_label(color, &self.status);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(format!("Tool: {}", self.tool.label()));

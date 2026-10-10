@@ -13,10 +13,6 @@ pub struct Settings {
     pub author: String,
     /// Default document language for accessibility fixes, such as `en-US`.
     pub language: String,
-    /// OpenRouter key for the AI features; `OPENROUTER_API_KEY` overrides it.
-    pub openrouter_api_key: String,
-    /// OpenRouter model for the AI features.
-    pub ai_model: String,
     /// Files opened recently, newest first.
     pub recent_files: Vec<PathBuf>,
     /// Path of the signing identity file used by default.
@@ -28,8 +24,6 @@ impl Default for Settings {
         Self {
             author: crate::annotations::default_author(),
             language: "en-US".into(),
-            openrouter_api_key: String::new(),
-            ai_model: "anthropic/claude-haiku-5.5".into(),
             recent_files: Vec::new(),
             signing_identity: None,
         }
@@ -58,11 +52,6 @@ impl Settings {
         std::fs::write(&partial, serde_json::to_string_pretty(self)?)?;
         std::fs::rename(partial, path)?;
         Ok(())
-    }
-
-    /// The key from the environment, else from the settings.
-    pub fn api_key(&self) -> Option<String> {
-        std::env::var("OPENROUTER_API_KEY").ok().filter(|k| !k.trim().is_empty()).or_else(|| Some(self.openrouter_api_key.trim().to_string()).filter(|k| !k.is_empty()))
     }
 
     pub fn remember_file(&mut self, path: PathBuf) {
