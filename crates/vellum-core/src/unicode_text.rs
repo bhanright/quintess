@@ -23,10 +23,25 @@ use crate::pages::number;
 use crate::strings::{encode_win_ansi, hex_string};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FontStyle {
+pub enum FontWeight {
     Regular,
     Bold,
     Italic,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FontFamily {
+    Sans,
+    Serif,
+    Monospace,
+}
+
+/// Which look of embedded font to use: a family and a weight, matching the
+/// standard font the text would otherwise be set in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FontStyle {
+    pub family: FontFamily,
+    pub weight: FontWeight,
 }
 
 /// A font file loaded from disk, with what the writer needs to know about it.
@@ -79,11 +94,25 @@ impl FaceData {
 /// Candidate font files, most general first. Missing files are skipped.
 fn fallback_files(style: FontStyle) -> Vec<(PathBuf, u32)> {
     let windows = PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
-    let main = match style {
-        FontStyle::Regular => ["segoeui.ttf", "arial.ttf"],
-        FontStyle::Bold => ["segoeuib.ttf", "arialbd.ttf"],
-        FontStyle::Italic => ["segoeuii.ttf", "ariali.ttf"],
+    // The font matching the standard font's look comes first, so Latin text
+    // looks like its neighbors; Segoe UI then covers Greek, Cyrillic and more.
+    let matching = match (style.family, style.weight) {
+        (FontFamily::Sans, FontWeight::Regular) => "arial.ttf",
+        (FontFamily::Sans, FontWeight::Bold) => "arialbd.ttf",
+        (FontFamily::Sans, FontWeight::Italic) => "ariali.ttf",
+        (FontFamily::Serif, FontWeight::Regular) => "times.ttf",
+        (FontFamily::Serif, FontWeight::Bold) => "timesbd.ttf",
+        (FontFamily::Serif, FontWeight::Italic) => "timesi.ttf",
+        (FontFamily::Monospace, FontWeight::Regular) => "cour.ttf",
+        (FontFamily::Monospace, FontWeight::Bold) => "courbd.ttf",
+        (FontFamily::Monospace, FontWeight::Italic) => "couri.ttf",
     };
+    let broad = match style.weight {
+        FontWeight::Regular => "segoeui.ttf",
+        FontWeight::Bold => "segoeuib.ttf",
+        FontWeight::Italic => "segoeuii.ttf",
+    };
+    let main = [matching, broad];
     let mut files: Vec<(PathBuf, u32)> = main.iter().map(|name| (windows.join(name), 0)).collect();
     for name in ["seguisym.ttf", "Nirmala.ttc", "msyh.ttc", "YuGothR.ttc", "malgun.ttf", "seguihis.ttf", "seguiemj.ttf"] {
         files.push((windows.join(name), 0));
@@ -106,15 +135,13 @@ fn fallback_files(style: FontStyle) -> Vec<(PathBuf, u32)> {
 }
 
 fn faces(style: FontStyle) -> &'static [FaceData] {
-    static REGULAR: OnceLock<Vec<FaceData>> = OnceLock::new();
-    static BOLD: OnceLock<Vec<FaceData>> = OnceLock::new();
-    static ITALIC: OnceLock<Vec<FaceData>> = OnceLock::new();
-    let cell = match style {
-        FontStyle::Regular => &REGULAR,
-        FontStyle::Bold => &BOLD,
-        FontStyle::Italic => &ITALIC,
-    };
-    cell.get_or_init(|| fallback_files(style).iter().filter(|(path, _)| path.exists()).filter_map(|(path, index)| FaceData::load(path, *index)).collect())
+    // Each look's fonts are loaded once and kept for the life of the program.
+    static LOADED: OnceLock<std::sync::Mutex<std::collections::HashMap<FontStyle, &'static [FaceData]>>> = OnceLock::new();
+    let mut loaded = LOADED.get_or_init(Default::default).lock().expect("font cache lock");
+    *loaded.entry(style).or_insert_with(|| {
+        let faces: Vec<FaceData> = fallback_files(style).iter().filter(|(path, _)| path.exists()).filter_map(|(path, index)| FaceData::load(path, *index)).collect();
+        Box::leak(faces.into_boxed_slice())
+    })
 }
 
 /// One embedded font being filled with the glyphs a document uses.
@@ -315,11 +342,17 @@ pub fn fits_win_ansi(text: &str) -> bool {
 }
 
 pub fn style_of(font: StandardFont) -> FontStyle {
-    match font {
-        StandardFont::HelveticaBold | StandardFont::TimesBold | StandardFont::CourierBold => FontStyle::Bold,
-        StandardFont::HelveticaOblique | StandardFont::TimesItalic => FontStyle::Italic,
-        _ => FontStyle::Regular,
-    }
+    let weight = match font {
+        StandardFont::HelveticaBold | StandardFont::TimesBold | StandardFont::CourierBold => FontWeight::Bold,
+        StandardFont::HelveticaOblique | StandardFont::TimesItalic => FontWeight::Italic,
+        _ => FontWeight::Regular,
+    };
+    let family = match font {
+        StandardFont::TimesRoman | StandardFont::TimesBold | StandardFont::TimesItalic => FontFamily::Serif,
+        StandardFont::Courier | StandardFont::CourierBold => FontFamily::Monospace,
+        _ => FontFamily::Sans,
+    };
+    FontStyle { family, weight }
 }
 
 /// Writes text-showing operators with whichever font the text needs.

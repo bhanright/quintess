@@ -18,6 +18,7 @@ pub mod forms;
 pub mod images;
 pub mod stamp;
 pub mod document;
+pub mod edit_text;
 pub mod engine;
 pub mod metadata;
 pub mod ocr;
