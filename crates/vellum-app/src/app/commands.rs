@@ -4,6 +4,7 @@
 //! that change (Undo …) draw their own, and the palette still lists them.
 
 use super::*;
+use vellum_core::batch::Step;
 
 /// One thing the app can do from a menu.
 pub(super) struct Command {
@@ -116,8 +117,8 @@ pub(super) const COMMANDS: &[Command] = &[
     .shortcut("F11")
     .always(),
     command("View", "Command palette", |app, _| app.open_palette()).shortcut("Ctrl+K").always(),
-    command("Tools ▸ Comment", "Flatten all comments into the page", |app, _| app.edit("Flatten comments", |pdf| forms::flatten(pdf, false).map(|_| ()))),
-    command("Tools ▸ Comment", "Remove all comments", |app, _| app.edit("Remove comments", |pdf| remove_annotations(pdf, &[]).map(|_| ()))),
+    command("Tools ▸ Comment", "Flatten all comments into the page", |app, _| app.edit_recording("Flatten comments", Step::Flatten { forms_only: false }, |pdf| forms::flatten(pdf, false).map(|_| ()))),
+    command("Tools ▸ Comment", "Remove all comments", |app, _| app.edit_recording("Remove comments", Step::RemoveComments, |pdf| remove_annotations(pdf, &[]).map(|_| ()))),
     command("Tools ▸ Comment", "Copy comment summary", |app, ctx| {
         if let Some(pdf) = app.tabs.get(app.active).map(|t| t.load_pdf()) {
             if let Some(pdf) = app.report(pdf) {
@@ -152,13 +153,13 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools ▸ Pages", "Resize to paper size…", |app, _| app.dialogs.push(Dialog::Resize { size: "letter".into(), landscape: false, pages: "all".into() })),
     command("Tools ▸ Pages", "Several pages per sheet…", |app, _| app.dialogs.push(Dialog::NUp { columns: 2, rows: 1, sheet: "letter".into(), frames: false })),
     command("Tools ▸ Pages", "Page labels…", |app, _| app.dialogs.push(Dialog::PageLabels { first_page: 1, style: "roman".into(), prefix: String::new(), start: 1 })),
-    command("Tools ▸ Pages", "Reverse order", |app, _| app.edit("Reverse pages", pages::reverse_pages)),
-    command("Tools ▸ Pages", "Remove blank pages", |app, _| app.edit("Remove blank pages", |pdf| pages::remove_blank_pages(pdf).map(|_| ()))),
+    command("Tools ▸ Pages", "Reverse order", |app, _| app.edit_recording("Reverse pages", Step::Reverse, pages::reverse_pages)),
+    command("Tools ▸ Pages", "Remove blank pages", |app, _| app.edit_recording("Remove blank pages", Step::RemoveBlankPages, |pdf| pages::remove_blank_pages(pdf).map(|_| ()))),
     command("Tools ▸ Forms", "Detect fields automatically", |app, _| app.detect_fields()),
     command("Tools ▸ Forms", "Import data…", |app, _| app.import_form_data()),
     command("Tools ▸ Forms", "Fill from spreadsheet…", |app, _| app.open_form_merge()).hint("One filled copy of this form for every row of a spreadsheet"),
     command("Tools ▸ Forms", "Clear all fields", |app, _| app.edit("Clear form", forms::reset_form)),
-    command("Tools ▸ Forms", "Flatten fields into the page", |app, _| app.edit("Flatten form", |pdf| forms::flatten(pdf, true).map(|_| ()))),
+    command("Tools ▸ Forms", "Flatten fields into the page", |app, _| app.edit_recording("Flatten form", Step::Flatten { forms_only: true }, |pdf| forms::flatten(pdf, true).map(|_| ()))),
     command("Tools ▸ Redact", "Find and redact…", |app, _| app.dialogs.push(Dialog::redact())),
     command("Tools ▸ Redact", "Check for leftover text…", |app, _| app.dialogs.push(Dialog::CheckForText { texts: String::new() })).hint("Search every part of the file for words that should be gone"),
     command("Tools ▸ Protect", "Protect with password…", |app, _| app.dialogs.push(Dialog::protect())),
@@ -172,7 +173,7 @@ pub(super) const COMMANDS: &[Command] = &[
             }
         }
     }),
-    command("Tools ▸ Protect", "Remove metadata", |app, _| app.edit("Remove metadata", vellum_core::metadata::strip_metadata)),
+    command("Tools ▸ Protect", "Remove metadata", |app, _| app.edit_recording("Remove metadata", Step::RemoveMetadata, vellum_core::metadata::strip_metadata)),
     command("Tools ▸ Sign", "Sign here (draw a box)", |app, _| {
         app.tool = Tool::Sign;
         app.info("Drag a box where the signature should appear.");
@@ -191,10 +192,16 @@ pub(super) const COMMANDS: &[Command] = &[
         .hint("Find words in every PDF in a folder")
         .always(),
     command("Tools", "Inspect objects", |app, _| app.tool = Tool::Inspect).hint("Click the page to see what is drawn there: fonts, sizes, colors, image details"),
-    command("Tools", "Recognize text (OCR)", |app, ctx| app.start_ocr(ctx)),
+    command("Tools", "Recognize text (OCR)", |app, ctx| {
+        app.start_ocr(ctx);
+        app.record(Step::Ocr { dpi: None });
+    }),
     command("Tools", "Compare with another version…", |app, ctx| app.start_compare(ctx)),
     command("Tools ▸ Accessibility", "Check accessibility", |app, _| app.check_accessibility()),
-    command("Tools ▸ Accessibility", "Fix automatically", |app, _| app.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes])),
+    command("Tools ▸ Accessibility", "Fix automatically", |app, _| {
+        app.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes]);
+        app.record(Step::AccessibilityFix);
+    }),
     command("Tools ▸ PDF/A (archiving)", "Check", |app, _| {
         if let Some(pdf) = app.tabs.get(app.active).map(|t| t.load_pdf()) {
             if let Some(pdf) = app.report(pdf) {
@@ -202,9 +209,15 @@ pub(super) const COMMANDS: &[Command] = &[
             }
         }
     }),
-    command("Tools ▸ PDF/A (archiving)", "Convert to PDF/A-2b", |app, _| app.apply_app_requests(vec![AppRequest::ConvertToPdfA])),
+    command("Tools ▸ PDF/A (archiving)", "Convert to PDF/A-2b", |app, _| {
+        app.apply_app_requests(vec![AppRequest::ConvertToPdfA]);
+        app.record(Step::PdfA);
+    }),
     command("Tools", "Attach a file…", |app, _| app.apply_sidebar_actions(vec![SidebarAction::AddAttachment])),
-    command("Tools", "Run an action on files…", |app, _| app.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new() })).always(),
+    command("Tools", "Record an action (start or stop)", |app, _| app.toggle_recording())
+        .hint("Do page, stamp, redaction, cleanup and conversion steps once, then save them to run on other files")
+        .always(),
+    command("Tools", "Run an action on files…", |app, _| app.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new(), steps: Vec::new() })).always(),
     command("Help", "About Vellum", |app, _| app.dialogs.push(Dialog::About)).always(),
 ];
 

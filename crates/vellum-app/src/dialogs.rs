@@ -15,6 +15,7 @@ use vellum_core::pages::{self, Margins, NUpLayout, SplitRule, paper_size};
 use vellum_core::ranges::parse_page_ranges;
 use vellum_core::redact::{self, RedactionArea, RedactionSettings};
 use vellum_core::security::{self, AllowedActions, Cipher, ProtectionSettings};
+use vellum_core::batch::Step;
 use vellum_core::stamp::{self, Anchor, HeaderFooter, ImageStamp, TextStamp};
 
 use crate::tab::DocumentTab;
@@ -41,6 +42,8 @@ pub enum AppRequest {
     StartFormMerge(FormMergeJob),
     ShowRedactionCheck(vellum_core::redaction_check::RedactionCheck),
     StartFolderSearch(FolderQuery),
+    /// A step just applied, for the action being recorded (ignored otherwise).
+    Record(vellum_core::batch::Step),
     /// Open a file (or switch to it) at a page, with the search shown.
     OpenAtMatch { path: PathBuf, page_index: usize, query: FolderQuery },
 }
@@ -127,7 +130,8 @@ pub enum Dialog {
     About,
     Preferences(vellum_core::settings::Settings),
     Optimize { preset: usize, dpi: f32, quality: u8, grayscale: bool, remove_metadata: bool },
-    Batch { action: Option<PathBuf>, inputs: Vec<PathBuf> },
+    /// `steps` describes the chosen action's steps.
+    Batch { action: Option<PathBuf>, inputs: Vec<PathBuf>, steps: Vec<String> },
     CreateIdentity { name: String, email: String, organization: String },
     TextResult { title: String, text: String },
     SignatureResults(Vec<vellum_core::signatures::SignatureCheck>),
@@ -605,14 +609,23 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             }
             return Ok(());
         }
-        Dialog::Batch { action, inputs } => {
-            ui.label("An action is a JSON list of steps, such as OCR, redaction, watermark and optimize, run on every file.");
-            ui.horizontal(|ui| {
+        Dialog::Batch { action, inputs, steps } => {
+            ui.label("An action is a list of steps, such as OCR, redaction, watermark and optimize, run on every file. Record one with Tools ▸ Record an action.");
+            ui.horizontal(|ui| -> anyhow::Result<()> {
                 if ui.button("Choose action…").clicked() {
                     *action = rfd::FileDialog::new().add_filter("Action", &["json"]).pick_file();
+                    *steps = match action {
+                        Some(path) => vellum_core::batch::Action::load(path)?.steps.iter().map(vellum_core::batch::Step::describe).collect(),
+                        None => Vec::new(),
+                    };
                 }
                 ui.label(action.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "No action chosen".into()));
-            });
+                Ok(())
+            })
+            .inner?;
+            for (number, step) in steps.iter().enumerate() {
+                ui.weak(format!("{}. {step}", number + 1));
+            }
             ui.horizontal(|ui| {
                 if ui.button("Choose files…").clicked() {
                     if let Some(files) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_files() {
@@ -882,6 +895,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let name = tab.title.clone();
                 let stamp = stamp.clone();
                 tab.apply("Watermark", |pdf| stamp::stamp_text(pdf, &chosen, &stamp, &name))?;
+                outcome.requests.push(AppRequest::Record(Step::Stamp { stamp, pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -922,6 +936,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let name = tab.title.clone();
                 let settings = settings.clone();
                 tab.apply("Header and footer", |pdf| stamp::add_header_footer(pdf, &chosen, &settings, &name).map(|_| ()))?;
+                outcome.requests.push(AppRequest::Record(Step::HeaderFooter { settings, pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -962,6 +977,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     next = stamp::add_header_footer(pdf, &all, &hf, &name)?;
                     Ok(())
                 })?;
+                outcome.requests.push(AppRequest::Record(Step::Bates { settings: hf }));
                 settings.bates_start = next;
                 outcome.requests.push(AppRequest::Status(format!("Numbered. The next document would start at {next}.")));
                 outcome.keep_open = false;
@@ -977,6 +993,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let chosen = parse_pages(tab, pages)?;
                 let color = *color;
                 tab.apply("Background", |pdf| stamp::set_background_color(pdf, &chosen, color))?;
+                outcome.requests.push(AppRequest::Record(Step::Background { color, pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -1005,6 +1022,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let chosen = parse_pages(tab, pages)?;
                 let settings = settings.clone();
                 tab.apply("Image stamp", |pdf| stamp::stamp_image(pdf, &chosen, &image, &settings))?;
+                outcome.requests.push(AppRequest::Record(Step::ImageStamp { image, settings, pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -1089,8 +1107,9 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             ui.horizontal(|ui| {
                 if ui.button("Remove all metadata").clicked() {
-                    if let Err(error) = tab.apply("Remove metadata", metadata::strip_metadata) {
-                        outcome.error = Some(error.to_string());
+                    match tab.apply("Remove metadata", metadata::strip_metadata) {
+                        Ok(()) => outcome.requests.push(AppRequest::Record(Step::RemoveMetadata)),
+                        Err(error) => outcome.error = Some(error.to_string()),
                     }
                     outcome.keep_open = false;
                 }
@@ -1098,6 +1117,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             if buttons(ui, "Save properties", outcome) {
                 let changes = DocumentInfo { producer: None, creation_date: None, modification_date: None, ..info.clone() };
                 tab.apply("Document properties", |pdf| metadata::write_info(pdf, &changes))?;
+                outcome.requests.push(AppRequest::Record(Step::Properties { info: changes }));
                 outcome.keep_open = false;
             }
         }
@@ -1176,6 +1196,18 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 }
                 let check = vellum_core::redaction_check::check_redaction(&tab.bytes, tab.password.as_deref(), &areas, &texts, label)?;
                 outcome.requests.push(AppRequest::ShowRedactionCheck(check));
+                // Recorded as the patterns themselves, so other files are searched afresh.
+                let mut patterns = Vec::new();
+                if !query.trim().is_empty() {
+                    let source = vellum_core::engine::search_pattern(query, *use_regex, *match_case, false)?.as_str().to_string();
+                    patterns.push(if *match_case { source } else { format!("(?i){source}") });
+                }
+                for ((_, on), (_, preset)) in presets.iter().zip(redact::sensitive_data_patterns()) {
+                    if *on {
+                        patterns.push(preset.as_str().to_string());
+                    }
+                }
+                outcome.requests.push(AppRequest::Record(Step::Redact { patterns, sensitive: false, label: label.clone(), remove_metadata: *strip_metadata }));
                 outcome.keep_open = false;
             }
         }
@@ -1190,6 +1222,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let chosen = parse_pages(tab, pages)?;
                 let degrees = *degrees;
                 tab.apply("Rotate pages", |pdf| pages::rotate_pages(pdf, &chosen, degrees))?;
+                outcome.requests.push(AppRequest::Record(Step::Rotate { degrees, pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -1198,6 +1231,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             if buttons(ui, "Delete", outcome) {
                 let chosen = parse_pages(tab, pages)?;
                 tab.apply("Delete pages", |pdf| pages::delete_pages(pdf, &chosen))?;
+                outcome.requests.push(AppRequest::Record(Step::Delete { pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -1304,6 +1338,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let chosen = parse_pages(tab, pages)?;
                 let margins = *margins;
                 tab.apply("Crop pages", |pdf| pages::crop_pages(pdf, &chosen, margins))?;
+                outcome.requests.push(AppRequest::Record(Step::Crop { margins, pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -1319,6 +1354,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let target = if *landscape { (height, width) } else { (width, height) };
                 let chosen = parse_pages(tab, pages)?;
                 tab.apply("Resize pages", |pdf| pages::resize_pages(pdf, &chosen, target))?;
+                outcome.requests.push(AppRequest::Record(Step::Resize { paper: size.clone(), landscape: *landscape, pages: pages.clone() }));
                 outcome.keep_open = false;
             }
         }
@@ -1340,6 +1376,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let (sheet_width, sheet_height) = if columns > rows { (height, width) } else { (width, height) };
                 let mut result = pages::n_up(&tab.load_pdf()?, &NUpLayout { columns: *columns, rows: *rows, sheet_width, sheet_height, gutter: 18.0, draw_frames: *frames })?;
                 outcome.requests.push(AppRequest::OpenDocument { title: format!("{} ({}-up).pdf", tab.title.trim_end_matches(".pdf"), *columns * *rows), bytes: result.to_bytes(&Default::default())? });
+                outcome.requests.push(AppRequest::Record(Step::PagesPerSheet { columns: *columns, rows: *rows, sheet: sheet.clone(), frames: *frames }));
                 outcome.keep_open = false;
             }
         }
@@ -1401,7 +1438,14 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     2 => vellum_core::optimize::OptimizeSettings::smallest(),
                     _ => vellum_core::optimize::OptimizeSettings { target_dpi: Some(*dpi), jpeg_quality: *quality, grayscale_images: *grayscale, remove_metadata: *remove_metadata, ..Default::default() },
                 };
+                let step = match preset {
+                    0 => Step::Optimize { preset: "lossless".into() },
+                    1 => Step::Optimize { preset: "balanced".into() },
+                    2 => Step::Optimize { preset: "smallest".into() },
+                    _ => Step::OptimizeCustom { settings: settings.clone() },
+                };
                 outcome.requests.push(AppRequest::StartOptimize(settings));
+                outcome.requests.push(AppRequest::Record(step));
                 outcome.keep_open = false;
             }
         }

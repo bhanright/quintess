@@ -23,6 +23,7 @@ use crate::viewer::{self, Tool, ToolSettings, ViewerAction, ViewerState};
 
 mod commands;
 mod inspector;
+mod recording;
 mod split;
 
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
@@ -57,6 +58,8 @@ pub struct VellumApp {
     right_pane_active: bool,
     other_panes: HashMap<u64, split::OtherPane>,
     inspector: Option<inspector::Inspector>,
+    /// Steps of the action being recorded, while recording.
+    recording: Option<Vec<vellum_core::batch::Step>>,
 }
 
 /// A developer aid: with `VELLUM_SCREENSHOT=<file.png>` the app sets itself
@@ -64,6 +67,7 @@ pub struct VellumApp {
 /// visible page has rendered, and exits. `VELLUM_SETUP` is a comma-separated
 /// list of `organizer`, `night`, `dark`, `zoom=1.5`, `page=3`, `tool=Ink`,
 /// `search=text`, `dialog=name`, `tool=edit-text`, `edit-line=N`,
+/// `command=Reverse order` (any command by its label),
 /// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
 /// `sidebar=comments|fields|bookmarks|search`.
@@ -104,6 +108,7 @@ impl VellumApp {
             right_pane_active: false,
             other_panes: HashMap::new(),
             inspector: None,
+            recording: None,
         };
         app.tool_settings.author = app.settings.author.clone();
         if let Err(error) = vellum_core::engine::pdfium() {
@@ -175,6 +180,11 @@ impl VellumApp {
                     }
                 }
                 "palette" => self.open_palette_with(value),
+                "command" => {
+                    if let Some(command) = commands::COMMANDS.iter().find(|c| c.label == value) {
+                        (command.run)(self, ctx);
+                    }
+                }
                 "split" => self.split_view = true,
                 "inspect" => {
                     // x;y on the current page
@@ -395,16 +405,23 @@ impl VellumApp {
 
     /// Runs an edit on the active document as one undoable step.
     fn edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) {
-        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        self.try_edit(label, change);
+    }
+
+    /// Like `edit`, and returns whether the edit was made.
+    fn try_edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) -> bool {
+        let Some(tab) = self.tabs.get_mut(self.active) else { return false };
         let was_signed = tab.signed;
         let result = tab.apply(label, change);
-        if self.report(result).is_some() {
-            if was_signed {
-                self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it."));
-            } else {
-                self.info(format!("{label} done. Ctrl+Z undoes it."));
-            }
+        if self.report(result).is_none() {
+            return false;
         }
+        if was_signed {
+            self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it."));
+        } else {
+            self.info(format!("{label} done. Ctrl+Z undoes it."));
+        }
+        true
     }
 
     fn receive_rendered_pages(&mut self, ctx: &egui::Context) {
@@ -1426,6 +1443,7 @@ impl VellumApp {
                     });
                 }
                 AppRequest::ShowRedactionCheck(check) => self.dialogs.push(Dialog::RedactionCheck(check)),
+                AppRequest::Record(step) => self.record(step),
                 AppRequest::StartFolderSearch(query) => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Searching the folder", move |progress| {
@@ -1647,6 +1665,9 @@ impl eframe::App for VellumApp {
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         if !self.tabs.is_empty() {
             egui::Panel::top("tabs").show(ui, |ui| self.tab_bar(ui));
+        }
+        if self.recording.is_some() {
+            egui::Panel::top("recording").show(ui, |ui| self.recording_bar(ui));
         }
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
