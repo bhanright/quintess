@@ -60,6 +60,12 @@ struct FaceData {
 impl FaceData {
     fn load(path: &PathBuf, index: u32) -> Option<Self> {
         let data = std::fs::read(path).ok()?;
+        let fallback_name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Embedded".into());
+        Self::from_bytes(data, index, &fallback_name)
+    }
+
+    /// A font from memory, such as one already embedded in a document.
+    fn from_bytes(data: Vec<u8>, index: u32, fallback_name: &str) -> Option<Self> {
         let face = ttf_parser::Face::parse(&data, index).ok()?;
         let units_per_em = face.units_per_em() as f32;
         let scale = 1000.0 / units_per_em;
@@ -68,7 +74,7 @@ impl FaceData {
             .into_iter()
             .find(|name| name.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
             .and_then(|name| name.to_string())
-            .unwrap_or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Embedded".into()))
+            .unwrap_or_else(|| fallback_name.to_string())
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
@@ -144,6 +150,11 @@ fn faces(style: FontStyle) -> &'static [FaceData] {
     })
 }
 
+/// The preferred font (if any) followed by the fallback chain.
+fn combined<'a>(preferred: &'a Option<std::sync::Arc<FaceData>>, chain: &'a [FaceData]) -> Vec<&'a FaceData> {
+    preferred.iter().map(|face| face.as_ref()).chain(chain.iter()).collect()
+}
+
 /// One embedded font being filled with the glyphs a document uses.
 struct UsedFace {
     face_index: usize,
@@ -159,6 +170,9 @@ struct UsedFace {
 pub struct UnicodeFonts {
     style: FontStyle,
     used: Vec<UsedFace>,
+    /// A font tried before the fallback chain, such as the original font of
+    /// text being edited.
+    preferred: Option<std::sync::Arc<FaceData>>,
 }
 
 /// A stretch of text drawn with one font.
@@ -172,7 +186,7 @@ pub struct GlyphRun {
 
 impl UnicodeFonts {
     pub fn new(style: FontStyle) -> Self {
-        Self { style, used: Vec::new() }
+        Self { style, used: Vec::new(), preferred: None }
     }
 
     /// True when at least one usable system font was found.
@@ -182,7 +196,7 @@ impl UnicodeFonts {
 
     /// Which font draws a character, and its original glyph id there.
     fn pick(&self, character: char) -> Option<(usize, u16)> {
-        faces(self.style).iter().enumerate().find_map(|(index, face)| face.face().glyph_index(character).map(|glyph| (index, glyph.0)))
+        combined(&self.preferred, faces(self.style)).into_iter().enumerate().find_map(|(index, face)| face.face().glyph_index(character).map(|glyph| (index, glyph.0)))
     }
 
     fn advance(face: &FaceData, glyph: u16) -> f32 {
@@ -191,10 +205,11 @@ impl UnicodeFonts {
 
     /// Width of `text` at a font size of 1 point.
     pub fn measure(&self, text: &str) -> f32 {
-        let all = faces(self.style);
+        let preferred = self.preferred.clone();
+        let all = combined(&preferred, faces(self.style));
         text.chars()
             .map(|character| match self.pick(character) {
-                Some((index, glyph)) => Self::advance(&all[index], glyph),
+                Some((index, glyph)) => Self::advance(all[index], glyph),
                 None => 500.0,
             })
             .sum::<f32>()
@@ -203,7 +218,8 @@ impl UnicodeFonts {
 
     /// Splits text into runs per font and records the glyphs it uses.
     pub fn layout(&mut self, doc: &mut Document, text: &str) -> Vec<GlyphRun> {
-        let all = faces(self.style);
+        let preferred = self.preferred.clone();
+        let all = combined(&preferred, faces(self.style));
         let mut runs: Vec<GlyphRun> = Vec::new();
         let mut current_face: Option<usize> = None;
         let mut glyph_bytes: Vec<u8> = Vec::new();
@@ -239,7 +255,7 @@ impl UnicodeFonts {
             }
             let used = self.used.iter_mut().find(|u| u.face_index == face_index).expect("just added");
             let new_glyph = used.remapper.remap(glyph);
-            let advance = Self::advance(&all[face_index], glyph);
+            let advance = Self::advance(all[face_index], glyph);
             used.widths.insert(new_glyph, advance);
             used.unicode.entry(new_glyph).or_insert_with(|| character.to_string());
             glyph_bytes.extend_from_slice(&new_glyph.to_be_bytes());
@@ -251,9 +267,10 @@ impl UnicodeFonts {
 
     /// Writes every font used so far into the document as subsets.
     pub fn finish(self, doc: &mut Document) -> Result<()> {
-        let all = faces(self.style);
+        let preferred = self.preferred.clone();
+        let all = combined(&preferred, faces(self.style));
         for used in self.used {
-            let face = &all[used.face_index];
+            let face = all[used.face_index];
             let subset = subsetter::subset(&face.data, face.index, &used.remapper).map_err(|error| anyhow!("could not subset {}: {error:?}", face.postscript_name))?;
             // A six-letter tag marks the font as a subset, as the PDF format asks.
             let tag: String = (0..6).map(|i| (b'A' + ((used.font_id.0 as usize / 26usize.pow(i)) % 26) as u8) as char).collect();
@@ -376,6 +393,21 @@ impl TextSetter {
         let style = style_of(preferred);
         let unicode = (embed && UnicodeFonts::available(style)).then(|| UnicodeFonts::new(style));
         Self { standard: preferred, standard_id: None, unicode, fonts: Dictionary::new() }
+    }
+
+    /// A setter that draws with an existing font program (for example the
+    /// original font of edited text), when it is a TrueType or OpenType font
+    /// with a glyph for every character of `text`. Returns `None` otherwise.
+    pub fn with_font_program(preferred: StandardFont, program: Vec<u8>, name: &str, text: &str) -> Option<Self> {
+        let face = FaceData::from_bytes(program, 0, name)?;
+        let parsed = face.face();
+        if !text.chars().filter(|c| !c.is_whitespace()).all(|c| parsed.glyph_index(c).is_some()) {
+            return None;
+        }
+        drop(parsed);
+        let mut unicode = UnicodeFonts::new(style_of(preferred));
+        unicode.preferred = Some(std::sync::Arc::new(face));
+        Some(Self { standard: preferred, standard_id: None, unicode: Some(unicode), fonts: Dictionary::new() })
     }
 
     pub fn uses_embedded_fonts(&self) -> bool {

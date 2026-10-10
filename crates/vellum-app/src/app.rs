@@ -52,7 +52,7 @@ pub struct VellumApp {
 /// up as `VELLUM_SETUP` describes, saves a picture of its window once every
 /// visible page has rendered, and exits. `VELLUM_SETUP` is a comma-separated
 /// list of `organizer`, `night`, `dark`, `zoom=1.5`, `page=3`, `tool=Ink`,
-/// `search=text`, `dialog=name` and
+/// `search=text`, `dialog=name`, `tool=edit-text`, `edit-line=N` and
 /// `sidebar=comments|fields|bookmarks|search`.
 struct SelfCheck {
     path: PathBuf,
@@ -104,6 +104,15 @@ impl VellumApp {
             let (key, value) = item.split_once('=').unwrap_or((item, ""));
             match key {
                 "organizer" => self.organizer = true,
+                "tool" if value == "edit-text" => self.tool = Tool::EditText,
+                "edit-line" => {
+                    self.tool = Tool::EditText;
+                    if let (Some(tab), Ok(number)) = (self.tabs.get(self.active), value.parse::<usize>()) {
+                        if let Some(line) = tab.editable_lines(0).get(number.saturating_sub(1)).cloned() {
+                            viewer::begin_text_edit(self.viewer_states.entry(tab.id).or_default(), line);
+                        }
+                    }
+                }
                 "night" => self.night_mode = true,
                 "dark" => {
                     self.dark_interface = true;
@@ -143,6 +152,7 @@ impl VellumApp {
                     "optimize" => self.dialogs.push(Dialog::Optimize { preset: 1, dpi: 150.0, quality: 80, grayscale: false, remove_metadata: false }),
                     "preferences" => self.dialogs.push(Dialog::Preferences(self.settings.clone())),
                     "accessibility" => self.check_accessibility(),
+                    "print" => self.open_print_dialog(),
                     _ => {}
                 },
                 _ => {}
@@ -324,6 +334,12 @@ impl VellumApp {
             self.redo();
         } else if shortcut(Modifiers::COMMAND, Key::Z) {
             self.undo();
+        }
+        if shortcut(Modifiers::COMMAND, Key::P) {
+            self.open_print_dialog();
+        }
+        if shortcut(Modifiers::COMMAND, Key::H) && !self.tabs.is_empty() {
+            self.dialogs.push(Dialog::FindReplace { find: String::new(), replace: String::new(), use_regex: false, match_case: false });
         }
         if shortcut(Modifiers::COMMAND, Key::W) {
             self.close_tab(self.active, false);
@@ -517,6 +533,26 @@ impl VellumApp {
         });
     }
 
+    /// Applies a bytes-to-bytes text edit to the active tab as one undoable step.
+    fn edit_page_text(&mut self, label: &str, change: impl FnOnce(&[u8], Option<&str>) -> anyhow::Result<Vec<u8>>) {
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        let was_signed = tab.signed;
+        let result = change(&tab.bytes, tab.password.as_deref()).and_then(|bytes| tab.replace_bytes(label, bytes));
+        if self.report(result).is_some() {
+            if was_signed {
+                self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it."));
+            } else {
+                self.info(format!("{label} done. Ctrl+Z undoes it."));
+            }
+        }
+    }
+
+    fn open_print_dialog(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let dialog = dialogs::PrintDialog::new(tab.pages.len() as u32, tab.current_page as u32 + 1);
+        self.dialogs.push(Dialog::Print(dialog));
+    }
+
     fn sign_here(&mut self, page: u32, rect: [f32; 4]) {
         let Some(identity_path) = self.settings.signing_identity.clone() else {
             self.error("Create or choose a signing identity first.");
@@ -642,6 +678,9 @@ impl VellumApp {
                     });
                 }
                 ui.menu_button("Export", |ui| self.export_menu(ui));
+                if ui.add_enabled(has_tab, egui::Button::new("Print…  Ctrl+P")).clicked() {
+                    self.open_print_dialog();
+                }
                 ui.separator();
                 if ui.add_enabled(has_tab, egui::Button::new("Properties…")).clicked() {
                     self.dialogs.push(Dialog::Properties { info: Default::default(), loaded: false });
@@ -674,6 +713,12 @@ impl VellumApp {
                             ui.ctx().copy_text(text.as_string().0);
                         }
                     }
+                }
+                if ui.button("Edit page text").on_hover_text("Click a line to change, restyle or delete it; drag to move it; click empty space to add text").clicked() {
+                    self.tool = Tool::EditText;
+                }
+                if ui.button("Find and replace text…  Ctrl+H").clicked() {
+                    self.dialogs.push(Dialog::FindReplace { find: String::new(), replace: String::new(), use_regex: false, match_case: false });
                 }
                 if ui.button("Find…  Ctrl+F").clicked() {
                     self.show_sidebar = true;
@@ -1062,6 +1107,9 @@ impl VellumApp {
             if ui.add_enabled(!self.tabs.is_empty(), egui::Button::new("💾")).on_hover_text("Save (Ctrl+S)").clicked() {
                 self.save(false);
             }
+            if ui.add_enabled(!self.tabs.is_empty(), egui::Button::new("🖨")).on_hover_text("Print (Ctrl+P)").clicked() {
+                self.open_print_dialog();
+            }
             let can_undo = self.tabs.get(self.active).is_some_and(|t| t.undo_label().is_some());
             let can_redo = self.tabs.get(self.active).is_some_and(|t| t.redo_label().is_some());
             if ui.add_enabled(can_undo, egui::Button::new("↶")).on_hover_text("Undo (Ctrl+Z)").clicked() {
@@ -1101,6 +1149,7 @@ impl VellumApp {
             for (tool, icon) in [
                 (Tool::Select, "⌶ Select"),
                 (Tool::Hand, "✋"),
+                (Tool::EditText, "✎ Edit text"),
                 (Tool::Highlight, "🖍 Highlight"),
                 (Tool::Underline, "U̲"),
                 (Tool::StrikeOut, "S̶"),
@@ -1345,6 +1394,13 @@ impl VellumApp {
                 ViewerAction::AskForText(pending) => self.dialogs.push(Dialog::Text(pending)),
                 ViewerAction::OpenLink(url) => self.dialogs.push(Dialog::ConfirmLink(url)),
                 ViewerAction::Sign { page, rect } => self.sign_here(page, rect),
+                ViewerAction::ReplaceText { line, text, style } => self.edit_page_text("Edit text", |bytes, password| vellum_core::edit_text::replace_line(bytes, password, &line, &text, &style)),
+                ViewerAction::DeleteText(line) => self.edit_page_text("Delete text", |bytes, password| vellum_core::edit_text::delete_line(bytes, password, &line)),
+                ViewerAction::MoveText { line, offset } => self.edit_page_text("Move text", |bytes, password| {
+                    let style = vellum_core::edit_text::LineStyle { offset, ..vellum_core::edit_text::LineStyle::of(&line) };
+                    vellum_core::edit_text::replace_line(bytes, password, &line, &line.text, &style)
+                }),
+                ViewerAction::AddPageText { page, x, y, text, style } => self.edit("Add text", |pdf| vellum_core::edit_text::add_text(pdf, page as usize - 1, x, y, &text, &style)),
                 ViewerAction::GoToPage(index) => {
                     if let Some(tab) = self.tab() {
                         viewer::go_to_page(tab, index);
@@ -1453,6 +1509,27 @@ impl VellumApp {
                     self.settings.signing_identity = Some(path.clone());
                     let _ = self.settings.save();
                     self.info(format!("Created {}. Keep it private: it holds your signing key. Use Tools ▸ Sign ▸ Sign here.", path.display()));
+                }
+                AppRequest::StartPrint(settings) => {
+                    let Some((_, bytes, password, title)) = self.job_input() else { continue };
+                    let ctx = self.worker_context.clone();
+                    let printer = settings.printer.clone();
+                    self.start_job(&ctx, "Printing", move |progress| {
+                        let document = vellum_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
+                        vellum_core::print::print(&document, &title, &settings, |done, total| progress(done, total))?;
+                        Ok(JobOutcome::Message(format!("Sent {} sheets to {printer}.", settings.pages.len() as u32 * settings.copies.max(1))))
+                    });
+                }
+                AppRequest::StartFindReplace { pattern, replacement } => {
+                    let Some((tab_id, bytes, password, _)) = self.job_input() else { continue };
+                    let ctx = self.worker_context.clone();
+                    self.start_job(&ctx, "Replacing text", move |_| {
+                        let (new_bytes, count) = vellum_core::edit_text::find_and_replace(&bytes, password.as_deref(), &pattern, &replacement)?;
+                        if count == 0 {
+                            return Ok(JobOutcome::Message("No matches found.".into()));
+                        }
+                        Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Replace text ({count} replacements)"), bytes: new_bytes })
+                    });
                 }
                 AppRequest::ApplyAccessibilityFixes => {
                     let title = self.tabs.get(self.active).map(|t| t.title.trim_end_matches(".pdf").to_string()).unwrap_or_default();

@@ -45,15 +45,25 @@ saves a picture of the window and exits (setup options are documented on
   incremental updates, verification (CMS cross-checked with OpenSSL).
 - Accessibility checker with automatic fixes; PDF/A-2b preflight and conversion.
 - Batch actions (JSON list of steps over many files).
+- Printing through Windows (`print.rs`): printer list, driver properties,
+  copies, collate, fit or actual size, auto-rotate, grayscale, duplex, print
+  to file. Tested only through "Microsoft Print to PDF" writing to a file.
+- Editing existing page text (`edit_text.rs`): line by line, change, restyle,
+  move, delete, add, find and replace. The old line's glyphs are removed with
+  the redaction engine in text-only mode (never PDFium content regeneration,
+  which rewrites the whole page and loses justification). The original font
+  is reused when it is embedded TrueType/OpenType with the needed glyphs;
+  otherwise Arial, Times New Roman or Courier New stand in by style.
 - Desktop app: tabs, background rendering, zoom and fit, thumbnails,
   bookmarks, comments, fields, search, attachments, page organizer with drag
   and drop, every markup tool, form filling, signing, dialogs for all tools,
-  undo/redo, night reading mode, dark interface, preferences, recent files.
+  undo/redo, night reading mode, dark interface, preferences, recent files,
+  Print dialog (Ctrl+P), Edit text tool with a style bar, find and replace (Ctrl+H).
 
 ## Ideas for next
 
-1. Printing (render pages and send to the Windows print spooler).
-2. Text editing of existing page content (Acrobat's "Edit PDF").
+1. Paragraph-level text editing (reflowing a whole paragraph, not just lines).
+2. Reusing bare CFF fonts (InDesign's usual embedding) when editing text.
 3. Incremental saves for edits after signing, so signatures survive.
 4. Complex script shaping (rustybuzz) for Indic and Arabic text.
 5. Release build, installer, file associations, an app icon.

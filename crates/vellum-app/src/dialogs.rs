@@ -36,6 +36,8 @@ pub enum AppRequest {
     IdentityCreated(PathBuf),
     ApplyAccessibilityFixes,
     ConvertToPdfA,
+    StartPrint(vellum_core::print::PrintSettings),
+    StartFindReplace { pattern: regex::Regex, replacement: String },
 }
 
 pub enum Dialog {
@@ -72,6 +74,26 @@ pub enum Dialog {
     AccessibilityResults(Vec<vellum_core::accessibility::Check>),
     PreflightResults(Vec<vellum_core::preflight::PreflightIssue>),
     ComparisonResult { summary: String, report_path: PathBuf },
+    Print(PrintDialog),
+    FindReplace { find: String, replace: String, use_regex: bool, match_case: bool },
+}
+
+/// Choices in the Print dialog.
+pub struct PrintDialog {
+    pub printers: Vec<vellum_core::print::PrinterInfo>,
+    pub settings: vellum_core::print::PrintSettings,
+    /// 0 all pages, 1 current page, 2 the range below.
+    pub which_pages: usize,
+    pub range: String,
+    pub current_page: u32,
+}
+
+impl PrintDialog {
+    pub fn new(page_count: u32, current_page: u32) -> Self {
+        let printers = vellum_core::print::printers().unwrap_or_default();
+        let printer = printers.first().map(|p| p.name.clone()).unwrap_or_default();
+        Self { printers, settings: vellum_core::print::PrintSettings::new(printer, page_count), which_pages: 0, range: String::new(), current_page }
+    }
 }
 
 pub struct DialogOutcome {
@@ -107,6 +129,7 @@ impl Dialog {
                 crate::viewer::TextPurpose::TextBox => "Text box",
                 crate::viewer::TextPurpose::LinkAddress => "Link",
                 crate::viewer::TextPurpose::FieldName(_) => "New form field",
+                crate::viewer::TextPurpose::PageText => "Add text to the page",
             },
             Dialog::ConfirmLink(_) => "Open link?",
             Dialog::Password { .. } => "Password required",
@@ -121,6 +144,8 @@ impl Dialog {
             Dialog::AccessibilityResults(_) => "Accessibility check",
             Dialog::PreflightResults(_) => "PDF/A check",
             Dialog::ComparisonResult { .. } => "Comparison",
+            Dialog::Print(_) => "Print",
+            Dialog::FindReplace { .. } => "Find and replace text",
         };
         title.to_string()
     }
@@ -487,7 +512,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 _ => "Type the text",
             };
             ui.weak(hint);
-            let multiline = matches!(pending.purpose, crate::viewer::TextPurpose::Note | crate::viewer::TextPurpose::TextBox);
+            let multiline = matches!(pending.purpose, crate::viewer::TextPurpose::Note | crate::viewer::TextPurpose::TextBox | crate::viewer::TextPurpose::PageText);
             let response = if multiline {
                 ui.add(egui::TextEdit::multiline(&mut pending.text).desired_rows(4).desired_width(f32::INFINITY))
             } else {
@@ -1058,6 +1083,124 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     _ => vellum_core::optimize::OptimizeSettings { target_dpi: Some(*dpi), jpeg_quality: *quality, grayscale_images: *grayscale, remove_metadata: *remove_metadata, ..Default::default() },
                 };
                 outcome.requests.push(AppRequest::StartOptimize(settings));
+                outcome.keep_open = false;
+            }
+        }
+        Dialog::Print(print) => {
+            use vellum_core::print::{Duplex, Scaling};
+            if print.printers.is_empty() {
+                ui.label("No printers are installed.");
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+                return Ok(());
+            }
+            let page_count = tab.pages.len() as u32;
+            egui::Grid::new("print").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+                ui.label("Printer");
+                ui.horizontal(|ui| {
+                    let before = print.settings.printer.clone();
+                    egui::ComboBox::from_id_salt("printer").width(260.0).selected_text(print.settings.printer.as_str()).show_ui(ui, |ui| {
+                        for printer in &print.printers {
+                            let label = if printer.is_default { format!("{} (default)", printer.name) } else { printer.name.clone() };
+                            ui.selectable_value(&mut print.settings.printer, printer.name.clone(), label);
+                        }
+                    });
+                    if print.settings.printer != before {
+                        // Driver settings belong to one printer.
+                        print.settings.device_mode = None;
+                    }
+                    if ui.button("Properties…").on_hover_text("Paper size, tray, quality and other printer settings").clicked() {
+                        match vellum_core::print::printer_properties(&print.settings.printer, 0, print.settings.device_mode.as_deref()) {
+                            Ok(Some(mode)) => print.settings.device_mode = Some(mode),
+                            Ok(None) => {}
+                            Err(error) => outcome.error = Some(error.to_string()),
+                        }
+                    }
+                });
+                ui.end_row();
+                ui.label("Pages");
+                ui.vertical(|ui| {
+                    ui.radio_value(&mut print.which_pages, 0, if page_count == 1 { "All (1 page)".to_string() } else { format!("All ({page_count} pages)") });
+                    ui.radio_value(&mut print.which_pages, 1, format!("Current page ({})", print.current_page));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut print.which_pages, 2, "Pages");
+                        if ui.add(egui::TextEdit::singleline(&mut print.range).hint_text("1-3, 5, odd").desired_width(120.0)).changed() {
+                            print.which_pages = 2;
+                        }
+                    });
+                });
+                ui.end_row();
+                ui.label("Copies");
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut print.settings.copies).range(1..=999));
+                    ui.checkbox(&mut print.settings.collate, "Collate");
+                });
+                ui.end_row();
+                ui.label("Size");
+                ui.vertical(|ui| {
+                    ui.radio_value(&mut print.settings.scaling, Scaling::Fit, "Fit to the paper");
+                    ui.radio_value(&mut print.settings.scaling, Scaling::ShrinkOversized, "Shrink oversized pages");
+                    ui.radio_value(&mut print.settings.scaling, Scaling::ActualSize, "Actual size");
+                });
+                ui.end_row();
+                ui.label("Two-sided");
+                egui::ComboBox::from_id_salt("duplex")
+                    .selected_text(match print.settings.duplex {
+                        Duplex::PrinterDefault => "Printer setting",
+                        Duplex::OneSided => "One-sided",
+                        Duplex::LongEdge => "Flip on long edge",
+                        Duplex::ShortEdge => "Flip on short edge",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut print.settings.duplex, Duplex::PrinterDefault, "Printer setting");
+                        ui.selectable_value(&mut print.settings.duplex, Duplex::OneSided, "One-sided");
+                        ui.selectable_value(&mut print.settings.duplex, Duplex::LongEdge, "Flip on long edge");
+                        ui.selectable_value(&mut print.settings.duplex, Duplex::ShortEdge, "Flip on short edge");
+                    });
+                ui.end_row();
+                ui.label("Options");
+                ui.vertical(|ui| {
+                    ui.checkbox(&mut print.settings.auto_rotate, "Turn pages to match the paper");
+                    ui.checkbox(&mut print.settings.grayscale, "Print in grayscale");
+                    ui.checkbox(&mut print.settings.annotations, "Include comments and form fields");
+                });
+                ui.end_row();
+            });
+            if buttons(ui, "Print", outcome) {
+                let mut settings = print.settings.clone();
+                settings.pages = match print.which_pages {
+                    1 => vec![print.current_page],
+                    2 => parse_pages(tab, &print.range)?,
+                    _ => (1..=page_count).collect(),
+                };
+                outcome.requests.push(AppRequest::StartPrint(settings));
+                outcome.keep_open = false;
+            }
+        }
+        Dialog::FindReplace { find, replace, use_regex, match_case } => {
+            ui.label("Changes the page text itself, line by line. A match that spans two lines is not replaced.");
+            egui::Grid::new("find replace").num_columns(2).show(ui, |ui| {
+                ui.label("Find");
+                ui.add(egui::TextEdit::singleline(find).desired_width(260.0));
+                ui.end_row();
+                ui.label("Replace with");
+                ui.add(egui::TextEdit::singleline(replace).desired_width(260.0));
+                ui.end_row();
+            });
+            ui.horizontal(|ui| {
+                ui.checkbox(use_regex, "Regular expression");
+                ui.checkbox(match_case, "Match case");
+            });
+            if buttons(ui, "Replace all", outcome) {
+                if find.is_empty() {
+                    anyhow::bail!("enter the text to find");
+                }
+                let source = if *use_regex { find.clone() } else { regex::escape(find) };
+                let pattern = regex::RegexBuilder::new(&source).case_insensitive(!*match_case).build()?;
+                // A literal replacement must not treat `$` as a group reference.
+                let replacement = if *use_regex { replace.clone() } else { replace.replace('$', "$$") };
+                outcome.requests.push(AppRequest::StartFindReplace { pattern, replacement });
                 outcome.keep_open = false;
             }
         }

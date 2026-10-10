@@ -2,16 +2,17 @@
 //!
 //! PDFium reports each text-showing operation as a text object; objects on
 //! the same baseline, in the same font and size, close together, form one
-//! editable line ([`TextLine`]). Replacing a line removes its objects with
-//! PDFium (which regenerates that page's content stream) and draws the new
-//! text with [`TextSetter`] at the same position, size, angle and color,
-//! in a font of the same style. Fonts in PDFs are usually subsets holding
-//! only the characters already used, which is why the original font program
-//! is not reused, the same compromise Acrobat makes.
+//! editable line ([`EditableLine`]). Replacing a line removes just its glyphs
+//! from the content stream (leaving everything else untouched) and draws the new
+//! text with [`TextSetter`] at the same position, size, angle and color.
+//! The original font is reused when it is embedded as TrueType or OpenType
+//! and has every character the new text needs; otherwise a font of the same
+//! style stands in (fonts are often subsets holding only the characters
+//! already used, or bare CFF without a character map).
 //!
 //! Text inside form XObjects (nested drawings) is not editable here.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -125,7 +126,9 @@ pub fn editable_lines(document: &PdfDocument, page_index: usize) -> Result<Vec<E
     for piece in pieces(document, page_index)? {
         let size = piece.apparent_size.max(1.0);
         let joins_previous = lines.last().is_some_and(|line| {
-            let same_style = line.font_name == piece.font_name && (line.apparent_size - piece.apparent_size).abs() < 0.5 && line.invisible == piece.invisible;
+            // Fonts may differ within a line (a symbol drawn from a fallback font),
+            // so size, visibility and position decide, not the font name.
+            let same_style = (line.apparent_size - piece.apparent_size).abs() < 0.5 && line.invisible == piece.invisible;
             let same_baseline = (line.matrix[5] - piece.matrix[5]).abs() < size * 0.2 && line.matrix[1].abs() < 0.01 && piece.matrix[1].abs() < 0.01;
             let gap = piece.bounds[0] - line.bounds[2];
             same_style && same_baseline && gap > -size * 0.3 && gap < size * 1.2
@@ -182,28 +185,40 @@ impl LineStyle {
     }
 }
 
-/// Removes the given text objects from a page with PDFium and returns the
-/// rewritten file. `expected_text` guards against editing a stale view.
-fn remove_objects(bytes: &[u8], password: Option<&str>, line: &EditableLine) -> Result<Vec<u8>> {
-    let document = crate::engine::open_document(bytes.to_vec(), password)?;
-    {
+/// Takes a line out of the page and returns the edited model, plus the
+/// original font program when the document embeds it.
+///
+/// Only the glyphs of that line are removed from the content stream; every
+/// other operator stays byte-for-byte the same, so the rest of the page keeps
+/// its exact spacing. (Regenerating the page with PDFium would rewrite all
+/// its text and lose justification.)
+fn take_out_line(bytes: &[u8], password: Option<&str>, line: &EditableLine) -> Result<(Pdf, Option<Vec<u8>>)> {
+    let original_font = {
+        let document = crate::engine::open_document(bytes.to_vec(), password)?;
         let current = editable_lines(&document, line.page_index)?;
         if !current.iter().any(|c| c.object_indices == line.object_indices && c.text == line.text) {
             bail!("the page changed since the text was selected; select it again");
         }
-        let mut page = document.pages().get(line.page_index as i32)?;
-        let mut indices = line.object_indices.clone();
-        indices.sort_unstable_by(|a, b| b.cmp(a));
-        for index in indices {
-            page.objects_mut().remove_object_at_index(index as PdfPageObjectIndex)?;
-        }
-        page.regenerate_content()?;
+        let page = document.pages().get(line.page_index as i32)?;
+        page.objects()
+            .get(line.object_indices[0] as PdfPageObjectIndex)
+            .ok()
+            .and_then(|object| object.as_text_object().map(|text| text.font()).filter(|font| font.is_embedded().unwrap_or(false)).and_then(|font| font.data().ok()))
+    };
+    let mut pdf = Pdf::from_bytes(bytes, password)?;
+    // A band along the baseline catches this line's glyph centers but not
+    // those of the lines above and below, even when lines are set tightly.
+    let size = line.apparent_size.max(1.0);
+    let band = [line.bounds[0] - 0.5, line.matrix[5] + size * 0.05, line.bounds[2] + 0.5, line.matrix[5] + size * 0.6];
+    let removed = crate::redact::remove_text(&mut pdf, line.page_index as u32 + 1, &[band])?;
+    if removed == 0 {
+        bail!("this text could not be taken out of the page (its encoding is not supported for editing)");
     }
-    document.save_to_bytes().map_err(|error| anyhow!("PDFium could not save the edited page: {error}"))
+    Ok((pdf, original_font))
 }
 
 /// Draws a line of text at a text matrix with the given look.
-fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], style: &LineStyle, invisible: bool) -> Result<()> {
+fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], style: &LineStyle, invisible: bool, original_font: Option<(Vec<u8>, &str)>) -> Result<()> {
     if text.trim().is_empty() {
         return Ok(());
     }
@@ -212,7 +227,8 @@ fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], sty
     // the font so the text appears at the requested size.
     let scale = (matrix[0] * matrix[0] + matrix[1] * matrix[1]).sqrt().max(0.0001);
     let unit = [matrix[0] / scale, matrix[1] / scale, matrix[2] / scale, matrix[3] / scale];
-    let mut setter = TextSetter::for_texts(style.font, [text]);
+    // The original font when it can draw the new text; otherwise a matching one.
+    let mut setter = original_font.and_then(|(program, name)| TextSetter::with_font_program(style.font, program, name, text)).unwrap_or_else(|| TextSetter::for_texts(style.font, [text]));
     let [red, green, blue] = style.color;
     let mut content = format!(
         "q BT {} {} {} {} rg {} {} {} {} {} {} Tm ",
@@ -236,16 +252,17 @@ fn draw_line(pdf: &mut Pdf, page_index: usize, text: &str, matrix: [f32; 6], sty
 
 /// Replaces a line's text (and optionally its look) and returns the new file.
 pub fn replace_line(bytes: &[u8], password: Option<&str>, line: &EditableLine, new_text: &str, style: &LineStyle) -> Result<Vec<u8>> {
-    let without = remove_objects(bytes, password, line)?;
-    let mut pdf = Pdf::from_bytes(&without, password)?;
-    draw_line(&mut pdf, line.page_index, new_text.trim_end(), line.matrix, style, line.invisible)?;
+    let (mut pdf, original_font) = take_out_line(bytes, password, line)?;
+    // Reuse the original font only while the person keeps the line's style.
+    let keep_font = style.font == line.matching_font();
+    let original = original_font.filter(|_| keep_font).map(|program| (program, line.font_name.as_str()));
+    draw_line(&mut pdf, line.page_index, new_text.trim_end(), line.matrix, style, line.invisible, original)?;
     pdf.to_bytes(&crate::SaveSettings::default())
 }
 
 /// Deletes a line of text from the page.
 pub fn delete_line(bytes: &[u8], password: Option<&str>, line: &EditableLine) -> Result<Vec<u8>> {
-    let without = remove_objects(bytes, password, line)?;
-    let mut pdf = Pdf::from_bytes(&without, password)?;
+    let (mut pdf, _) = take_out_line(bytes, password, line)?;
     pdf.to_bytes(&crate::SaveSettings::default())
 }
 
@@ -255,7 +272,7 @@ pub fn add_text(pdf: &mut Pdf, page_index: usize, x: f32, y: f32, text: &str, st
     let lines: Vec<&str> = text.lines().collect();
     for (number_of_line, line) in lines.iter().enumerate() {
         let baseline = y - number_of_line as f32 * style.apparent_size * 1.25;
-        draw_line(pdf, page_index, line, [1.0, 0.0, 0.0, 1.0, x, baseline], style, false)?;
+        draw_line(pdf, page_index, line, [1.0, 0.0, 0.0, 1.0, x, baseline], style, false, None)?;
     }
     Ok(())
 }

@@ -9,6 +9,9 @@ use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use vellum_core::annotations::{AnnotationKind, LinkTarget, NewAnnotation};
 use vellum_core::forms::{FieldInfo, FieldType, NewField, NewFieldKind};
 
+use vellum_core::edit_text::{EditableLine, LineStyle};
+use vellum_core::fonts::StandardFont;
+
 use crate::render::{RenderRequest, RenderWorker};
 use crate::tab::{DocumentTab, FitMode, PageGeometry, TextSelection};
 
@@ -39,6 +42,8 @@ pub enum Tool {
     SignatureField,
     /// Draw a box to sign the document digitally there.
     Sign,
+    /// Change, restyle, move or delete existing text; click empty space to add text.
+    EditText,
 }
 
 impl Tool {
@@ -65,6 +70,7 @@ impl Tool {
             Tool::CheckBox => "Checkbox",
             Tool::SignatureField => "Signature field",
             Tool::Sign => "Sign here",
+            Tool::EditText => "Edit text",
         }
     }
 
@@ -107,6 +113,10 @@ pub enum ViewerAction {
     GoToPage(usize),
     /// Sign digitally with the signature shown in this box.
     Sign { page: u32, rect: [f32; 4] },
+    ReplaceText { line: EditableLine, text: String, style: LineStyle },
+    DeleteText(EditableLine),
+    MoveText { line: EditableLine, offset: (f32, f32) },
+    AddPageText { page: u32, x: f32, y: f32, text: String, style: LineStyle },
 }
 
 /// Something waiting for the person to type text in a dialog.
@@ -124,6 +134,8 @@ pub enum TextPurpose {
     TextBox,
     LinkAddress,
     FieldName(FieldKindChoice),
+    /// New text drawn into the page itself (not a comment).
+    PageText,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -141,8 +153,60 @@ pub struct ViewerState {
     ink_stroke: Vec<(f32, f32)>,
     ink_page: Option<usize>,
     editing_field: Option<FieldEdit>,
+    editing_text: Option<TextEditing>,
+    /// The line being dragged to a new position with the Edit text tool.
+    moving_line: Option<EditableLine>,
     last_viewport_width: f32,
     last_viewport_height: f32,
+}
+
+/// An existing line of page text open for editing.
+struct TextEditing {
+    line: EditableLine,
+    text: String,
+    family: FontFamilyChoice,
+    bold: bool,
+    italic: bool,
+    size: f32,
+    color: [f32; 3],
+    focus_requested: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FontFamilyChoice {
+    Sans,
+    Serif,
+    Monospace,
+}
+
+/// The standard font for a family and weight.
+fn compose_font(family: FontFamilyChoice, bold: bool, italic: bool) -> StandardFont {
+    match (family, bold, italic) {
+        (FontFamilyChoice::Monospace, true, _) => StandardFont::CourierBold,
+        (FontFamilyChoice::Monospace, false, _) => StandardFont::Courier,
+        (FontFamilyChoice::Serif, true, _) => StandardFont::TimesBold,
+        (FontFamilyChoice::Serif, false, true) => StandardFont::TimesItalic,
+        (FontFamilyChoice::Serif, false, false) => StandardFont::TimesRoman,
+        (FontFamilyChoice::Sans, true, _) => StandardFont::HelveticaBold,
+        (FontFamilyChoice::Sans, false, true) => StandardFont::HelveticaOblique,
+        (FontFamilyChoice::Sans, false, false) => StandardFont::Helvetica,
+    }
+}
+
+impl TextEditing {
+    fn start(line: EditableLine) -> Self {
+        let family = if line.monospace { FontFamilyChoice::Monospace } else if line.serif { FontFamilyChoice::Serif } else { FontFamilyChoice::Sans };
+        Self { text: line.text.clone(), family, bold: line.bold, italic: line.italic, size: line.apparent_size, color: line.color, line, focus_requested: false }
+    }
+
+    fn style(&self) -> LineStyle {
+        LineStyle { font: compose_font(self.family, self.bold, self.italic), apparent_size: self.size, color: self.color, offset: (0.0, 0.0) }
+    }
+
+    fn changed(&self) -> bool {
+        let original = TextEditing::start(self.line.clone());
+        self.text != original.text || self.family != original.family || self.bold != original.bold || self.italic != original.italic || (self.size - original.size).abs() > 0.05 || self.color != original.color
+    }
 }
 
 struct FieldEdit {
@@ -316,6 +380,25 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
             }
         }
     }
+    if tool == Tool::EditText {
+        let hover = ui.input(|i| i.pointer.hover_pos());
+        for line in tab.editable_lines(page_index).iter() {
+            let rect = screen_rect_of(geometry, page_rect, zoom, line.bounds).expand(1.5);
+            let hovered = hover.is_some_and(|p| rect.contains(p));
+            let editing = state.editing_text.as_ref().is_some_and(|e| e.line == *line);
+            if editing {
+                continue;
+            }
+            let color = if hovered { Color32::from_rgb(40, 110, 255) } else { Color32::from_rgba_unmultiplied(40, 110, 255, 90) };
+            painter.rect_stroke(rect, 2.0, Stroke::new(if hovered { 1.5 } else { 0.75 }, color), StrokeKind::Outside);
+        }
+        if let (Some(line), Some((drag_page, start)), Some(now)) = (&state.moving_line, state.drag_start, state.drag_now) {
+            if drag_page == page_index {
+                let moved = [line.bounds[0] + now.0 - start.0, line.bounds[1] + now.1 - start.1, line.bounds[2] + now.0 - start.0, line.bounds[3] + now.1 - start.1];
+                painter.rect_stroke(screen_rect_of(geometry, page_rect, zoom, moved), 2.0, Stroke::new(1.5, Color32::from_rgb(255, 140, 0)), StrokeKind::Outside);
+            }
+        }
+    }
     if state.ink_page == Some(page_index) && state.ink_stroke.len() > 1 {
         let points: Vec<Pos2> = state.ink_stroke.iter().map(|&(x, y)| {
             let (sx, sy) = geometry.page_to_top_left(x, y);
@@ -347,6 +430,68 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         return;
     }
 
+    if let Some(editing) = state.editing_text.as_mut().filter(|e| e.line.page_index == page_index) {
+        let rect = screen_rect_of(geometry, page_rect, zoom, editing.line.bounds);
+        let editor_rect = egui::Rect::from_min_size(rect.min - vec2(2.0, 2.0), vec2((rect.width() + 80.0).max(160.0), rect.height().max(14.0) + 4.0));
+        let font_size = (editing.size * zoom).clamp(8.0, 64.0);
+        let response = ui.put(editor_rect, egui::TextEdit::singleline(&mut editing.text).font(egui::FontId::proportional(font_size)).margin(vec2(2.0, 0.0)));
+        if !editing.focus_requested {
+            response.request_focus();
+            editing.focus_requested = true;
+        }
+        let mut apply = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let mut cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut delete = false;
+        // A small style bar just below the line, clear of the text being edited.
+        egui::Area::new(ui.id().with(("text style", page_index))).order(egui::Order::Foreground).fixed_pos(editor_rect.left_bottom() + vec2(0.0, 6.0)).show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).inner_margin(4.0).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("edit text family")
+                        .width(70.0)
+                        .selected_text(match editing.family {
+                            FontFamilyChoice::Sans => "Sans",
+                            FontFamilyChoice::Serif => "Serif",
+                            FontFamilyChoice::Monospace => "Mono",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut editing.family, FontFamilyChoice::Sans, "Sans (Helvetica)");
+                            ui.selectable_value(&mut editing.family, FontFamilyChoice::Serif, "Serif (Times)");
+                            ui.selectable_value(&mut editing.family, FontFamilyChoice::Monospace, "Mono (Courier)");
+                        });
+                    ui.toggle_value(&mut editing.bold, egui::RichText::new("B").strong()).on_hover_text("Bold");
+                    ui.toggle_value(&mut editing.italic, egui::RichText::new("I").italics()).on_hover_text("Italic");
+                    ui.add(egui::DragValue::new(&mut editing.size).range(2.0..=144.0).speed(0.1).suffix(" pt")).on_hover_text("Size");
+                    ui.color_edit_button_rgb(&mut editing.color).on_hover_text("Color");
+                    if ui.button("✔").on_hover_text("Apply (Enter)").clicked() {
+                        apply = true;
+                    }
+                    if ui.button("🗑").on_hover_text("Delete this line").clicked() {
+                        delete = true;
+                    }
+                    if ui.button("✖").on_hover_text("Cancel (Esc)").clicked() {
+                        cancel = true;
+                    }
+                });
+                ui.weak(format!("Original font: {}", editing.line.font_name));
+            });
+        });
+        if delete {
+            let editing = state.editing_text.take().expect("open");
+            actions.push(ViewerAction::DeleteText(editing.line));
+        } else if apply {
+            let editing = state.editing_text.take().expect("open");
+            if editing.text.trim().is_empty() {
+                actions.push(ViewerAction::DeleteText(editing.line));
+            } else if editing.changed() {
+                let style = editing.style();
+                actions.push(ViewerAction::ReplaceText { line: editing.line, text: editing.text, style });
+            }
+        } else if cancel {
+            state.editing_text = None;
+        }
+        return;
+    }
+
     let id = ui.id().with(("page", tab.id, page_index));
     let sense = if tool == Tool::Hand { Sense::hover() } else { Sense::click_and_drag() };
     let response = ui.interact(page_rect, id, sense);
@@ -359,6 +504,7 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         let cursor = match tool {
             Tool::Hand => egui::CursorIcon::Grab,
             Tool::Select if over_link => egui::CursorIcon::PointingHand,
+            Tool::EditText => egui::CursorIcon::Text,
             t if t.selects_text() && over_text => egui::CursorIcon::Text,
             Tool::Select => egui::CursorIcon::Default,
             _ => egui::CursorIcon::Crosshair,
@@ -381,6 +527,9 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
             if tool == Tool::Ink {
                 state.ink_stroke = vec![point];
                 state.ink_page = Some(page_index);
+            }
+            if tool == Tool::EditText {
+                state.moving_line = tab.editable_lines(page_index).iter().find(|l| l.contains(point.0, point.1)).cloned();
             }
             if tool.selects_text() {
                 let text = tab.page_text(page_index);
@@ -410,7 +559,14 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         if let Some((drag_page, start)) = state.drag_start.take() {
             let end = state.drag_now.take().unwrap_or(start);
             if drag_page == page_index {
-                finish_drag(tab, state, tool, settings, page_index, start, end, actions);
+                if let Some(line) = state.moving_line.take() {
+                    let offset = (end.0 - start.0, end.1 - start.1);
+                    if offset.0.hypot(offset.1) > 1.0 {
+                        actions.push(ViewerAction::MoveText { line, offset });
+                    }
+                } else {
+                    finish_drag(tab, state, tool, settings, page_index, start, end, actions);
+                }
             }
         }
     }
@@ -448,6 +604,12 @@ fn click(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &
                 .filter(|a| a.page == page && a.subtype != "Link" && a.subtype != "Widget" && inside(a.rect, point))
                 .min_by(|a, b| area(a.rect).total_cmp(&area(b.rect)))
                 .map(|a| a.id);
+        }
+        Tool::EditText => {
+            match tab.editable_lines(page_index).iter().find(|l| l.contains(point.0, point.1)).cloned() {
+                Some(line) => state.editing_text = Some(TextEditing::start(line)),
+                None => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::PageText, rect: [point.0, point.1, point.0, point.1], text: String::new() })),
+            }
         }
         Tool::Note => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::Note, rect: [point.0, point.1, point.0, point.1], text: String::new() })),
         Tool::Stamp => {
@@ -578,6 +740,13 @@ pub fn complete_pending_text(pending: &PendingText, settings: &ToolSettings) -> 
             };
             ViewerAction::AddAnnotation { page, annotation: with_settings(AnnotationKind::Link { rect: pending.rect, target }, "") }
         }
+        TextPurpose::PageText => {
+            if pending.text.trim().is_empty() {
+                return None;
+            }
+            // The click marks where the first baseline starts.
+            ViewerAction::AddPageText { page, x: pending.rect[0], y: pending.rect[1], text: pending.text.clone(), style: LineStyle { font: StandardFont::Helvetica, apparent_size: settings.font_size, color: [0.0; 3], offset: (0.0, 0.0) } }
+        }
         TextPurpose::FieldName(kind) => {
             let name = pending.text.trim();
             if name.is_empty() {
@@ -597,6 +766,11 @@ pub fn complete_pending_text(pending: &PendingText, settings: &ToolSettings) -> 
             })
         }
     })
+}
+
+/// Opens the line editor on a line, as clicking it with the Edit text tool does.
+pub fn begin_text_edit(state: &mut ViewerState, line: EditableLine) {
+    state.editing_text = Some(TextEditing::start(line));
 }
 
 /// Zoom steps used by the zoom buttons.

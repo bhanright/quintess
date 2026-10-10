@@ -153,6 +153,53 @@ pub enum MoreCommand {
         #[arg(required = true)]
         inputs: Vec<PathBuf>,
     },
+    /// List the installed printers.
+    Printers,
+    /// Print the document.
+    Print {
+        #[command(flatten)]
+        input: Input,
+        /// Printer name; the default printer when omitted.
+        #[arg(long)]
+        printer: Option<String>,
+        #[arg(long, default_value = "all")]
+        pages: String,
+        #[arg(long, default_value_t = 1)]
+        copies: u32,
+        /// Print at actual size instead of fitting the paper.
+        #[arg(long)]
+        actual_size: bool,
+        #[arg(long)]
+        grayscale: bool,
+        /// long, short or off.
+        #[arg(long)]
+        duplex: Option<String>,
+        /// Leave out comments and form fields.
+        #[arg(long)]
+        no_annotations: bool,
+        /// Write the printer's output to this file (for "Microsoft Print to PDF").
+        #[arg(long)]
+        to_file: Option<PathBuf>,
+    },
+    /// List the page text as editable lines, or find and replace it.
+    EditText {
+        #[command(flatten)]
+        input: Input,
+        /// Text (or with --regex, a pattern) to replace.
+        #[arg(long)]
+        find: Option<String>,
+        #[arg(long, default_value = "")]
+        replace: String,
+        #[arg(long)]
+        regex: bool,
+        #[arg(long)]
+        ignore_case: bool,
+        /// Page whose lines to list.
+        #[arg(long, default_value_t = 1)]
+        page: u32,
+        #[command(flatten)]
+        output: Output,
+    },
     /// Show or change settings, e.g. `vellum settings author="Jane Doe"`.
     Settings {
         /// key=value pairs: author, language, signing_identity.
@@ -370,6 +417,59 @@ pub fn run(command: MoreCommand) -> Result<()> {
             }
             if failures > 0 {
                 bail!("{failures} files failed");
+            }
+        }
+        MoreCommand::Printers => {
+            for printer in vellum_core::print::printers()? {
+                println!("{}{}", printer.name, if printer.is_default { "  (default)" } else { "" });
+            }
+        }
+        MoreCommand::Print { input, printer, pages, copies, actual_size, grayscale, duplex, no_annotations, to_file } => {
+            let document = document(&input)?;
+            let page_count = document.pages().len() as u32;
+            let printer = printer.or_else(vellum_core::print::default_printer).context("no printer given and no default printer is set")?;
+            let mut settings = vellum_core::print::PrintSettings::new(printer.clone(), page_count);
+            settings.pages = vellum_core::ranges::parse_page_ranges(&pages, page_count)?;
+            settings.copies = copies;
+            settings.grayscale = grayscale;
+            settings.annotations = !no_annotations;
+            settings.output_file = to_file;
+            if actual_size {
+                settings.scaling = vellum_core::print::Scaling::ActualSize;
+            }
+            settings.duplex = match duplex.as_deref() {
+                None => vellum_core::print::Duplex::PrinterDefault,
+                Some("long") => vellum_core::print::Duplex::LongEdge,
+                Some("short") => vellum_core::print::Duplex::ShortEdge,
+                Some("off") => vellum_core::print::Duplex::OneSided,
+                Some(other) => bail!("--duplex takes long, short or off, not {other}"),
+            };
+            let title = input.input.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            vellum_core::print::print(&document, &title, &settings, |done, total| eprint!("\rprinting sheet {done} of {total}"))?;
+            eprintln!();
+            println!("sent to {printer}");
+        }
+        MoreCommand::EditText { input, find, replace, regex, ignore_case, page, output } => {
+            let bytes = std::fs::read(&input.input)?;
+            match find {
+                Some(find) => {
+                    let source = if regex { find } else { regex::escape(&find) };
+                    let pattern = regex::RegexBuilder::new(&source).case_insensitive(ignore_case).build()?;
+                    let replacement = if regex { replace } else { replace.replace('$', "$$") };
+                    let (edited, count) = vellum_core::edit_text::find_and_replace(&bytes, input.password.as_deref(), &pattern, &replacement)?;
+                    println!("{count} replacements");
+                    if count > 0 {
+                        let target = output.output.clone().unwrap_or_else(|| input.input.clone());
+                        std::fs::write(&target, edited)?;
+                        println!("wrote {}", target.display());
+                    }
+                }
+                None => {
+                    let document = document(&input)?;
+                    for (index, line) in vellum_core::edit_text::editable_lines(&document, page as usize - 1)?.iter().enumerate() {
+                        println!("{:>3}  {:>5.1} pt  {:<24} {}", index + 1, line.apparent_size, line.font_name, line.text);
+                    }
+                }
             }
         }
         MoreCommand::Settings { changes } => {

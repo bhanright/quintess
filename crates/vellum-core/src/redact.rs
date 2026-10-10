@@ -166,6 +166,43 @@ fn intersects(a: [f32; 4], b: [f32; 4]) -> bool {
 
 /// A glyph is removed when its center is inside a box or more than a third
 /// of it is covered.
+/// Whether a glyph's center lies inside any area.
+fn center_is_inside(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
+    let (x, y) = ((glyph[0] + glyph[2]) / 2.0, (glyph[1] + glyph[3]) / 2.0);
+    areas.iter().any(|a| x >= a[0] && x <= a[2] && y >= a[1] && y <= a[3])
+}
+
+/// Removes the glyphs whose centers fall inside the areas on one page,
+/// leaving every other drawing operation exactly as it was. Returns the
+/// number of glyphs removed.
+pub fn remove_text(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]]) -> Result<usize> {
+    let page_id = pdf.page_id(page_number)?;
+    pdf.materialize_inherited_attributes(page_id)?;
+    let content = pdf.doc.get_page_content(page_id);
+    let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
+    let mut report = RedactionReport::default();
+    let mut remover = Redactor { pdf, areas: areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true };
+    let resources = remover.page_resources();
+    let (new_operations, changed) = remover.process(operations, &resources, IDENTITY)?;
+    let added = std::mem::take(&mut remover.pending_resources);
+    if !changed {
+        return Ok(0);
+    }
+    let mut resources = resources;
+    if !added.is_empty() {
+        let mut entries = resources.get(b"XObject").ok().map(|x| pdf.resolve(x).clone()).and_then(|x| x.as_dict().ok().cloned()).unwrap_or_default();
+        for (name, id) in added {
+            entries.set(name.as_bytes(), id);
+        }
+        resources.set("XObject", entries);
+    }
+    let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), encode_operations(&new_operations)));
+    let page = pdf.doc.get_dictionary_mut(page_id)?;
+    page.set("Contents", content_id);
+    page.set("Resources", resources);
+    Ok(report.glyphs_removed)
+}
+
 fn glyph_is_covered(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
     let center = ((glyph[0] + glyph[2]) / 2.0, (glyph[1] + glyph[3]) / 2.0);
     let glyph_area = ((glyph[2] - glyph[0]) * (glyph[3] - glyph[1])).max(0.0001);
@@ -315,6 +352,9 @@ struct Redactor<'a> {
     /// Redacted copies of images and forms that the stream being processed
     /// now refers to, to be added to its resources.
     pending_resources: Vec<(String, ObjectId)>,
+    /// Remove only glyphs whose centers fall in an area, leaving images and
+    /// shapes alone (used to take a line of text out for editing).
+    text_only: bool,
 }
 
 fn operand_number(operation: &Operation, index: usize) -> f32 {
@@ -445,7 +485,7 @@ impl Redactor<'_> {
                     continue;
                 }
                 "S" | "s" | "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "n" => {
-                    let fully_inside = path_box.is_some_and(|b| self.areas.iter().any(|a| b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]));
+                    let fully_inside = !self.text_only && path_box.is_some_and(|b| self.areas.iter().any(|a| b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]));
                     if fully_inside && operation.operator != "n" {
                         // Keep the path (it may be a clip) but paint nothing.
                         output.append(&mut path_operations);
@@ -465,7 +505,7 @@ impl Redactor<'_> {
                 }
                 "BI" => {
                     let image_box = transformed_box(state.ctm, [0.0, 0.0, 1.0, 1.0]);
-                    if self.areas.iter().any(|a| intersects(image_box, *a)) {
+                    if !self.text_only && self.areas.iter().any(|a| intersects(image_box, *a)) {
                         self.report.images_removed += 1;
                         changed = true;
                         continue;
@@ -539,7 +579,8 @@ impl Redactor<'_> {
                         let advance = (glyph_width * size + text.char_spacing + if is_space { text.word_spacing } else { 0.0 }) * text.horizontal_scale;
                         let rendering = multiply([size * text.horizontal_scale, 0.0, 0.0, size, 0.0, text.rise], multiply(*text_matrix, state.ctm));
                         let glyph_box = transformed_box(rendering, [0.0, metrics.descent, glyph_width.max(0.1 * metrics.units_scale * 1000.0), metrics.ascent]);
-                        if glyph_is_covered(glyph_box, &self.areas) && !is_space_only(chunk) {
+                        let covered = if self.text_only { center_is_inside(glyph_box, &self.areas) } else { glyph_is_covered(glyph_box, &self.areas) };
+                        if covered && !is_space_only(chunk) {
                             flush_bytes(&mut output, &mut pending_bytes);
                             // TJ numbers are thousandths of a text-space unit, subtracted.
                             pending_adjustment -= advance / text.horizontal_scale.max(0.0001) * 1000.0 / size;
@@ -569,6 +610,9 @@ impl Redactor<'_> {
         let Ok(stream) = self.pdf.doc.get_object(xobject_id).and_then(|o| o.as_stream()).cloned() else { return Ok(None) };
         let subtype = stream.dict.get(b"Subtype").ok().and_then(|s| s.as_name().ok()).unwrap_or(b"").to_vec();
         if subtype == b"Image" {
+            if self.text_only {
+                return Ok(None);
+            }
             let image_box = transformed_box(ctm, [0.0, 0.0, 1.0, 1.0]);
             let covering: Vec<[f32; 4]> = self.areas.iter().copied().filter(|a| intersects(image_box, *a)).collect();
             if covering.is_empty() {
@@ -752,7 +796,7 @@ pub fn apply_redactions(pdf: &mut Pdf, areas: &[RedactionArea], settings: &Redac
         pdf.materialize_inherited_attributes(page_id)?;
         let content = pdf.doc.get_page_content(page_id);
         let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
-        let mut redactor = Redactor { pdf, areas: page_areas.clone(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new() };
+        let mut redactor = Redactor { pdf, areas: page_areas.clone(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false };
         let resources = redactor.page_resources();
         let (new_operations, _) = redactor.process(operations, &resources, IDENTITY)?;
         let added = std::mem::take(&mut redactor.pending_resources);

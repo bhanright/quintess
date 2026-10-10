@@ -93,6 +93,8 @@ pub struct DocumentTab {
     /// PDFium's view of the current bytes, for text and search on this thread.
     document: Option<PdfDocument<'static>>,
     text_cache: RefCell<HashMap<usize, Rc<PageText>>>,
+    /// Editable lines of existing text, per page, read on demand.
+    line_cache: RefCell<HashMap<usize, Rc<Vec<vellum_core::edit_text::EditableLine>>>>,
     /// Rendered pages: (page, resolution key) → texture.
     pub textures: HashMap<(usize, u32), egui::TextureHandle>,
     pub pending: HashSet<(usize, u32)>,
@@ -142,6 +144,7 @@ impl DocumentTab {
             signed: false,
             document: None,
             text_cache: RefCell::new(HashMap::new()),
+            line_cache: RefCell::new(HashMap::new()),
             textures: HashMap::new(),
             pending: HashSet::new(),
             texture_night_mode: false,
@@ -188,6 +191,7 @@ impl DocumentTab {
         self.document = None;
         self.document = Some(engine::open_document(self.bytes.as_ref().clone(), self.password.as_deref())?);
         self.text_cache.borrow_mut().clear();
+        self.line_cache.borrow_mut().clear();
         self.textures.clear();
         self.pending.clear();
         self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
@@ -261,6 +265,16 @@ impl DocumentTab {
         let text = Rc::new(engine::page_text(self.document.as_ref()?, page_index).ok()?);
         self.text_cache.borrow_mut().insert(page_index, text.clone());
         Some(text)
+    }
+
+    /// The page's existing text as editable lines, read once and cached.
+    pub fn editable_lines(&self, page_index: usize) -> Rc<Vec<vellum_core::edit_text::EditableLine>> {
+        if let Some(lines) = self.line_cache.borrow().get(&page_index) {
+            return lines.clone();
+        }
+        let lines = Rc::new(self.document.as_ref().and_then(|d| vellum_core::edit_text::editable_lines(d, page_index).ok()).unwrap_or_default());
+        self.line_cache.borrow_mut().insert(page_index, lines.clone());
+        lines
     }
 
     pub fn pdfium_document(&self) -> Option<&PdfDocument<'static>> {
