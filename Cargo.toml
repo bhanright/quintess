@@ -7,5 +7,11 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+
+# Full debug info for every dependency made the build folder grow past 13 GB.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 opt-level = 2
+debug = false

@@ -5,7 +5,10 @@
 //! Rendering and positioned text come from PDFium through [`engine`].
 
 pub mod annotations;
+pub mod attachments;
 pub mod bookmarks;
+pub mod compare;
+pub mod convert;
 pub mod create;
 pub mod fonts;
 pub mod forms;
@@ -14,6 +17,7 @@ pub mod stamp;
 pub mod document;
 pub mod engine;
 pub mod metadata;
+pub mod optimize;
 pub mod pages;
 pub mod ranges;
 pub mod redact;

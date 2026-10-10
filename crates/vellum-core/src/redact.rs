@@ -127,11 +127,11 @@ pub fn marked_areas(pdf: &Pdf) -> Vec<RedactionArea> {
         .collect()
 }
 
-type Matrix = [f32; 6];
-const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+pub(crate) type Matrix = [f32; 6];
+pub(crate) const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
 /// `a` then `b`, in PDF's row-vector convention.
-fn multiply(a: Matrix, b: Matrix) -> Matrix {
+pub(crate) fn multiply(a: Matrix, b: Matrix) -> Matrix {
     [
         a[0] * b[0] + a[1] * b[2],
         a[0] * b[1] + a[1] * b[3],
@@ -147,7 +147,7 @@ fn transform(m: Matrix, x: f32, y: f32) -> (f32, f32) {
 }
 
 /// The axis-aligned box around a rectangle after transformation.
-fn transformed_box(m: Matrix, [left, bottom, right, top]: [f32; 4]) -> [f32; 4] {
+pub(crate) fn transformed_box(m: Matrix, [left, bottom, right, top]: [f32; 4]) -> [f32; 4] {
     let corners = [transform(m, left, bottom), transform(m, right, bottom), transform(m, left, top), transform(m, right, top)];
     let xs = corners.map(|c| c.0);
     let ys = corners.map(|c| c.1);
@@ -669,7 +669,7 @@ enum XObjectChange {
 }
 
 /// Decodes an image XObject into pixels when its format allows editing.
-fn decode_image(pdf: &Pdf, stream: &Stream) -> Option<DynamicImage> {
+pub(crate) fn decode_image(pdf: &Pdf, stream: &Stream) -> Option<DynamicImage> {
     let width = stream.dict.get(b"Width").ok()?.as_i64().ok()? as u32;
     let height = stream.dict.get(b"Height").ok()?.as_i64().ok()? as u32;
     let filters: Vec<Vec<u8>> = match stream.dict.get(b"Filter").ok().map(|f| pdf.resolve(f)) {
