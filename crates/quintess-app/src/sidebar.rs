@@ -23,6 +23,7 @@ pub enum SidebarPage {
     Search,
     Attachments,
     Layers,
+    Tags,
 }
 
 /// Edits requested from the sidebar.
@@ -44,6 +45,12 @@ pub enum SidebarAction {
     MoveSelectionToLayer((u32, u16)),
     /// Select an object from the Objects list.
     SelectObject { page_index: usize, object: quintess_core::objects::PageObject },
+    /// An edit to the accessibility tags, made by the Tags panel.
+    EditTags { label: &'static str, edit: Box<dyn FnOnce(&mut quintess_core::Pdf) -> anyhow::Result<()>> },
+    /// Tag the document automatically from its layout.
+    AutoTag { replace_existing: bool },
+    /// Switch to the tool that tags a dragged area.
+    UseTagAreaTool,
     /// Move an object one step up or down the page's order.
     RestackObject { page_index: usize, object: quintess_core::objects::PageObject, forward: bool },
 }
@@ -59,6 +66,7 @@ pub struct SidebarState {
     drafts_version: (u64, u64),
     /// The layer being renamed, and the name typed so far.
     renaming_layer: Option<((u32, u16), String)>,
+    tags: crate::tags_panel::TagsPanelState,
 }
 
 pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, worker: &RenderWorker, night_mode: bool) -> Vec<SidebarAction> {
@@ -71,6 +79,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
         (SidebarPage::Search, "Search", crate::theme::icon::SEARCH),
         (SidebarPage::Attachments, "Files", crate::theme::icon::ATTACHMENT),
         (SidebarPage::Layers, "Layers", crate::theme::icon::LAYERS),
+        (SidebarPage::Tags, "Tags", crate::theme::icon::TAGS),
     ];
     if crate::theme::is_studio(ui.ctx()) {
         // Icons in a segmented row, and the section's name in small capitals.
@@ -109,6 +118,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
         SidebarPage::Search => search(ui, tab),
         SidebarPage::Attachments => attachments(ui, tab, &mut actions),
         SidebarPage::Layers => layers(ui, tab, state, &mut actions),
+        SidebarPage::Tags => crate::tags_panel::show(ui, tab, &mut state.tags, &mut actions),
     }
     actions
 }

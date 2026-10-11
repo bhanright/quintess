@@ -308,6 +308,20 @@ et.rs`): .pfx/.p12
 - Text wrap (`text_wrap.rs`): Wrap text in the object tool's toolbar;
   wrapped text is laid out again after a move, resize or delete.
 
+- Tag tree editor (`tag_tree.rs`, `marked_content.rs`, `auto_tag.rs`,
+  app `tags_panel.rs`): the structure tree as a model (RoleMap resolved,
+  previews and bounds per MCID, links and fields, broken trees listed);
+  edits for type, alt/actual text, language, table and list attributes,
+  add, delete (unwrap or make artifact), move, tag an area, mark as
+  artifact, untag, document language, DisplayDocTitle, Tabs /S. Every edit
+  rebuilds the ParentTree and back-pointers (`repair`; `check_consistency`
+  verifies). Content edits only rewrite BDC/EMC markers, so pages render
+  identically. Reading-order regions with reordering; rule-based
+  auto-tagging that reports its guesses. App: Tags sidebar panel, numbered
+  reading-order boxes on the page, Tag an area tool. CLI: `tags`,
+  `reading-order`. Not done: tags inside form XObjects, column-aware
+  reading order, tables from text alignment, tagging comments.
+
 ## Ideas for next
 
 1. Compile the installer (needs Inno Setup 6); William wanted to discuss

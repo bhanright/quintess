@@ -332,6 +332,17 @@ From the command line: `quintess tables report.pdf` lists the tables found (`--j
 - **File ▸ Reduce file size**: *Keep quality* compresses without changing anything visible; *Balanced* and *Smallest* also resample pictures (Smallest removes metadata, attachments and scripts too). *Custom* sets resolution and quality.
 - **Tools ▸ Accessibility** checks the document (title, language, tags, alternate text and more) and fixes what it can automatically. When nothing fails and you have reviewed the items only a person can judge (marked ?, such as alternate text and contrast), **Declare PDF/UA-1** marks the document as meeting the PDF/UA standard.
 
+## Tags and reading order
+
+Screen readers use a PDF's tags to know what each part of a page is (a heading, a paragraph, a list, a picture) and in what order to read it. The **Tags** panel in the sidebar (or **Tools ▸ Accessibility ▸ Tags and reading order**) shows them.
+
+- **Add tags to document** tags a file that has none, from its layout: headings by size and weight, paragraphs, bulleted and numbered lists, pictures, simple ruled tables, links and form fields. Repeated headers, footers and page numbers become decoration that screen readers skip. Check the result, and write alternate text for each picture it flags (shown in orange).
+- Select an element in the tree to change its type, its **alternate text** (describe each picture), its actual text or its language. **↑** and **↓** move it earlier or later in the reading order; **Unwrap** removes the tag but keeps what it holds; **Mark as decoration** makes screen readers skip it.
+- **Show the reading order on the page** numbers the tagged regions in the order they will be read, and lists them in the panel, where you can move them up and down.
+- **Tag an area**: drag a box around untagged text or a picture and choose what it is.
+
+Tagging never changes how the page looks.
+
 ## PDF/A and PDF/X
 
 **Tools ▸ Standards ▸ PDF/A** checks a document for long-term archiving and converts it. Choose the level:

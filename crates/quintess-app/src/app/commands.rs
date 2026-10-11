@@ -231,6 +231,14 @@ pub(super) const COMMANDS: &[Command] = &[
     }),
     command("Tools", "Compare with another version…", |app, ctx| app.start_compare(ctx)),
     command("Tools ▸ Accessibility", "Check accessibility", |app, _| app.check_accessibility()),
+    command("Tools ▸ Accessibility", "Tags and reading order", |app, _| app.sidebar.page = crate::sidebar::SidebarPage::Tags)
+        .hint("Edit the tags screen readers use, and the order they read the page in"),
+    command("Tools ▸ Accessibility", "Add tags to document", |app, _| {
+        let tagged = app.tabs.get(app.active).is_some_and(|tab| tab.tag_tree().exists);
+        app.sidebar.page = crate::sidebar::SidebarPage::Tags;
+        app.apply_sidebar_actions(vec![crate::sidebar::SidebarAction::AutoTag { replace_existing: tagged }]);
+    })
+    .hint("Tag an untagged document from its layout: headings, paragraphs, lists, pictures, tables, links"),
     command("Tools ▸ Accessibility", "Fix automatically", |app, _| {
         app.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes]);
         app.record(Step::AccessibilityFix);

@@ -89,7 +89,7 @@ pub struct QuintessApp {
 /// `command=Reverse order` (any command by its label), `crash` (to test the crash handler),
 /// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
-/// `sidebar=comments|fields|bookmarks|search`.
+/// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`.
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -287,6 +287,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 "split" => self.split_view = true,
+                "reading-order" => {
+                    if let Some(tab) = self.tab() {
+                        tab.show_reading_order = true;
+                    }
+                }
                 "spelling" => self.start_spell_check(ctx),
                 "read-aloud" => self.start_reading(false),
                 "sign-dialog" => self.sign_here(1, [350.0, 80.0, 550.0, 140.0]),
@@ -339,6 +344,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         "fields" => sidebar::SidebarPage::Fields,
                         "bookmarks" => sidebar::SidebarPage::Bookmarks,
                         "search" => sidebar::SidebarPage::Search,
+                        "layers" => sidebar::SidebarPage::Layers,
+                        "tags" => sidebar::SidebarPage::Tags,
                         _ => sidebar::SidebarPage::Thumbnails,
                     }
                 }
@@ -1433,6 +1440,27 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         self.edit("Add video", |pdf| quintess_core::media::add_video(pdf, page_index as u32 + 1, rect, &video, poster.as_deref()).map(|_| ()));
     }
 
+    /// Tags the document from its layout, reading text through PDFium, and
+    /// says what was guessed.
+    fn auto_tag(&mut self, replace_existing_tags: bool) {
+        // Used only when the document names no language: the one chosen for spelling.
+        let language = Some(self.settings.spelling_language.clone()).filter(|language| !language.is_empty());
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        let options = quintess_core::auto_tag::AutoTagOptions { language, replace_existing_tags };
+        let result = tab.load_pdf().and_then(|mut pdf| {
+            let report = quintess_core::auto_tag::auto_tag(&mut pdf, tab.pdfium_document(), &options)?;
+            Ok((pdf.to_bytes(&quintess_core::SaveSettings::default())?, report))
+        });
+        let result = result.and_then(|(bytes, report)| tab.replace_bytes("Add tags", bytes).map(|_| report));
+        if let Some(report) = self.report(result) {
+            let mut message = format!("Tagged {} headings, {} paragraphs, {} lists, {} figures, {} tables and {} links.", report.headings, report.paragraphs, report.lists, report.figures, report.tables, report.links);
+            if !report.figures_needing_alt_text.is_empty() {
+                message.push_str(&format!(" {} pictures need alternate text: select them in the Tags panel.", report.figures_needing_alt_text.len()));
+            }
+            self.info(message);
+        }
+    }
+
     fn import_form_data(&mut self) {
         let Some(path) = rfd::FileDialog::new().add_filter("Form data", &["json", "xfdf", "xml"]).pick_file() else { return };
         let result = std::fs::read_to_string(&path).map_err(anyhow::Error::from).and_then(|text| {
@@ -1847,6 +1875,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         self.reselect_objects(page_index, &expected);
                     }
                 }
+                ViewerAction::TagArea { page, rect } => self.dialogs.push(Dialog::TagArea { page, rect, choice: 0 }),
                 ViewerAction::SetTextWrap { page_index, bounds, on } => {
                     if on {
                         let options = quintess_core::text_wrap::WrapOptions::default();
@@ -1898,6 +1927,12 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 SidebarAction::ReplyToAnnotation(id, text) => {
                     let author = self.tool_settings.author.clone();
                     self.edit("Reply", |pdf| reply_to_annotation(pdf, id, &text, &author).map(|_| ()));
+                }
+                SidebarAction::EditTags { label, edit } => self.edit(label, edit),
+                SidebarAction::AutoTag { replace_existing } => self.auto_tag(replace_existing),
+                SidebarAction::UseTagAreaTool => {
+                    self.tool = Tool::TagArea;
+                    self.info("Drag a box around the text or picture to tag.");
                 }
                 SidebarAction::UpdateLayer(layer) => {
                     self.edit("Change layer", |pdf| quintess_core::layers::update_layer(pdf, &layer));

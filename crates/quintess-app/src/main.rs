@@ -11,6 +11,7 @@ mod render;
 mod sidebar;
 mod spell;
 mod tab;
+mod tags_panel;
 mod theme;
 mod measure_tool;
 mod object_tool;

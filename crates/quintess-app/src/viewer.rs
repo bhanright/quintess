@@ -51,6 +51,8 @@ pub enum Tool {
     EditObjects,
     /// Measure distances, perimeters and areas at a scale.
     Measure,
+    /// Drag a box around content to tag it for accessibility.
+    TagArea,
 }
 
 impl Tool {
@@ -81,6 +83,7 @@ impl Tool {
             Tool::Inspect => "Inspect",
             Tool::EditObjects => "Edit pictures and shapes",
             Tool::Measure => "Measure",
+            Tool::TagArea => "Tag an area",
         }
     }
 
@@ -91,7 +94,7 @@ impl Tool {
 
     /// Tools that draw a rectangle by dragging.
     fn drags_a_box(self) -> bool {
-        matches!(self, Tool::TextBox | Tool::Rectangle | Tool::Ellipse | Tool::Link | Tool::RedactArea | Tool::TextField | Tool::CheckBox | Tool::SignatureField | Tool::Line | Tool::Arrow | Tool::Sign)
+        matches!(self, Tool::TextBox | Tool::Rectangle | Tool::Ellipse | Tool::Link | Tool::RedactArea | Tool::TextField | Tool::CheckBox | Tool::SignatureField | Tool::Line | Tool::Arrow | Tool::Sign | Tool::TagArea)
     }
 }
 
@@ -140,6 +143,8 @@ pub enum ViewerAction {
     AddPageText { page: u32, x: f32, y: f32, text: String, style: LineStyle },
     /// Change pictures and drawings on a page; afterwards, select what lies
     /// at `expected` (kind and bounds), or clear the selection when empty.
+    /// Tag the content inside a dragged box (1-based page, page space).
+    TagArea { page: u32, rect: [f32; 4] },
     /// Start or stop text wrapping around the picture at `bounds`.
     SetTextWrap { page_index: usize, bounds: [f32; 4], on: bool },
     ChangeObjects { page_index: usize, objects: Vec<quintess_core::objects::PageObject>, change: quintess_core::objects::Change, label: String, expected: Vec<(quintess_core::objects::ObjectKind, [f32; 4])> },
@@ -625,6 +630,18 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
         for rect in &found.rects {
             let fill = if current { Color32::from_rgba_unmultiplied(255, 140, 0, 110) } else { Color32::from_rgba_unmultiplied(255, 220, 0, 80) };
             painter.rect_filled(screen_rect_of(geometry, page_rect, zoom, *rect), 1.0, fill);
+        }
+    }
+    // The Tags panel's reading order: numbered boxes in the order screen readers read.
+    if tab.show_reading_order {
+        let accent = crate::theme::highlight();
+        for region in tab.reading_order(page_index).iter() {
+            let rect = screen_rect_of(geometry, page_rect, zoom, region.bounds);
+            painter.rect_stroke(rect, 2.0, Stroke::new(1.5, accent), StrokeKind::Outside);
+            // Just left of the box, so the number never covers the text.
+            let badge = egui::Rect::from_min_size(egui::pos2(rect.left() - 26.0, rect.top()), vec2(22.0, 18.0));
+            painter.rect_filled(badge, 3.0, accent);
+            painter.text(badge.center(), egui::Align2::CENTER_CENTER, region.number.to_string(), egui::FontId::proportional(12.0), Color32::WHITE);
         }
     }
     if tab.selection.is_some_and(|s| s.page_index == page_index) {
@@ -1180,6 +1197,7 @@ fn finish_drag(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, setti
         Tool::TextField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Text), rect, text: String::new() })),
         Tool::CheckBox if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::CheckBox), rect, text: String::new() })),
         Tool::Sign if big_enough => actions.push(ViewerAction::Sign { page, rect }),
+        Tool::TagArea if big_enough => actions.push(ViewerAction::TagArea { page, rect }),
         Tool::SignatureField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Signature), rect, text: String::new() })),
         _ => {}
     }

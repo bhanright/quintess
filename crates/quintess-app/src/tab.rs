@@ -107,6 +107,10 @@ pub struct DocumentTab {
     object_layer_cache: RefCell<HashMap<usize, Rc<Vec<(usize, (u32, u16))>>>>,
     /// Per page, where the pictures that text wraps around are.
     wrap_cache: RefCell<HashMap<usize, Rc<Vec<[f32; 4]>>>>,
+    tag_cache: RefCell<Option<Rc<quintess_core::tag_tree::TagTree>>>,
+    reading_order_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::tag_tree::ReadingOrderRegion>>>>,
+    /// Number the tagged regions of each page in reading order (Tags panel).
+    pub show_reading_order: bool,
     /// Rendered pages: (page, resolution key) → texture.
     pub textures: HashMap<(usize, u32), egui::TextureHandle>,
     pub pending: HashSet<(usize, u32)>,
@@ -176,6 +180,9 @@ impl DocumentTab {
             layer_cache: RefCell::new(None),
             object_layer_cache: RefCell::new(HashMap::new()),
             wrap_cache: RefCell::new(HashMap::new()),
+            tag_cache: RefCell::new(None),
+            reading_order_cache: RefCell::new(HashMap::new()),
+            show_reading_order: false,
             textures: HashMap::new(),
             pending: HashSet::new(),
             texture_night_mode: false,
@@ -234,6 +241,8 @@ impl DocumentTab {
         *self.layer_cache.borrow_mut() = None;
         self.object_layer_cache.borrow_mut().clear();
         self.wrap_cache.borrow_mut().clear();
+        *self.tag_cache.borrow_mut() = None;
+        self.reading_order_cache.borrow_mut().clear();
         self.textures.clear();
         self.pending.clear();
         self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
@@ -387,6 +396,35 @@ impl DocumentTab {
     }
 
     /// The objects on a page that can be picked: those not on a locked layer.
+    /// The accessibility tag tree, with text read through PDFium.
+    pub fn tag_tree(&self) -> Rc<quintess_core::tag_tree::TagTree> {
+        if let Some(tree) = self.tag_cache.borrow().as_ref() {
+            return tree.clone();
+        }
+        let tree = self.load_pdf().map(|pdf| match self.pdfium_document() {
+            Some(document) => quintess_core::tag_tree::read_tag_tree_with_renderer(&pdf, document),
+            None => quintess_core::tag_tree::read_tag_tree(&pdf),
+        }).unwrap_or_default();
+        let tree = Rc::new(tree);
+        *self.tag_cache.borrow_mut() = Some(tree.clone());
+        tree
+    }
+
+    /// A page's tagged regions in reading order.
+    pub fn reading_order(&self, page_index: usize) -> Rc<Vec<quintess_core::tag_tree::ReadingOrderRegion>> {
+        if let Some(regions) = self.reading_order_cache.borrow().get(&page_index) {
+            return regions.clone();
+        }
+        let page = page_index as u32 + 1;
+        let regions = self.load_pdf().ok().and_then(|pdf| match self.pdfium_document() {
+            Some(document) => quintess_core::tag_tree::reading_order_with_renderer(&pdf, page, document).ok(),
+            None => quintess_core::tag_tree::reading_order(&pdf, page).ok(),
+        }).unwrap_or_default();
+        let regions = Rc::new(regions);
+        self.reading_order_cache.borrow_mut().insert(page_index, regions.clone());
+        regions
+    }
+
     /// Where the pictures that text wraps around sit on a page.
     pub fn wrapping_bounds(&self, page_index: usize) -> Rc<Vec<[f32; 4]>> {
         if let Some(bounds) = self.wrap_cache.borrow().get(&page_index) {

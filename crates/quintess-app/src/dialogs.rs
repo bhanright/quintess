@@ -175,6 +175,8 @@ pub enum Dialog {
     Portfolio(Box<crate::tool_dialogs::PortfolioDialog>),
     Media(Box<crate::tool_dialogs::MediaDialog>),
     Threads(Box<crate::tool_dialogs::ThreadsDialog>),
+    /// What to tag the content in a dragged box as.
+    TagArea { page: u32, rect: [f32; 4], choice: usize },
     /// Making a PDF from another kind of file, or a web page.
     Convert(Box<ConvertDialog>),
     AccessibilityResults(Vec<quintess_core::accessibility::Check>),
@@ -273,6 +275,7 @@ impl Dialog {
             Dialog::Portfolio(_) => "Portfolio files",
             Dialog::Media(_) => "Audio, video and 3D",
             Dialog::Threads(_) => "Article threads",
+            Dialog::TagArea { .. } => "Tag this area",
             Dialog::Convert(convert) if convert.web_page => "Create a PDF from a web page",
             Dialog::Convert(_) => "Create a PDF from a file",
             Dialog::AccessibilityResults(_) => "Accessibility check",
@@ -1372,6 +1375,27 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         Dialog::Portfolio(portfolio) => return portfolio.show(ui, tab, outcome),
         Dialog::Media(media) => return media.show(ui, tab, outcome),
         Dialog::Threads(threads) => return threads.show(ui, tab, outcome),
+        Dialog::TagArea { page, rect, choice } => {
+            ui.label("Tag the untagged text and pictures in the box as:");
+            for (index, (_, name)) in TAG_AREA_CHOICES.iter().enumerate() {
+                ui.radio_value(choice, index, *name);
+            }
+            ui.weak("New tags go at the end of the reading order; move them in the Tags panel.");
+            if buttons(ui, "Tag", outcome) {
+                let (structure_type, name) = TAG_AREA_CHOICES[*choice];
+                let selection = quintess_core::tag_tree::ContentSelection::Region { page: *page, area: *rect };
+                tab.apply(&format!("Tag as {name}"), |pdf| {
+                    if structure_type == "Artifact" {
+                        quintess_core::tag_tree::mark_as_artifact(pdf, &selection, quintess_core::tag_tree::ArtifactKind::Layout).map(|_| ())
+                    } else {
+                        let (parent, index) = end_of_reading_order(pdf)?;
+                        quintess_core::tag_tree::tag_content(pdf, &selection, structure_type, parent, index).map(|_| ())
+                    }
+                })?;
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -2377,4 +2401,30 @@ impl ConvertDialog {
         }
         Ok(())
     }
+}
+
+/// The tags offered for a dragged area: the structure type and its name.
+const TAG_AREA_CHOICES: [(&str, &str); 9] = [
+    ("P", "Paragraph"),
+    ("H1", "Heading 1"),
+    ("H2", "Heading 2"),
+    ("H3", "Heading 3"),
+    ("Figure", "Figure (picture)"),
+    ("Table", "Table"),
+    ("L", "List"),
+    ("Formula", "Formula"),
+    ("Artifact", "Decoration (screen readers skip it)"),
+];
+
+/// Where a new tag goes so it is read last: inside the document's single
+/// Document element if it has one, else at the end of the tree.
+fn end_of_reading_order(pdf: &mut Pdf) -> anyhow::Result<(quintess_core::tag_tree::ElementId, usize)> {
+    use quintess_core::tag_tree::TagNode;
+    let root = quintess_core::tag_tree::ensure_structure_tree(pdf)?;
+    let tree = quintess_core::tag_tree::read_tag_tree(pdf);
+    let elements: Vec<_> = tree.children.iter().filter_map(|kid| if let TagNode::Element(element) = kid { Some(element) } else { None }).collect();
+    Ok(match elements.as_slice() {
+        [document] if document.standard_type == "Document" => (document.id, document.children.len()),
+        _ => (root, tree.children.len()),
+    })
 }
