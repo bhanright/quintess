@@ -212,3 +212,70 @@ fn converters_lists_every_provider() {
     let json: serde_json::Value = serde_json::from_str(&ok(&["converters", "--json"])).unwrap();
     assert_eq!(json.as_array().unwrap().len(), 5);
 }
+
+#[test]
+fn portfolios_are_made_listed_and_unpacked() {
+    let folder = folder("portfolio");
+    let report = letter(&folder);
+    let notes = folder.join("notes.txt");
+    std::fs::write(&notes, "remember the milk\n").unwrap();
+    let portfolio = folder.join("case.pdf");
+    let made = ok(&["portfolio", "create", path(&report), path(&notes), "-o", path(&portfolio), "--cover-text", "Case 17", "--sort", "name", "--initial", "notes.txt"]);
+    assert!(made.contains("2 files"), "{made}");
+    assert!(ok(&["text", path(&portfolio)]).contains("This is a portfolio"), "the cover page explains itself");
+
+    let listing = ok(&["portfolio", "list", path(&portfolio)]);
+    assert!(listing.contains("letter.pdf") && listing.contains("notes.txt") && listing.contains("(opens first)"), "{listing}");
+    let json: serde_json::Value = serde_json::from_str(&ok(&["portfolio", "list", path(&portfolio), "--json"])).unwrap();
+    assert_eq!(json["files"].as_array().unwrap().len(), 2);
+    assert_eq!(json["initial"], "notes.txt");
+
+    let out = folder.join("out");
+    ok(&["portfolio", "extract", path(&portfolio), "-o", path(&out), "--name", "notes.txt"]);
+    assert_eq!(std::fs::read(out.join("notes.txt")).unwrap(), b"remember the milk\n");
+    assert!(!out.join("letter.pdf").exists(), "only the named file is written");
+    let everything = folder.join("everything");
+    ok(&["portfolio", "extract", path(&portfolio), "-o", path(&everything)]);
+    assert!(everything.join("letter.pdf").exists() && everything.join("notes.txt").exists());
+
+    // An ordinary PDF is not a portfolio.
+    let refused = quintess(&["portfolio", "list", path(&report)]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("not a portfolio"));
+}
+
+#[test]
+fn videos_are_added_listed_and_extracted() {
+    let folder = folder("media");
+    let pdf = letter(&folder);
+    assert!(ok(&["media", "list", path(&pdf)]).contains("No audio, video or 3D content"));
+    let video = folder.join("clip.mp4");
+    std::fs::write(&video, b"\0\0\0\x18ftypmp42 not really a video").unwrap();
+    let with_video = folder.join("with-video.pdf");
+    ok(&["media", "add-video", path(&pdf), path(&video), "--rect", "100,300,400,500", "-o", path(&with_video)]);
+    let listing = ok(&["media", "list", path(&with_video)]);
+    assert!(listing.contains("clip.mp4") && listing.contains("video/mp4"), "{listing}");
+    let json: serde_json::Value = serde_json::from_str(&ok(&["media", "list", path(&with_video), "--json"])).unwrap();
+    assert_eq!(json[0]["page"], 1);
+    let out = folder.join("out");
+    ok(&["media", "extract", path(&with_video), "-o", path(&out), "--item", "1"]);
+    assert_eq!(std::fs::read(out.join("clip.mp4")).unwrap(), std::fs::read(&video).unwrap());
+    assert!(!quintess(&["media", "extract", path(&with_video), "-o", path(&out), "--item", "5"]).status.success());
+    assert!(!quintess(&["media", "add-video", path(&pdf), path(&video), "--rect", "1,2,3", "-o", path(&with_video)]).status.success());
+}
+
+#[test]
+fn threads_are_listed_with_their_text() {
+    let folder = folder("threads");
+    let pdf = letter(&folder);
+    assert!(ok(&["threads", "list", path(&pdf)]).contains("No article threads"));
+    let mut document = quintess_core::Pdf::open(&pdf, None).unwrap();
+    quintess_core::threads::create_thread(&mut document, "Notice story", &[(1, [0.0, 0.0, 612.0, 792.0])]).unwrap();
+    let threaded = folder.join("threaded.pdf");
+    document.save(&threaded, &quintess_core::SaveSettings::default()).unwrap();
+    let listing = ok(&["threads", "list", path(&threaded), "--text"]);
+    assert!(listing.contains("Notice story") && listing.contains("1 boxes") && listing.contains("| Notice"), "{listing}");
+    let json: serde_json::Value = serde_json::from_str(&ok(&["threads", "list", path(&threaded), "--json", "--text"])).unwrap();
+    assert_eq!(json[0]["title"], "Notice story");
+    assert!(json[0]["text"].as_str().unwrap().contains("Notice"));
+}

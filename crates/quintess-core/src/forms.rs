@@ -198,8 +198,17 @@ pub fn fill_fields(pdf: &mut Pdf, values: &BTreeMap<String, String>) -> Result<V
         };
         let Some(field_id) = field.id else { continue };
         match field.field_type {
-            FieldType::Text | FieldType::ComboBox | FieldType::ListBox => {
-                pdf.doc.get_dictionary_mut(field_id)?.set("V", text_string(value));
+            FieldType::ListBox => {
+                // A list box can hold several choices; they arrive one per line.
+                let chosen: Vec<&str> = value.split('\n').filter(|choice| !choice.is_empty()).collect();
+                select_list_box_values(pdf, field_id, &field.options, &chosen)?;
+                regenerate_text_appearance(pdf, field_id, &chosen.join(", "))?;
+            }
+            FieldType::Text | FieldType::ComboBox => {
+                let dictionary = pdf.doc.get_dictionary_mut(field_id)?;
+                dictionary.set("V", text_string(value));
+                // Rich text set earlier would now disagree with the value.
+                dictionary.remove(b"RV");
                 regenerate_text_appearance(pdf, field_id, value)?;
             }
             FieldType::CheckBox | FieldType::RadioGroup => {
@@ -538,27 +547,319 @@ fn circle(cx: f32, cy: f32, r: f32) -> String {
     )
 }
 
-/// Field values as a name → value map, for JSON export.
+/// Field values as a name → value map, for JSON export. A list box with
+/// several choices selected has them joined by line breaks, which
+/// [`fill_fields`] splits again.
 pub fn export_values(pdf: &Pdf) -> BTreeMap<String, String> {
-    list_fields(pdf).into_iter().filter(|f| !matches!(f.field_type, FieldType::PushButton | FieldType::Signature)).map(|f| (f.name, f.value)).collect()
+    list_fields(pdf)
+        .into_iter()
+        .filter(|f| !matches!(f.field_type, FieldType::PushButton | FieldType::Signature))
+        .map(|f| {
+            let value = if f.field_type == FieldType::ListBox { selected_values(pdf, &f).join("\n") } else { f.value };
+            (f.name, value)
+        })
+        .collect()
 }
 
-/// Field values as XFDF, the XML exchange format Acrobat reads.
-pub fn export_xfdf(pdf: &Pdf, source_file_name: &str) -> String {
-    let escape = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
-    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\">\n<fields>\n");
-    for (name, value) in export_values(pdf) {
-        xml.push_str(&format!("  <field name=\"{}\"><value>{}</value></field>\n", escape(&name), escape(&value)));
+/// The choices selected in a list box (or the single value of other fields),
+/// one entry each, unlike [`FieldInfo::value`] which joins them for display.
+fn selected_values(pdf: &Pdf, field: &FieldInfo) -> Vec<String> {
+    let Some(dictionary) = field.id.and_then(|id| pdf.doc.get_dictionary(id).ok()) else { return vec![field.value.clone()] };
+    match inherited(pdf, dictionary, b"V") {
+        Some(Object::Array(items)) => items.iter().filter_map(|item| object_to_text(pdf.resolve(item))).collect(),
+        Some(Object::Dictionary(_)) | None => Vec::new(),
+        Some(other) => object_to_text(other).into_iter().collect(),
     }
-    xml.push_str(&format!("</fields>\n<f href=\"{}\"/>\n</xfdf>\n", escape(source_file_name)));
+}
+
+/// Selects the given choices of a list box: `/V` is one string, or an array
+/// when several are chosen, and `/I` lists their positions among the options.
+fn select_list_box_values(pdf: &mut Pdf, field_id: ObjectId, options: &[String], chosen: &[&str]) -> Result<()> {
+    let dictionary = pdf.doc.get_dictionary_mut(field_id)?;
+    match chosen {
+        [] => {
+            dictionary.remove(b"V");
+        }
+        [only] => dictionary.set("V", text_string(only)),
+        many => dictionary.set("V", many.iter().map(|choice| text_string(choice)).collect::<Vec<Object>>()),
+    }
+    let mut positions: Vec<i64> = chosen.iter().filter_map(|choice| options.iter().position(|option| option == choice)).map(|position| position as i64).collect();
+    positions.sort_unstable();
+    if positions.is_empty() {
+        dictionary.remove(b"I");
+    } else {
+        dictionary.set("I", positions.into_iter().map(Object::Integer).collect::<Vec<Object>>());
+    }
+    Ok(())
+}
+
+/// One field of an XFDF file.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct XfdfField {
+    /// The fully qualified name, partial names joined with dots.
+    pub name: String,
+    /// One entry per `<value>`; a list box with several choices has several.
+    pub values: Vec<String>,
+    /// The XHTML inside `<value-richtext>`, when the field has styled text.
+    pub rich_text: Option<String>,
+}
+
+/// The XML of one field, written inside its parent's element.
+#[derive(Default)]
+struct XfdfNode {
+    children: BTreeMap<String, XfdfNode>,
+    values: Vec<String>,
+    rich_text: Option<String>,
+}
+
+/// Field values as XFDF, the XML exchange format Acrobat reads. Fields with
+/// dotted names are written nested (`a.b` is `<field name="a"><field name="b">`),
+/// list boxes write one `<value>` per choice, and styled text keeps its
+/// `<value-richtext>`.
+pub fn export_xfdf(pdf: &Pdf, source_file_name: &str) -> String {
+    let mut root = XfdfNode::default();
+    for field in list_fields(pdf) {
+        if matches!(field.field_type, FieldType::PushButton | FieldType::Signature) {
+            continue;
+        }
+        let values = if field.field_type == FieldType::ListBox { selected_values(pdf, &field) } else { vec![field.value.clone()] };
+        let rich_text = field.id.and_then(|id| pdf.doc.get_dictionary(id).ok()).and_then(|dictionary| inherited(pdf, dictionary, b"RV")).and_then(rich_value_body);
+        let mut node = &mut root;
+        for part in field.name.split('.') {
+            node = node.children.entry(part.to_string()).or_default();
+        }
+        node.values = values;
+        node.rich_text = rich_text;
+    }
+    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\">\n<fields>\n");
+    write_xfdf_children(&root, 1, &mut xml);
+    xml.push_str(&format!("</fields>\n<f href=\"{}\"/>\n</xfdf>\n", xml_escape(source_file_name)));
     xml
 }
 
-/// Reads XFDF field values (flat names) into a map for [`fill_fields`].
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn write_xfdf_children(node: &XfdfNode, depth: usize, xml: &mut String) {
+    let indent = "  ".repeat(depth);
+    for (name, child) in &node.children {
+        if child.children.is_empty() {
+            xml.push_str(&format!("{indent}<field name=\"{}\">", xml_escape(name)));
+            for value in &child.values {
+                xml.push_str(&format!("<value>{}</value>", xml_escape(value)));
+            }
+            if let Some(rich) = &child.rich_text {
+                xml.push_str(&format!("<value-richtext>{rich}</value-richtext>"));
+            }
+            xml.push_str("</field>\n");
+        } else {
+            xml.push_str(&format!("{indent}<field name=\"{}\">\n", xml_escape(name)));
+            write_xfdf_children(child, depth + 1, xml);
+            xml.push_str(&format!("{indent}</field>\n"));
+        }
+    }
+}
+
+/// The `<body>` element of a field's `/RV` rich text, without any XML
+/// declaration, or `None` when it is not well-formed enough to embed.
+fn rich_value_body(value: &Object) -> Option<String> {
+    let text = match value {
+        Object::String(..) => object_to_text(value)?,
+        Object::Stream(stream) => String::from_utf8_lossy(&stream.decompressed_content().unwrap_or_else(|_| stream.content.clone())).into_owned(),
+        _ => return None,
+    };
+    let start = text.find("<body")?;
+    let body = text[start..].trim();
+    let mut reader = quick_xml::Reader::from_str(body);
+    loop {
+        match reader.read_event() {
+            Ok(quick_xml::events::Event::Eof) => return Some(body.to_string()),
+            Err(_) => return None,
+            Ok(_) => {}
+        }
+    }
+}
+
+/// Where the rich text of a `<value-richtext>` element starts and how deeply
+/// nested the reader is inside it.
+#[derive(PartialEq)]
+enum XfdfCapture {
+    Nothing,
+    Value,
+    RichText { start: usize, depth: u32 },
+}
+
+/// Reads every field of an XFDF file: nested `<field>` elements give dotted
+/// names, each `<value>` is one value, and `<value-richtext>` is kept as XHTML.
+/// Fields that only group others (no value, no rich text) are not returned.
+pub fn parse_xfdf_fields(xml: &str) -> Vec<XfdfField> {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut name_stack: Vec<String> = Vec::new();
+    let mut fields: Vec<XfdfField> = Vec::new();
+    let mut capture = XfdfCapture::Nothing;
+    let mut value_text = String::new();
+    loop {
+        // Rich text ends where its closing tag begins, so note the position first.
+        let before_event = reader.buffer_position() as usize;
+        let event = match reader.read_event() {
+            Ok(Event::Eof) | Err(_) => break,
+            Ok(event) => event,
+        };
+        // Rich text is copied as it was written, so only its nesting is followed.
+        if let XfdfCapture::RichText { start, depth } = &mut capture {
+            match &event {
+                Event::Start(_) => *depth += 1,
+                Event::End(element) if *depth == 0 && element.name().as_ref() == b"value-richtext" => {
+                    let rich = xml[*start..before_event].trim().to_string();
+                    if let Some(field) = current_field(&mut fields, &name_stack) {
+                        field.rich_text = Some(rich);
+                    }
+                    capture = XfdfCapture::Nothing;
+                }
+                Event::End(_) => *depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            continue;
+        }
+        match event {
+            Event::Start(element) => match element.name().as_ref() {
+                b"field" => {
+                    let name = element.attributes().flatten().find(|attribute| attribute.key.as_ref() == b"name").and_then(|attribute| attribute.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder()).ok()).map(|name| name.into_owned()).unwrap_or_default();
+                    name_stack.push(name);
+                }
+                b"value" if !name_stack.is_empty() => {
+                    capture = XfdfCapture::Value;
+                    value_text.clear();
+                }
+                b"value-richtext" if !name_stack.is_empty() => capture = XfdfCapture::RichText { start: reader.buffer_position() as usize, depth: 0 },
+                _ => {}
+            },
+            Event::Empty(element) if element.name().as_ref() == b"value" && !name_stack.is_empty() => {
+                if let Some(field) = current_field(&mut fields, &name_stack) {
+                    field.values.push(String::new());
+                }
+            }
+            Event::Text(text) if capture == XfdfCapture::Value => {
+                if let Ok(text) = text.decode() {
+                    value_text.push_str(&text);
+                }
+            }
+            Event::CData(data) if capture == XfdfCapture::Value => {
+                if let Ok(text) = data.decode() {
+                    value_text.push_str(&text);
+                }
+            }
+            Event::GeneralRef(reference) if capture == XfdfCapture::Value => value_text.push_str(&xml_reference_text(&reference)),
+            Event::End(element) => match element.name().as_ref() {
+                b"value" if capture == XfdfCapture::Value => {
+                    capture = XfdfCapture::Nothing;
+                    let text = std::mem::take(&mut value_text);
+                    if let Some(field) = current_field(&mut fields, &name_stack) {
+                        field.values.push(text);
+                    }
+                }
+                b"field" => {
+                    name_stack.pop();
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    fields
+}
+
+/// The entry for the field being read, created on first use.
+fn current_field<'a>(fields: &'a mut Vec<XfdfField>, name_stack: &[String]) -> Option<&'a mut XfdfField> {
+    if name_stack.is_empty() {
+        return None;
+    }
+    let name = name_stack.join(".");
+    if let Some(position) = fields.iter().position(|field| field.name == name) {
+        return fields.get_mut(position);
+    }
+    fields.push(XfdfField { name, ..Default::default() });
+    fields.last_mut()
+}
+
+fn xml_reference_text(reference: &quick_xml::events::BytesRef) -> String {
+    if let Ok(Some(character)) = reference.resolve_char_ref() {
+        return character.to_string();
+    }
+    match reference.decode().as_deref() {
+        Ok("amp") => "&",
+        Ok("lt") => "<",
+        Ok("gt") => ">",
+        Ok("quot") => "\"",
+        Ok("apos") => "'",
+        _ => "",
+    }
+    .to_string()
+}
+
+/// The text of XFDF rich text (XHTML): paragraphs and line breaks become
+/// line breaks, all other markup is dropped.
+pub fn rich_text_to_plain(rich: &str) -> String {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(rich);
+    let mut text = String::new();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) | Err(_) => break,
+            Ok(Event::Text(piece)) => {
+                if let Ok(piece) = piece.decode() {
+                    text.push_str(&piece);
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => text.push_str(&xml_reference_text(&reference)),
+            Ok(Event::CData(data)) => {
+                if let Ok(piece) = data.decode() {
+                    text.push_str(&piece);
+                }
+            }
+            Ok(Event::End(element)) if element.name().as_ref() == b"p" => text.push('\n'),
+            Ok(Event::Empty(element)) if element.name().as_ref() == b"br" => text.push('\n'),
+            _ => {}
+        }
+    }
+    text.trim_end_matches('\n').to_string()
+}
+
+/// The plain value an XFDF field fills in: its values joined by line breaks,
+/// or the plain text of its rich text when it has no `<value>`.
+fn xfdf_plain_value(field: &XfdfField) -> Option<String> {
+    if !field.values.is_empty() {
+        Some(field.values.join("\n"))
+    } else {
+        field.rich_text.as_deref().map(rich_text_to_plain)
+    }
+}
+
+/// Reads XFDF field values into a map for [`fill_fields`]: nested fields get
+/// dotted names, several values are joined by line breaks (which a list box
+/// takes as separate choices), and rich text becomes its plain text. Use
+/// [`apply_xfdf`] to keep rich text's styling.
 pub fn parse_xfdf(xml: &str) -> BTreeMap<String, String> {
-    let pattern = regex::Regex::new(r#"(?s)<field\s+name="([^"]*)"\s*>\s*<value>(.*?)</value>"#).expect("valid pattern");
-    let unescape = |text: &str| text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&amp;", "&");
-    pattern.captures_iter(xml).map(|c| (unescape(&c[1]), unescape(&c[2]))).collect()
+    parse_xfdf_fields(xml).into_iter().filter_map(|field| Some((field.name.clone(), xfdf_plain_value(&field)?))).collect()
+}
+
+/// Fills the form from XFDF, keeping rich text as the field's `/RV` beside
+/// its plain `/V`. Returns the field names that matched no fillable field.
+pub fn apply_xfdf(pdf: &mut Pdf, xml: &str) -> Result<Vec<String>> {
+    let fields = parse_xfdf_fields(xml);
+    let values: BTreeMap<String, String> = fields.iter().filter_map(|field| Some((field.name.clone(), xfdf_plain_value(field)?))).collect();
+    let unmatched = fill_fields(pdf, &values)?;
+    let known = list_fields(pdf);
+    for field in &fields {
+        let Some(rich) = &field.rich_text else { continue };
+        let Some(target) = known.iter().find(|candidate| candidate.name == field.name && candidate.field_type == FieldType::Text) else { continue };
+        if let Some(id) = target.id {
+            pdf.doc.get_dictionary_mut(id)?.set("RV", text_string(rich));
+        }
+    }
+    Ok(unmatched)
 }
 
 /// Field values as CSV rows: name, type, value.

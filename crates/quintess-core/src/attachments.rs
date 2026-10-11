@@ -22,7 +22,7 @@ pub struct Attachment {
 }
 
 /// The `/Names /EmbeddedFiles` tree's flat list of (name, file spec) pairs.
-fn embedded_file_pairs(pdf: &Pdf) -> Vec<(String, Object)> {
+pub(crate) fn embedded_file_pairs(pdf: &Pdf) -> Vec<(String, Object)> {
     let Some(tree) = pdf
         .doc
         .catalog()
@@ -59,7 +59,7 @@ fn collect_name_tree(pdf: &Pdf, node: &Dictionary, pairs: &mut Vec<(String, Obje
     }
 }
 
-fn file_stream<'a>(pdf: &'a Pdf, spec: &'a Object) -> Option<&'a Stream> {
+pub(crate) fn file_stream<'a>(pdf: &'a Pdf, spec: &'a Object) -> Option<&'a Stream> {
     let spec = pdf.resolve(spec).as_dict().ok()?;
     let embedded = pdf.resolve(spec.get(b"EF").ok()?).as_dict().ok()?;
     let file = embedded.get(b"UF").or_else(|_| embedded.get(b"F")).ok()?;
@@ -161,7 +161,7 @@ fn file_spec(pdf: &mut Pdf, name: &str, data: &[u8], description: &str) -> Objec
     pdf.doc.add_object(spec)
 }
 
-fn write_tree(pdf: &mut Pdf, pairs: Vec<(String, Object)>) -> Result<()> {
+pub(crate) fn write_tree(pdf: &mut Pdf, pairs: Vec<(String, Object)>) -> Result<()> {
     let names: Vec<Object> = pairs.into_iter().flat_map(|(name, spec)| [text_string(&name), spec]).collect();
     let empty = names.is_empty();
     let catalog_id = pdf.catalog_id()?;

@@ -178,10 +178,15 @@ pub fn page_text(document: &PdfDocument, page_index: usize) -> Result<PageText> 
 impl PageText {
     /// The page's text as one string; `char_offsets[i]` is the index into
     /// `chars` of the i-th character of the string.
+    ///
+    /// Lines mixing right-to-left and left-to-right text are in logical
+    /// order (see [`crate::bidi_text`]), so `offsets` is not always
+    /// increasing.
     pub fn as_string(&self) -> (String, Vec<usize>) {
         let mut text = String::with_capacity(self.chars.len());
         let mut offsets = Vec::with_capacity(self.chars.len());
-        for (index, item) in self.chars.iter().enumerate() {
+        for index in self.reading_order(0..self.chars.len()) {
+            let item = &self.chars[index];
             // PDFium reports line breaks as "\r\n"; keep one newline.
             if item.character == '\r' {
                 continue;
@@ -190,6 +195,56 @@ impl PageText {
             offsets.push(index);
         }
         (text, offsets)
+    }
+
+    /// The page's text as PDFium writes it (line breaks as "\r\n"), with
+    /// right-to-left lines in logical order.
+    pub fn as_text_with_line_breaks(&self) -> String {
+        self.reading_order(0..self.chars.len()).into_iter().map(|index| self.chars[index].character).collect()
+    }
+
+    /// The indices of `range` in reading order: content order, except that
+    /// lines containing right-to-left letters are put into logical order.
+    fn reading_order(&self, range: std::ops::Range<usize>) -> Vec<usize> {
+        let mut order = Vec::with_capacity(range.len());
+        let mut line: Vec<usize> = Vec::new();
+        let mut previous_line: Option<crate::bidi_text::PreviousLine> = None;
+        for index in range {
+            let character = self.chars[index].character;
+            if character == '\r' || character == '\n' {
+                order.extend(self.line_in_reading_order(&line, &mut previous_line));
+                line.clear();
+                order.push(index);
+            } else {
+                line.push(index);
+            }
+        }
+        order.extend(self.line_in_reading_order(&line, &mut previous_line));
+        order
+    }
+
+    /// One line's character indices in logical order. `previous_line` is
+    /// what the last line with right-to-left text said about its paragraph,
+    /// which settles a line that could be read either way; it is cleared by
+    /// a line without right-to-left text.
+    fn line_in_reading_order(&self, line: &[usize], previous_line: &mut Option<crate::bidi_text::PreviousLine>) -> Vec<usize> {
+        if !line.iter().any(|&index| crate::bidi_text::is_strong_right_to_left(self.chars[index].character)) {
+            if !line.is_empty() {
+                *previous_line = None;
+            }
+            return line.to_vec();
+        }
+        let placed: Vec<crate::bidi_text::PlacedChar> = line.iter().map(|&index| (self.chars[index].character, self.chars[index].rect)).collect();
+        match crate::bidi_text::logical_order(&placed, *previous_line) {
+            Some(found) => {
+                *previous_line = Some(found.as_previous());
+                found.logical.into_iter().map(|position| line[position]).collect()
+            }
+            None => {
+                *previous_line = None;
+                line.to_vec()
+            }
+        }
     }
 
     /// Finds `pattern` on the page and returns one rectangle per line of
@@ -236,16 +291,21 @@ impl PageText {
     pub fn lines(&self) -> Vec<TextLine> {
         let mut lines: Vec<TextLine> = Vec::new();
         let mut current = TextLine::default();
-        for item in &self.chars {
+        // Where the current line's characters are, to put right-to-left text in logical order.
+        let mut current_indices: Vec<usize> = Vec::new();
+        let mut previous_line: Option<crate::bidi_text::PreviousLine> = None;
+        for (index, item) in self.chars.iter().enumerate() {
             if item.character == '\r' {
                 continue;
             }
             if item.character == '\n' {
                 if !current.text.trim().is_empty() {
+                    current.text = self.text_of_line(&current_indices, &mut previous_line);
                     lines.push(std::mem::take(&mut current));
                 } else {
                     current = TextLine::default();
                 }
+                current_indices.clear();
                 continue;
             }
             if current.text.is_empty() {
@@ -263,11 +323,17 @@ impl PageText {
                 current.italic &= item.italic || item.character.is_whitespace();
             }
             current.text.push(item.character);
+            current_indices.push(index);
         }
         if !current.text.trim().is_empty() {
+            current.text = self.text_of_line(&current_indices, &mut previous_line);
             lines.push(current);
         }
         lines
+    }
+
+    fn text_of_line(&self, indices: &[usize], previous_line: &mut Option<crate::bidi_text::PreviousLine>) -> String {
+        self.line_in_reading_order(indices, previous_line).into_iter().map(|index| self.chars[index].character).collect()
     }
 
     /// The character nearest to a point, for click-to-select.
@@ -288,14 +354,14 @@ impl PageText {
         best.map(|(index, _)| index)
     }
 
-    /// Text between two character indices, inclusive, in content order.
+    /// Text between two character indices, inclusive, in reading order.
     pub fn text_between(&self, first: usize, last: usize) -> String {
+        if self.chars.is_empty() {
+            return String::new();
+        }
         let (start, end) = if first <= last { (first, last) } else { (last, first) };
-        self.chars[start..=end.min(self.chars.len().saturating_sub(1))]
-            .iter()
-            .filter(|item| item.character != '\r')
-            .map(|item| item.character)
-            .collect()
+        let end = end.min(self.chars.len() - 1);
+        self.reading_order(start..end + 1).into_iter().map(|index| self.chars[index].character).filter(|&character| character != '\r').collect()
     }
 }
 
@@ -347,11 +413,18 @@ pub fn search_document(document: &PdfDocument, pattern: &regex::Regex) -> Result
     Ok(matches)
 }
 
-/// Plain text of the whole document, pages separated by form feeds.
+/// Plain text of the whole document, pages separated by form feeds. Lines
+/// that mix right-to-left and left-to-right text are in logical order.
 pub fn extract_text(document: &PdfDocument) -> Result<String> {
     let mut pages = Vec::new();
-    for page in document.pages().iter() {
-        pages.push(page.text()?.all());
+    for (index, page) in document.pages().iter().enumerate() {
+        let text = page.text()?.all();
+        // PDFium's own text is right for everything but right-to-left lines.
+        if text.chars().any(crate::bidi_text::is_strong_right_to_left) {
+            pages.push(page_text(document, index)?.as_text_with_line_breaks());
+        } else {
+            pages.push(text);
+        }
     }
     Ok(pages.join("\n\u{000C}\n"))
 }
