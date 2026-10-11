@@ -2121,7 +2121,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let path = folder.join(safe_name);
                     let written = std::fs::create_dir_all(&folder).and_then(|_| std::fs::write(&path, &bytes));
                     if self.report(written.map_err(anyhow::Error::from)).is_some() {
-                        let _ = std::process::Command::new("explorer").arg(&path).spawn();
+                        let _ = quintess_core::system::open_in_default_app(&path);
                     }
                 }
                 AppRequest::DeclarePdfUa { checks, reviewed } => {
