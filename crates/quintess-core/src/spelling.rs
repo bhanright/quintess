@@ -266,6 +266,106 @@ impl SpellChecker {
     }
 }
 
+/// Languages that can be downloaded on request from the wooorm/dictionaries
+/// collection (Hunspell dictionaries from LibreOffice and other open
+/// projects): tag, English name, and the collection's folder.
+pub const DOWNLOADABLE: &[(&str, &str, &str)] = &[
+    ("bg-BG", "Bulgarian", "bg"), ("ca-ES", "Catalan", "ca"), ("cs-CZ", "Czech", "cs"), ("cy-GB", "Welsh", "cy"),
+    ("da-DK", "Danish", "da"), ("de-AT", "German (Austria)", "de-AT"), ("de-CH", "German (Switzerland)", "de-CH"), ("de-DE", "German", "de"),
+    ("el-GR", "Greek", "el"), ("en-AU", "English (Australia)", "en-AU"), ("en-CA", "English (Canada)", "en-CA"), ("en-GB", "English (UK)", "en-GB"),
+    ("en-ZA", "English (South Africa)", "en-ZA"), ("eo", "Esperanto", "eo"), ("es-ES", "Spanish", "es"), ("es-MX", "Spanish (Mexico)", "es-MX"),
+    ("et-EE", "Estonian", "et"), ("eu-ES", "Basque", "eu"), ("fa-IR", "Persian", "fa"), ("fr-FR", "French", "fr"),
+    ("ga-IE", "Irish", "ga"), ("gd-GB", "Scottish Gaelic", "gd"), ("gl-ES", "Galician", "gl"), ("he-IL", "Hebrew", "he"),
+    ("hr-HR", "Croatian", "hr"), ("hu-HU", "Hungarian", "hu"), ("hy-AM", "Armenian", "hy"), ("is-IS", "Icelandic", "is"),
+    ("it-IT", "Italian", "it"), ("ka-GE", "Georgian", "ka"), ("ko-KR", "Korean", "ko"), ("la", "Latin", "la"),
+    ("lb-LU", "Luxembourgish", "lb"), ("lt-LT", "Lithuanian", "lt"), ("lv-LV", "Latvian", "lv"), ("mk-MK", "Macedonian", "mk"),
+    ("mn-MN", "Mongolian", "mn"), ("nb-NO", "Norwegian (Bokmål)", "nb"), ("ne-NP", "Nepali", "ne"), ("nl-NL", "Dutch", "nl"),
+    ("nn-NO", "Norwegian (Nynorsk)", "nn"), ("oc-FR", "Occitan", "oc"), ("pl-PL", "Polish", "pl"), ("pt-BR", "Portuguese (Brazil)", "pt"),
+    ("pt-PT", "Portuguese (Portugal)", "pt-PT"), ("ro-RO", "Romanian", "ro"), ("ru-RU", "Russian", "ru"), ("sk-SK", "Slovak", "sk"),
+    ("sl-SI", "Slovenian", "sl"), ("sr-RS", "Serbian (Cyrillic)", "sr"), ("sr-Latn", "Serbian (Latin)", "sr-Latn"), ("sv-SE", "Swedish", "sv"),
+    ("tr-TR", "Turkish", "tr"), ("uk-UA", "Ukrainian", "uk"), ("vi-VN", "Vietnamese", "vi"),
+];
+
+/// The English name of a language tag, when it's one Quintess knows.
+pub fn language_name(tag: &str) -> Option<&'static str> {
+    if tag == BUILT_IN_LANGUAGE {
+        return Some("English (US)");
+    }
+    DOWNLOADABLE.iter().find(|(known, _, _)| known.eq_ignore_ascii_case(tag)).map(|(_, name, _)| *name)
+}
+
+/// Where dictionaries the person adds are kept.
+pub fn user_dictionary_folder() -> PathBuf {
+    crate::settings::settings_folder().join("dictionaries")
+}
+
+/// Checks that an .aff/.dic pair is a usable dictionary, then copies it into
+/// the person's dictionary folder as `<tag>.aff` and `<tag>.dic`. The tag
+/// comes from the file name (`fr_FR.dic` is "fr-FR") unless given.
+pub fn install_dictionary(dic_path: &Path, tag: Option<&str>) -> Result<String> {
+    let aff_path = dic_path.with_extension("aff");
+    let aff = std::fs::read_to_string(&aff_path).with_context(|| format!("{} needs its .aff file beside it ({})", dic_path.display(), aff_path.display()))?;
+    let dic = std::fs::read_to_string(dic_path).with_context(|| format!("couldn't read {}", dic_path.display()))?;
+    let tag = normalize_tag(tag.unwrap_or_else(|| dic_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("")));
+    if tag.is_empty() {
+        bail!("couldn't tell the dictionary's language from its file name; name it like fr_FR.dic");
+    }
+    save_dictionary(&tag, &aff, &dic, None)?;
+    Ok(tag)
+}
+
+fn save_dictionary(tag: &str, aff: &str, dic: &str, license: Option<&str>) -> Result<()> {
+    Dictionary::new(aff, dic).map_err(|error| anyhow::anyhow!("this isn't a dictionary Quintess can read: {error}"))?;
+    let folder = user_dictionary_folder();
+    std::fs::create_dir_all(&folder)?;
+    crate::document::write_file_safely(&folder.join(format!("{tag}.aff")), aff.as_bytes())?;
+    crate::document::write_file_safely(&folder.join(format!("{tag}.dic")), dic.as_bytes())?;
+    if let Some(license) = license {
+        crate::document::write_file_safely(&folder.join(format!("{tag}.license.txt")), license.as_bytes())?;
+    }
+    // A fresh copy is read next time this language is used.
+    loaded().lock().unwrap().remove(tag);
+    Ok(())
+}
+
+/// Downloads one of the [`DOWNLOADABLE`] languages, with its license, into
+/// the person's dictionary folder. Only runs when the person asks.
+pub fn download_dictionary(tag: &str) -> Result<()> {
+    let Some((tag, _, folder)) = DOWNLOADABLE.iter().find(|(known, _, _)| known.eq_ignore_ascii_case(tag)) else { bail!("{tag} isn't in the list of downloadable dictionaries") };
+    let fetch = |file: &str| -> Result<String> {
+        let url = format!("https://raw.githubusercontent.com/wooorm/dictionaries/main/dictionaries/{folder}/{file}");
+        let mut response = ureq::get(&url).header("User-Agent", &format!("Quintess/{}", crate::updates::CURRENT_VERSION)).call().with_context(|| format!("could not download {url}"))?;
+        Ok(response.body_mut().with_config().limit(64 * 1024 * 1024).read_to_string()?)
+    };
+    let aff = fetch("index.aff")?;
+    let dic = fetch("index.dic")?;
+    let license = fetch("license").ok();
+    save_dictionary(tag, &aff, &dic, license.as_deref())
+}
+
+/// Removes a dictionary the person added (bundled ones stay).
+pub fn remove_dictionary(tag: &str) -> Result<()> {
+    let folder = user_dictionary_folder();
+    let mut removed = false;
+    for extension in ["aff", "dic", "license.txt"] {
+        let path = folder.join(format!("{tag}.{extension}"));
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+            removed = true;
+        }
+    }
+    if !removed {
+        bail!("{tag} wasn't added by you, so it can't be removed here");
+    }
+    loaded().lock().unwrap().remove(tag);
+    Ok(())
+}
+
+/// Whether a language's dictionary is one the person added.
+pub fn is_user_dictionary(tag: &str) -> bool {
+    user_dictionary_folder().join(format!("{tag}.dic")).is_file()
+}
+
 /// Byte ranges of the words in `text`: letters, digits and marks, with
 /// apostrophes inside a word kept ("don't"). Hyphens and slashes split words.
 pub fn words(text: &str) -> Vec<(usize, usize)> {

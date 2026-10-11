@@ -45,6 +45,8 @@ pub enum AppRequest {
     ShowRedactionCheck(quintess_core::redaction_check::RedactionCheck),
     StartFolderSearch(FolderQuery),
     DownloadOcrModels,
+    /// Download a spelling dictionary (a language tag such as "pt-PT").
+    DownloadDictionary(String),
     /// Turn to a page and outline a box there (display points from the top left).
     ShowOnPage { page_index: usize, display_rect: [f32; 4] },
     StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf> },
@@ -152,6 +154,8 @@ pub enum Dialog {
     FolderResults(Box<FolderResults>),
     QrCode(quintess_core::qr::FoundCode),
     /// Asks before downloading the OCR models, when they weren't installed.
+    /// Adding and removing spelling languages.
+    Dictionaries { filter: String },
     DownloadOcrModels,
     QrResults(Vec<quintess_core::qr::FoundCode>),
     Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
@@ -233,6 +237,7 @@ impl Dialog {
             Dialog::QrCode(code) => code.kind.describe(),
             Dialog::QrResults(_) => "QR codes",
             Dialog::DownloadOcrModels => "Download the recognition models?",
+            Dialog::Dictionaries { .. } => "Spelling languages",
             Dialog::Watch { .. } => "Watch a folder",
             Dialog::CheckForText { .. } => "Check for leftover text",
         };
@@ -711,9 +716,16 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     egui::ComboBox::from_id_salt("spelling language").selected_text(shown).show_ui(ui, |ui| {
                         ui.selectable_value(&mut settings.spelling_language, String::new(), "System language");
                         for language in quintess_core::spelling::SpellChecker::languages() {
-                            ui.selectable_value(&mut settings.spelling_language, language.clone(), language);
+                            let label = match quintess_core::spelling::language_name(&language) {
+                                Some(name) => format!("{name} ({language})"),
+                                None => language.clone(),
+                            };
+                            ui.selectable_value(&mut settings.spelling_language, language.clone(), label);
                         }
                     });
+                    if ui.button("Add a language…").clicked() {
+                        outcome.requests.push(AppRequest::OpenDialog(Box::new(Dialog::Dictionaries { filter: String::new() })));
+                    }
                 });
                 ui.end_row();
                 ui.label("Updates");
@@ -737,6 +749,62 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 outcome.requests.push(AppRequest::SettingsChanged(settings.clone()));
                 outcome.keep_open = false;
             }
+            return Ok(());
+        }
+        Dialog::Dictionaries { filter } => {
+            use quintess_core::spelling::{DOWNLOADABLE, SpellChecker, install_dictionary, is_user_dictionary, language_name, remove_dictionary};
+            ui.set_min_width(460.0);
+            let installed = SpellChecker::languages();
+            let mut to_remove = None;
+            ui.label(RichText::new("Installed").strong());
+            ui.horizontal_wrapped(|ui| {
+                for tag in &installed {
+                    let name = language_name(tag).map_or_else(|| tag.clone(), |name| format!("{name} ({tag})"));
+                    if is_user_dictionary(tag) {
+                        if ui.small_button(format!("{name}  ✕")).on_hover_text("Remove this dictionary").clicked() {
+                            to_remove = Some(tag.clone());
+                        }
+                    } else {
+                        ui.weak(name);
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+            if let Some(tag) = to_remove {
+                remove_dictionary(&tag)?;
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Download a language").strong());
+                ui.add(egui::TextEdit::singleline(filter).hint_text("Filter").desired_width(160.0));
+            });
+            ui.weak("Dictionaries come from the open-source wooorm/dictionaries collection (from LibreOffice and others), downloaded only when you choose one.");
+            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                let query = filter.trim().to_lowercase();
+                egui::Grid::new("downloadable dictionaries").num_columns(2).striped(true).show(ui, |ui| {
+                    for (tag, name, _) in DOWNLOADABLE.iter().filter(|(tag, name, _)| !installed.iter().any(|known| known == tag) && (query.is_empty() || name.to_lowercase().contains(&query) || tag.to_lowercase().contains(&query))) {
+                        ui.label(format!("{name} ({tag})"));
+                        if ui.small_button("Download").clicked() {
+                            outcome.requests.push(AppRequest::DownloadDictionary(tag.to_string()));
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| -> anyhow::Result<()> {
+                if ui.button("Add from files…").on_hover_text("A Hunspell dictionary: pick its .dic file; the .aff file must be beside it").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Hunspell dictionary", &["dic"]).pick_file() {
+                        let tag = install_dictionary(&path, None)?;
+                        outcome.requests.push(AppRequest::Status(format!("Added the {tag} dictionary.")));
+                    }
+                }
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+                Ok(())
+            })
+            .inner?;
             return Ok(());
         }
         Dialog::CreateIdentity { name, email, organization } => {

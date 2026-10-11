@@ -84,7 +84,7 @@ Quintess draws new text in the document's own font whenever that font already co
 
 # Spelling
 
-Quintess checks spelling as you type and can go through a whole document. It uses Hunspell dictionaries, the same kind LibreOffice and Firefox use: English for the US, UK, Canada and Australia comes with Quintess.
+Quintess checks spelling as you type and can go through a whole document. It uses Hunspell dictionaries, the same kind LibreOffice and Firefox use. English (US, UK, Canada, Australia), Spanish, French, German, Portuguese (Brazil) and Italian come with Quintess, and about 50 more languages can be added.
 
 ## While typing
 
@@ -103,11 +103,12 @@ Each change is an ordinary edit you can undo. Changing page text rewrites the li
 ## Languages and your dictionary
 
 - **Edit ▸ Preferences ▸ Spelling** turns checking while typing on or off and picks the dictionary. "System language" follows your computer's setting.
-- For another language, put its Hunspell files (for example `fr_FR.aff` and `fr_FR.dic`, from LibreOffice's dictionaries) in the `dictionaries` folder inside Quintess's settings folder. On Linux, dictionaries installed with the system (`/usr/share/hunspell`) are found automatically.
+- **Add a language…** (beside the dictionary choice in Preferences) downloads one of about 50 languages from the open-source wooorm/dictionaries collection, or installs any Hunspell dictionary you have (pick its `.dic` file; the `.aff` file must be beside it). Added languages can be removed there too.
+- Dictionaries can also be copied by hand into the `dictionaries` folder in Quintess's settings folder. On Linux, dictionaries installed with the system (`/usr/share/hunspell`) are found automatically.
 - Words you add are kept in `personal-dictionary.txt` in the settings folder, one per line; you can edit it.
 - Words with digits, ALL-CAPS abbreviations, web and email addresses and file names are not checked.
 
-From the command line: `quintess spell file.pdf` lists misspelled words with suggestions (`--language en-GB`, `--json`, `--languages`).
+From the command line: `quintess spell file.pdf` lists misspelled words with suggestions (`--language en-GB`, `--json`, `--languages`, `--download pt-PT`, `--install fr_FR.dic`).
 # Comments and markup
 
 The dock holds the common markup tools; **⋯** in the dock (or Tools ▸ Comment) has the rest.

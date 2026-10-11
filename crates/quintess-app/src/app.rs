@@ -1590,6 +1590,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         Ok(JobOutcome::Message("Downloaded the recognition models. Choose Recognize text (OCR) again to run it.".into()))
                     });
                 }
+                AppRequest::DownloadDictionary(tag) => {
+                    let ctx = self.worker_context.clone();
+                    let name = quintess_core::spelling::language_name(&tag).unwrap_or(&tag).to_string();
+                    self.start_job(&ctx, &format!("Downloading the {name} dictionary"), move |_| {
+                        quintess_core::spelling::download_dictionary(&tag)?;
+                        Ok(JobOutcome::Message(format!("Added the {name} dictionary. Choose it in Preferences ▸ Spelling.")))
+                    });
+                }
                 AppRequest::OpenDialog(dialog) => self.dialogs.push(*dialog),
                 AppRequest::ShowOnPage { page_index, display_rect } => {
                     if let Some(tab) = self.tab() {

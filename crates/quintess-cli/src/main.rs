@@ -513,6 +513,12 @@ enum Command {
         /// List the installed dictionaries and stop.
         #[arg(long)]
         languages: bool,
+        /// Download a dictionary (e.g. pt-PT) and stop; --languages lists what's installed.
+        #[arg(long, value_name = "LANGUAGE")]
+        download: Option<String>,
+        /// Install a Hunspell dictionary from its .dic file (the .aff beside it) and stop.
+        #[arg(long, value_name = "DIC_FILE")]
+        install: Option<std::path::PathBuf>,
         /// Print the results as JSON.
         #[arg(long)]
         json: bool,
@@ -1190,7 +1196,17 @@ fn run(cli: Cli) -> Result<()> {
             Some(release) => println!("Quintess {} is available (you have {}): {}", release.version, quintess_core::updates::CURRENT_VERSION, release.page),
             None => println!("Quintess {} is the latest version.", quintess_core::updates::CURRENT_VERSION),
         },
-        Command::Spell { input, language, languages, json } => {
+        Command::Spell { input, language, languages, download, install, json } => {
+            if let Some(tag) = download {
+                quintess_core::spelling::download_dictionary(&tag)?;
+                println!("downloaded the {tag} dictionary to {}", quintess_core::spelling::user_dictionary_folder().display());
+                return Ok(());
+            }
+            if let Some(path) = install {
+                let tag = quintess_core::spelling::install_dictionary(&path, None)?;
+                println!("installed the {tag} dictionary");
+                return Ok(());
+            }
             if languages {
                 println!("{}", quintess_core::spelling::SpellChecker::languages().join("\n"));
                 return Ok(());
