@@ -47,7 +47,8 @@ impl Default for OptimizeSettings {
             lossy_recompress: true,
             grayscale_images: false,
             remove_metadata: false,
-            remove_javascript: true,
+            // Forms use scripts for calculations and checks; only "smallest" removes them.
+            remove_javascript: false,
             remove_thumbnails: true,
             remove_embedded_files: false,
             remove_annotations: false,
@@ -58,14 +59,16 @@ impl Default for OptimizeSettings {
 }
 
 impl OptimizeSettings {
-    /// Settings that change nothing visible: lossless clean-up only.
+    /// Settings that change nothing visible: lossless clean-up only. Scripts
+    /// stay, since forms use them for calculations and checks.
     pub fn lossless() -> Self {
-        Self { target_dpi: None, lossy_recompress: false, ..Self::default() }
+        Self { target_dpi: None, lossy_recompress: false, remove_javascript: false, ..Self::default() }
     }
 
-    /// Aggressive settings for email: 100 DPI, quality 65.
+    /// Aggressive settings for email: 100 DPI, quality 65, and no metadata,
+    /// attachments or scripts.
     pub fn smallest() -> Self {
-        Self { target_dpi: Some(100.0), jpeg_quality: 65, remove_metadata: true, remove_embedded_files: true, ..Self::default() }
+        Self { target_dpi: Some(100.0), jpeg_quality: 65, remove_metadata: true, remove_embedded_files: true, remove_javascript: true, ..Self::default() }
     }
 }
 

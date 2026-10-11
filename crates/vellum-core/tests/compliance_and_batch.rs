@@ -44,6 +44,8 @@ fn pdfa_conversion_clears_fixable_issues() {
     assert!(remaining.iter().all(|i| !i.fixable), "{remaining:#?}");
     // Standard fonts are not embedded, which this conversion cannot fix; it says so.
     assert!(remaining.iter().any(|i| i.rule == "Fonts embedded"));
+    // And so it doesn't declare itself PDF/A, which would be false.
+    assert!(!vellum_core::metadata::read_xmp(&pdf).unwrap_or_default().contains("pdfaid:part"), "no false PDF/A claim");
     let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
     std::fs::write(folder().join("pdfa.pdf"), &bytes).unwrap();
     assert!(engine::open_document(bytes, None).is_ok());

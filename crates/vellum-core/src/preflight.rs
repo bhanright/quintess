@@ -107,6 +107,23 @@ pub fn convert_to_pdfa(pdf: &mut Pdf) -> Result<Vec<PreflightIssue>> {
     if pdf.doc.version.as_str() < "1.7" {
         pdf.doc.version = "1.7".into();
     }
+    // PDF/A requires a file identifier.
+    if !pdf.doc.trailer.has(b"ID") {
+        let mut id = [0u8; 16];
+        let _ = getrandom::fill(&mut id);
+        let id = Object::String(id.to_vec(), lopdf::StringFormat::Hexadecimal);
+        pdf.doc.trailer.set("ID", vec![id.clone(), id]);
+    }
+    // The file declares itself PDF/A only when nothing this can't repair
+    // (fonts that aren't embedded, attachments) stands in the way;
+    // otherwise the claim would be false.
+    let unrepaired: Vec<PreflightIssue> = check_pdfa(pdf).into_iter().filter(|issue| !issue.fixable).collect();
+    if !unrepaired.is_empty() {
+        let mut issues = check_pdfa(pdf);
+        issues.retain(|issue| issue.rule != "PDF/A identification");
+        issues.push(PreflightIssue { rule: "PDF/A identification", detail: "Not declared, because the issues above remain.".into(), fixable: false });
+        return Ok(issues);
+    }
     // Write the XMP packet with the PDF/A identification included.
     let info = crate::metadata::read_info(pdf);
     crate::metadata::write_xmp(pdf, &info)?;
@@ -117,13 +134,6 @@ pub fn convert_to_pdfa(pdf: &mut Pdf) -> Result<Vec<PreflightIssue>> {
             let id = pdf.doc.add_object(stream);
             pdf.doc.catalog_mut()?.set("Metadata", id);
         }
-    }
-    // PDF/A requires a file identifier.
-    if !pdf.doc.trailer.has(b"ID") {
-        let mut id = [0u8; 16];
-        let _ = getrandom::fill(&mut id);
-        let id = Object::String(id.to_vec(), lopdf::StringFormat::Hexadecimal);
-        pdf.doc.trailer.set("ID", vec![id.clone(), id]);
     }
     Ok(check_pdfa(pdf))
 }

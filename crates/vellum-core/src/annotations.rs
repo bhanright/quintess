@@ -398,7 +398,8 @@ pub fn add_annotation(pdf: &mut Pdf, page_number: u32, annotation: &NewAnnotatio
         }
         AnnotationKind::RedactionMark { rects } => {
             dict.set("QuadPoints", quad_points(rects));
-            dict.set("OC", color_object([0.0, 0.0, 0.0]));
+            // The color the area will be filled with once applied (interior color).
+            dict.set("IC", color_object([0.0, 0.0, 0.0]));
             let rect = union_rect(rects);
             let mut content = format!("{} 1.5 w", rgb(color, true));
             for &[left, bottom, right, top] in rects {

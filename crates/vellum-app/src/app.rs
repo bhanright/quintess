@@ -72,7 +72,7 @@ pub struct VellumApp {
 /// visible page has rendered, and exits. `VELLUM_SETUP` is a comma-separated
 /// list of `organizer`, `night`, `dark`, `zoom=1.5`, `page=3`, `tool=Ink`,
 /// `search=text`, `dialog=name`, `tool=edit-text`, `edit-line=N`,
-/// `command=Reverse order` (any command by its label),
+/// `command=Reverse order` (any command by its label), `crash` (to test the crash handler),
 /// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
 /// `sidebar=comments|fields|bookmarks|search`.
@@ -82,6 +82,8 @@ struct SelfCheck {
     requested: bool,
     /// No picture before this, for work that finishes in the background.
     not_before: std::time::Instant,
+    /// Crash on purpose a few frames in, to check the crash handler.
+    crash: bool,
 }
 
 impl VellumApp {
@@ -127,7 +129,7 @@ impl VellumApp {
             app.open_path(file);
         }
         if let Ok(path) = std::env::var("VELLUM_SCREENSHOT") {
-            app.self_check = Some(SelfCheck { path: path.into(), frames: 0, requested: false, not_before: std::time::Instant::now() });
+            app.self_check = Some(SelfCheck { path: path.into(), frames: 0, requested: false, not_before: std::time::Instant::now(), crash: false });
             app.apply_setup(&std::env::var("VELLUM_SETUP").unwrap_or_default(), &cc.egui_ctx);
         }
         app
@@ -189,6 +191,11 @@ impl VellumApp {
                     }
                 }
                 "palette" => self.open_palette_with(value),
+                "crash" => {
+                    if let Some(check) = self.self_check.as_mut() {
+                        check.crash = true;
+                    }
+                }
                 "qr" => {
                     // Scans now, without a background job, for the screenshot.
                     if let Some(tab) = self.tabs.get_mut(self.active) {
@@ -285,6 +292,9 @@ impl VellumApp {
     fn run_self_check(&mut self, ctx: &egui::Context) {
         let Some(check) = self.self_check.as_mut() else { return };
         check.frames += 1;
+        if check.crash && check.frames == 5 {
+            panic!("a crash requested by the self-check");
+        }
         let screenshot = ctx.input(|i| {
             i.raw.events.iter().find_map(|event| match event {
                 egui::Event::Screenshot { image, .. } => Some(image.clone()),
@@ -1706,6 +1716,7 @@ impl eframe::App for VellumApp {
         let ctx = ui.ctx().clone();
         self.receive_rendered_pages(&ctx);
         self.receive_watch_events();
+        crate::crash::note_unsaved(self.tabs.iter().filter(|t| t.dirty).map(|t| (t.title.clone(), t.bytes.clone())).collect());
         self.run_self_check(&ctx);
         if self.self_check.is_none() {
             self.remember_reading_positions(&ctx);

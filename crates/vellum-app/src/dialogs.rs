@@ -1605,7 +1605,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.label(format!("Current size: {:.1} MB", tab.bytes.len() as f64 / 1_048_576.0));
             ui.radio_value(preset, 0, "Keep quality: remove clutter and compress losslessly");
             ui.radio_value(preset, 1, "Balanced: images at 150 DPI, JPEG quality 80");
-            ui.radio_value(preset, 2, "Smallest: images at 100 DPI, JPEG quality 65, no metadata");
+            ui.radio_value(preset, 2, "Smallest: images at 100 DPI, JPEG quality 65, no metadata, attachments or scripts");
             ui.radio_value(preset, 3, "Custom");
             if *preset == 3 {
                 ui.horizontal(|ui| {

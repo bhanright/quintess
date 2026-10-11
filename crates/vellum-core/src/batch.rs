@@ -268,6 +268,11 @@ fn run_step(bytes: Vec<u8>, step: &Step, file_name: &str, state: &mut BatchState
         }),
         Step::PdfA => edit(&bytes, |pdf| crate::preflight::convert_to_pdfa(pdf).map(|_| ())),
         Step::Protect { user_password, owner_password } => {
+            // Without an owner password one would be made up and never shown,
+            // so the restrictions could never be lifted.
+            if owner_password.is_empty() {
+                bail!("the protect step needs an owner_password, the password that lifts the restrictions");
+            }
             let mut pdf = Pdf::from_bytes(&bytes, None)?;
             crate::security::protect(&mut pdf, &crate::security::ProtectionSettings { user_password: user_password.clone(), owner_password: owner_password.clone(), ..Default::default() })?;
             pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })
