@@ -22,7 +22,7 @@
 <meta property="og:image:alt" content="The Quintess logo beside the line: A free PDF editor for Windows.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/site.css?v=e2a7ec9932">
+<link rel="stylesheet" href="/assets/site.css?v=0e758b5f47">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -102,6 +102,23 @@
     </div>
     <p class="fine mono keep-case" data-asset-line>Quintess-0.1.0-setup.exe · installs per user, no admin rights</p>
     <p class="smartscreen">Version <span data-version>0.1.0</span> for Windows 10/11, 64-bit. The installer isn't code-signed yet, so Windows may show a SmartScreen warning. <a href="#install-notes">Read the installation notes</a>.</p>
+  </div>
+
+  <figure class="hero-shot" data-hero-shot>
+    <div class="hero-media">
+      <picture data-hero-picture>
+        <source srcset="/assets/img/app-edit.webp" type="image/webp">
+        <img src="/assets/img/app-edit.png" width="1280" height="860" alt="Quintess on Windows with a supply agreement open. A paragraph is being edited: the fee now reads $3,850 for the first two years, and the editing toolbar previews that two lines will change.">
+      </picture>
+      <video data-hero-video hidden controls muted playsinline preload="none" poster="/assets/video/edit-poster.webp" width="1040" height="700" aria-label="A 15-second recording of retyping a fee in a paragraph in Quintess">
+        <source src="/assets/video/edit.webm" type="video/webm">
+        <source src="/assets/video/edit.mp4" type="video/mp4">
+      </video>
+      <button class="watch" type="button" data-watch><span aria-hidden="true">▶</span> Watch a 15-second edit</button>
+    </div>
+    <figcaption class="mono">Quintess 0.1.0 on Windows, editing a paragraph. The toolbar previews how many lines will change before you apply.</figcaption>
+  </figure>
+  <div class="hero-spec">
     <dl class="spec mono">
       <div><dt>price</dt><dd>$0 · no trial, no ads</dd></div>
       <div><dt>license</dt><dd>MIT or Apache-2.0</dd></div>
@@ -111,56 +128,6 @@
       <div><dt>built with</dt><dd>Rust + PDFium</dd></div>
     </dl>
   </div>
-
-  <figure class="stage" aria-label="An animated walkthrough of editing a PDF in Quintess" data-stage>
-    <div class="stage-chrome mono" aria-hidden="true">
-      <span class="live"><span class="dot"></span>animated walkthrough</span>
-      <button class="pause mono" type="button" data-pause aria-pressed="false">pause animation</button>
-      <span data-stage-file>supply-agreement.pdf</span>
-    </div>
-    <ol class="steps mono" aria-hidden="true">
-      <li data-step="edit"><span>01</span>edit text</li>
-      <li data-step="redact"><span>02</span>redact</li>
-      <li data-step="sign"><span>03</span>sign</li>
-      <li data-step="qr"><span>04</span>read QR</li>
-    </ol>
-    <div class="page-wrap">
-      <article class="page" data-page>
-        <header class="page-head">
-          <span class="page-org">Northwind Supply Co.</span>
-          <span class="page-ref mono">Ref. NW-2026-114</span>
-        </header>
-        <p class="page-title">Supply Agreement</p>
-        <p class="page-p" data-reflow>This agreement covers the delivery of <b>480 units</b> of archival paper stock to the Buyer each quarter. The quarterly fee is <span class="edit-target" data-edit-target>$4,200</span>, payable within thirty days of each delivery, and includes freight to the Buyer's main warehouse.</p>
-        <p class="page-p">Either party may end this agreement with sixty days' written notice. Payments go to account <span class="redact-target" data-redact-target>0042&#8209;7781&#8209;5530</span> unless the Supplier names another in writing.</p>
-        <div class="page-sign">
-          <div class="sign-line">
-            <svg class="signature" viewBox="0 0 220 60" aria-hidden="true"><path data-signature d="M8 44c10-22 18-34 24-30 6 4-10 30-4 32 8 2 14-26 22-24 6 2-2 20 4 20 8 0 10-14 16-14 4 0 2 10 8 10 10 0 14-18 22-18 6 0 0 16 8 16 12 0 20-12 30-12 8 0 4 8 12 8 10 0 24-6 40-10"/></svg>
-            <span class="mono">Buyer</span>
-          </div>
-          <div class="seal mono" data-seal>signed</div>
-          <svg class="page-qr" data-qr viewBox="0 0 25 25" aria-hidden="true"><path stroke="currentColor" d="M0 0.5h7m1 0h1m1 0h5m3 0h7m-25 1h1m5 0h1m1 0h1m4 0h1m4 0h1m5 0h1m-25 1h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1m-25 1h1m1 0h3m1 0h1m2 0h1m2 0h2m1 0h2m1 0h1m1 0h3m1 0h1m-25 1h1m1 0h3m1 0h1m3 0h1m1 0h1m5 0h1m1 0h3m1 0h1m-25 1h1m5 0h1m2 0h1m1 0h1m1 0h1m2 0h1m1 0h1m5 0h1m-25 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-16 1h2m3 0h2m-15 1h1m4 0h3m2 0h2m2 0h3m5 0h2m-25 1h1m3 0h1m2 0h2m5 0h2m1 0h1m1 0h5m-24 1h1m2 0h4m1 0h2m1 0h1m3 0h5m1 0h1m1 0h2m-24 1h2m1 0h1m2 0h2m1 0h1m1 0h1m2 0h1m1 0h2m2 0h1m2 0h1m-24 1h1m1 0h1m2 0h2m4 0h4m2 0h1m5 0h1m-25 1h1m1 0h4m3 0h3m1 0h1m1 0h2m2 0h1m3 0h1m-24 1h1m1 0h5m1 0h3m2 0h4m2 0h3m1 0h2m-25 1h1m1 0h1m1 0h1m3 0h2m1 0h2m4 0h3m1 0h2m1 0h1m-25 1h1m1 0h2m1 0h3m2 0h1m1 0h2m1 0h6m1 0h1m-15 1h2m4 0h1m1 0h1m3 0h1m-21 1h7m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m1 0h1m3 0h1m-25 1h1m5 0h1m3 0h1m3 0h3m3 0h1m2 0h1m-24 1h1m1 0h3m1 0h1m3 0h1m3 0h7m1 0h1m1 0h1m-25 1h1m1 0h3m1 0h1m2 0h4m3 0h3m4 0h2m-25 1h1m1 0h3m1 0h1m2 0h1m3 0h1m7 0h2m1 0h1m-25 1h1m5 0h1m1 0h5m1 0h4m1 0h2m3 0h1m-25 1h7m3 0h1m3 0h1m1 0h2m3 0h1m2 0h1"/></svg>
-        </div>
-        <footer class="page-foot mono">Page 1 of 1</footer>
-      </article>
-      <!-- Overlay the demo draws on: cursor, edit box, redaction, notes. -->
-      <div class="overlay" aria-hidden="true" data-overlay>
-        <div class="edit-box" data-edit-box></div>
-        <div class="scan-line" data-scan-line></div>
-        <div class="note mono" data-note></div>
-        <svg class="cursor" data-cursor viewBox="0 0 20 24"><path d="M2 2v18l5-5 3.5 7 3-1.5L10 13.5h7z"/></svg>
-      </div>
-    </div>
-    <div class="dock" aria-hidden="true">
-      <span data-tool="select" title="Select"><svg viewBox="0 0 24 24"><path d="M5 3v15l4-4 3 7 2.5-1-3-7H17z"/></svg></span>
-      <span data-tool="edit" title="Edit text"><svg viewBox="0 0 24 24"><path d="M4 19h4M6 19V5M3 5h6M14 7v12m-2-12h4m-4 12h4"/></svg></span>
-      <span data-tool="highlight"><svg viewBox="0 0 24 24"><path d="m14 4 6 6-9 9H5v-6z M4 21h16"/></svg></span>
-      <span data-tool="redact" title="Redact"><svg viewBox="0 0 24 24"><path d="M3 9h18v6H3z"/></svg></span>
-      <span data-tool="sign" title="Sign"><svg viewBox="0 0 24 24"><path d="M3 17c3-6 5-9 6-8s-3 8-1 8 3-5 5-5 0 4 2 4 3-2 6-2M3 21h18"/></svg></span>
-      <span data-tool="qr" title="QR codes"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2"/></svg></span>
-    </div>
-    <figcaption class="stage-caption mono">An illustration of the workflow: a fee is retyped and the paragraph re-wraps, an account number is redacted, the page is signed and a QR code is read. It doesn't run Quintess in your browser; <a href="#screenshot">see the real app</a>.</figcaption>
-  </figure>
 </section>
 
 <!-- TICKER -->
@@ -169,17 +136,6 @@
     <span>edit existing text</span><span>reflow paragraphs</span><span>redaction</span><span>leftover check</span><span>digital signatures</span><span>offline OCR</span><span>forms + mail merge</span><span>bates numbering</span><span>PDF/A</span><span>compare versions</span><span>QR codes</span><span>watched folders</span><span>53 CLI commands</span><span>Arabic · Hebrew · Hindi</span><span>split view</span><span>command palette</span>
   </div>
 </div>
-
-<!-- THE REAL APP -->
-<section class="shot" id="screenshot" aria-label="Screenshot of Quintess">
-  <figure class="proof">
-    <picture>
-      <source srcset="/assets/img/app-edit.webp" type="image/webp">
-      <img src="/assets/img/app-edit.png" width="1280" height="860" loading="lazy" alt="Quintess on Windows with a supply agreement open. A paragraph is being edited: the fee now reads $3,850 for the first two years, and the editing toolbar shows the font, style, alignment and a preview that two lines will change.">
-    </picture>
-    <figcaption class="mono">Quintess 0.1.0 on Windows, editing a paragraph. The toolbar previews how many lines change before you apply.</figcaption>
-  </figure>
-</section>
 
 <!-- FEATURES -->
 <section class="section" id="features" aria-labelledby="features-title">
@@ -275,7 +231,7 @@
       <div class="cell-in">
         <p class="cell-label mono">QR codes</p>
         <h3>See where a QR code leads.</h3>
-        <div class="qr-demo" aria-hidden="true" data-qr-demo><div class="scan-line"></div></div>
+        <div class="qr-demo" aria-hidden="true"><svg class="qr-code" viewBox="0 0 25 25" aria-hidden="true"><path stroke="currentColor" d="M0 0.5h7m1 0h1m1 0h5m3 0h7m-25 1h1m5 0h1m1 0h1m4 0h1m4 0h1m5 0h1m-25 1h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1m-25 1h1m1 0h3m1 0h1m2 0h1m2 0h2m1 0h2m1 0h1m1 0h3m1 0h1m-25 1h1m1 0h3m1 0h1m3 0h1m1 0h1m5 0h1m1 0h3m1 0h1m-25 1h1m5 0h1m2 0h1m1 0h1m1 0h1m2 0h1m1 0h1m5 0h1m-25 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-16 1h2m3 0h2m-15 1h1m4 0h3m2 0h2m2 0h3m5 0h2m-25 1h1m3 0h1m2 0h2m5 0h2m1 0h1m1 0h5m-24 1h1m2 0h4m1 0h2m1 0h1m3 0h5m1 0h1m1 0h2m-24 1h2m1 0h1m2 0h2m1 0h1m1 0h1m2 0h1m1 0h2m2 0h1m2 0h1m-24 1h1m1 0h1m2 0h2m4 0h4m2 0h1m5 0h1m-25 1h1m1 0h4m3 0h3m1 0h1m1 0h2m2 0h1m3 0h1m-24 1h1m1 0h5m1 0h3m2 0h4m2 0h3m1 0h2m-25 1h1m1 0h1m1 0h1m3 0h2m1 0h2m4 0h3m1 0h2m1 0h1m-25 1h1m1 0h2m1 0h3m2 0h1m1 0h2m1 0h6m1 0h1m-15 1h2m4 0h1m1 0h1m3 0h1m-21 1h7m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m1 0h1m3 0h1m-25 1h1m5 0h1m3 0h1m3 0h3m3 0h1m2 0h1m-24 1h1m1 0h3m1 0h1m3 0h1m3 0h7m1 0h1m1 0h1m-25 1h1m1 0h3m1 0h1m2 0h4m3 0h3m4 0h2m-25 1h1m1 0h3m1 0h1m2 0h1m3 0h1m7 0h2m1 0h1m-25 1h1m5 0h1m1 0h5m1 0h4m1 0h2m3 0h1m-25 1h7m3 0h1m3 0h1m1 0h2m3 0h1m2 0h1"/></svg></div>
         <p class="qr-result mono" aria-hidden="true">destination: quintess.cc · review before opening</p>
         <p class="cell-copy">Quintess shows the real destination and warns about suspicious-looking addresses. Nothing opens until you choose to.</p>
       </div>
@@ -468,6 +424,6 @@
   </div>
 </footer>
 
-<script src="/assets/site.js?v=c6e3f65efb" defer></script>
+<script src="/assets/site.js?v=16c14e383e" defer></script>
 </body>
 </html>

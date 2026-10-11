@@ -515,3 +515,30 @@ body.paused *, body.paused *::before, body.paused *::after { animation-play-stat
 .shot figure { margin: 0; border: 1px solid var(--line-strong); background: var(--ink-2); padding: 10px; }
 .shot img { width: 100%; height: auto; }
 .shot figcaption { color: var(--faint); padding: 12px 4px 2px; }
+
+/* The hero shows the real app: a screenshot, and a recording on request. */
+.hero { grid-template-areas: "head head" "copy shot" "spec shot"; }
+.hero-head { grid-area: head; }
+.hero-copy { grid-area: copy; }
+.hero-shot { grid-area: shot; margin: 0; align-self: start; }
+.hero-spec { grid-area: spec; }
+.hero-spec .spec { margin-top: 0; }
+.hero-media { position: relative; border: 1px solid var(--line-strong); background: var(--ink-2); padding: 8px; }
+.hero-media img, .hero-media video { width: 100%; height: auto; display: block; }
+.watch { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 10px; padding: 11px 18px; background: rgba(10, 10, 15, 0.88); color: var(--text); border: 1px solid var(--line-strong); font: 600 15px/1 var(--body); cursor: pointer; backdrop-filter: blur(6px); }
+.watch:hover { border-color: var(--violet); color: #fff; }
+.watch span { color: var(--violet-hi); }
+.hero-shot figcaption { color: var(--faint); padding: 10px 2px 0; line-height: 1.6; }
+.qr-code { width: 100%; shape-rendering: crispEdges; color: var(--paper-ink); }
+@media (max-width: 1060px) {
+  .hero { grid-template-areas: "head" "copy" "shot" "spec"; }
+}
+.script-sample { flex-direction: column; align-items: flex-start; gap: 4px; font-size: clamp(19px, 1.8vw, 24px); }
+
+/* The hidden attribute always wins over display rules set above. */
+[hidden] { display: none !important; }
+
+
+.watch { white-space: nowrap; }
+@media (max-width: 720px) { .watch { font-size: 13px; padding: 8px 12px; bottom: 14px; } }
+

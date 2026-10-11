@@ -109,7 +109,7 @@ async function recordHit(request, env) {
   } catch {
     return new Response(null, { status: 400 });
   }
-  const kinds = ["view", "download", "github"];
+  const kinds = ["view", "download", "github", "video"];
   const kind = kinds.includes(body.kind) ? body.kind : null;
   if (!kind) return new Response(null, { status: 400 });
   const path = String(body.path || "/").slice(0, 200);

@@ -307,25 +307,15 @@
         const text = queries[index++ % queries.length];
         query.textContent = "";
         for (const letter of text) { query.textContent += letter; show(query.textContent); await sleep(140); }
-        await sleep(1800);
-        while (query.textContent.length) { query.textContent = query.textContent.slice(0, -1); await sleep(40); }
-        list.innerHTML = commands.slice(0, 4).map(([name, group]) => `<li>${name}<small>${group}</small></li>`).join("");
-        await sleep(500);
+
       };
     },
     scripts(cell) {
+      // All the samples at once, each in its own direction.
       const sample = $("[data-script]", cell);
-      const texts = [["नमस्ते दुनिया", "ltr"], ["مرحبا بالعالم", "rtl"], ["שלום עולם", "rtl"], ["வணக்கம் உலகம்", "ltr"], ["Здравствуй, мир", "ltr"], ["こんにちは世界", "ltr"]];
-      let index = 1;
-      return async () => {
-        await sleep(1800);
-        sample.classList.add("out");
-        await sleep(350);
-        const [text, direction] = texts[index++ % texts.length];
-        sample.textContent = text;
-        sample.dir = direction;
-        sample.classList.remove("out");
-      };
+      const texts = [["नमस्ते दुनिया", "ltr"], ["مرحبا بالعالم", "rtl"], ["שלום עולם", "rtl"], ["வணக்கம் உலகம்", "ltr"]];
+      sample.parentElement.innerHTML = texts.map(([text, direction]) => `<span dir="${direction}">${text}</span>`).join("");
+      return async () => {};
     },
     versions(cell) {
       const [, second, third] = $$(".version", cell);
@@ -341,7 +331,6 @@
     flow(cell) {
       const flow = $(".flow", cell);
       const steps = $$(".flow-step", cell);
-      flow.classList.add("running");
       let index = 0;
       return async () => {
         steps.forEach((step, i) => step.classList.toggle("hit", i === index % steps.length));
@@ -389,19 +378,29 @@
     if (reducedMotion) return;
     let visible = false;
     let running = false;
+    // Once, the first time the panel comes into view; no endless loops.
     whenVisible(cell, async (now) => {
       visible = now;
-      if (!now || running) return;
+      if (!now || running || cell.dataset.played) return;
       running = true;
-      while (visible && !document.hidden) await step();
+      cell.dataset.played = "1";
+      await step();
       running = false;
     }, 0.3);
   });
 
-  // The QR panel shows the same code as the demo page.
-  const qrDemo = $("[data-qr-demo]");
-  const pageQr = $("[data-qr]");
-  if (qrDemo && pageQr) qrDemo.prepend(pageQr.cloneNode(true));
+  // The recording plays only when asked for, in place of the screenshot.
+  const watch = $("[data-watch]");
+  const video = $("[data-hero-video]");
+  if (watch && video) {
+    watch.addEventListener("click", () => {
+      $("[data-hero-picture]").hidden = true;
+      watch.hidden = true;
+      video.hidden = false;
+      video.play().catch(() => {});
+      track("video");
+    });
+  }
 
   // ---- Counting numbers ----
   $$("[data-count]").forEach((element) => {
