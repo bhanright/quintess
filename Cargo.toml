@@ -21,3 +21,18 @@ debug = false
 lto = "thin"
 codegen-units = 4
 strip = true
+
+# The form-script engine (Boa) is large; form scripts are tiny and run in
+# milliseconds either way, so its libraries are built for size, not speed.
+[profile.release.package.boa_engine]
+opt-level = "s"
+
+[profile.release.package.boa_parser]
+opt-level = "s"
+
+[profile.release.package.boa_ast]
+opt-level = "s"
+
+[profile.release.package.regress]
+opt-level = "s"
+
