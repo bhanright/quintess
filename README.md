@@ -17,7 +17,7 @@ A free, open-source, private PDF reader and editor for Windows and Linux. Edit t
 - **Sign and protect**: digital signatures (later edits are saved on top, keeping the signed revision intact), verification, AES-256 encryption and permissions.
 - **Scans and codes**: offline OCR makes scanned pages searchable; QR codes on pages are read and opened safely.
 - **Convert**: export to Word, Markdown, HTML, text and images; compare two versions; reduce file size; accessibility fixes; PDF/A.
-- **Automate**: record your steps as an action, run it on many files, or watch a folder. A full command-line tool (`quintess`) does nearly everything the app does.
+- **Automate**: record your steps as an action, run it on many files, or watch a folder. The same `quintess` program is a full command-line tool that does nearly everything the app does (`quintess merge a.pdf b.pdf -o both.pdf`; `quintess report.pdf` opens the app).
 - **Languages**: text in any script, including shaped Hindi and other Indic scripts, Arabic and Hebrew.
 
 The built-in guide (press **F1** in the app, or read [docs/USER_GUIDE.md](docs/USER_GUIDE.md)) explains the tools, common workflows and their limits.
@@ -26,7 +26,7 @@ The built-in guide (press **F1** in the app, or read [docs/USER_GUIDE.md](docs/U
 
 ### Windows
 
-Download the installer from the [releases page](https://github.com/bhanright/quintess/releases) and run it. It installs for your user account only (no administrator rights needed) and offers Quintess for opening PDFs without changing your default.
+Download the installer from the [releases page](https://github.com/bhanright/quintess/releases) and run it. It installs for your user account only (no administrator rights needed) offers Quintess for opening PDFs without changing your default, and puts the `quintess` command on your PATH.
 
 ### Linux
 
@@ -51,7 +51,7 @@ sudo ./install.sh --system # or for everyone, into /opt/quintess
 
 Remove it with `~/.local/lib/quintess/uninstall.sh` (or `sudo /opt/quintess/uninstall.sh`). The tarball needs `libspeechd2` (Fedora: `speech-dispatcher-libs`); `install.sh` names anything missing.
 
-Both put Quintess in the applications menu and under "Open with" for PDFs, with the commands `quintess-app` and `quintess`. Optional, per feature: `cups-client` (printing), `sane-utils` (scanning), `speech-dispatcher` (read aloud), LibreOffice (converting Office files), `xdg-utils` (opening links), `zenity` (file dialogs without a desktop portal), `fonts-liberation` (stand-in fonts when editing text). On Linux there is no certificate store to sign from (use a .pfx/.p12 file), no Microsoft Office conversion and no self-update; see [Installing on Linux](docs/USER_GUIDE.md#installing-on-linux) in the guide.
+Both put Quintess in the applications menu and under "Open with" for PDFs, with the command `quintess` (the app, or the command-line tool when followed by a command). Optional, per feature: `cups-client` (printing), `sane-utils` (scanning), `speech-dispatcher` (read aloud), LibreOffice (converting Office files), `xdg-utils` (opening links), `zenity` (file dialogs without a desktop portal), `fonts-liberation` (stand-in fonts when editing text). On Linux there is no certificate store to sign from (use a .pfx/.p12 file), no Microsoft Office conversion and no self-update; see [Installing on Linux](docs/USER_GUIDE.md#installing-on-linux) in the guide.
 
 ## Privacy
 

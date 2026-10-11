@@ -72,8 +72,8 @@ jobs:
           quintess print sample.pdf --to-file printed.pdf
           quintess info printed.pdf
           # The app's self-check: renders the window once and saves a picture.
-          QUINTESS_SCREENSHOT="$PWD/screenshot-deb.png" timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" quintess-app sample.pdf
-          QUINTESS_SCREENSHOT="$PWD/screenshot-print-dialog.png" QUINTESS_SETUP=dialog=print timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" quintess-app sample.pdf
+          QUINTESS_SCREENSHOT="$PWD/screenshot-deb.png" timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" quintess sample.pdf
+          QUINTESS_SCREENSHOT="$PWD/screenshot-print-dialog.png" QUINTESS_SETUP=dialog=print timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" quintess sample.pdf
           sudo apt-get remove -y quintess
       - name: Install the tarball and try it
         run: |
@@ -81,7 +81,7 @@ jobs:
           cd unpacked/quintess-*-linux-x86_64
           ./install.sh
           ~/.local/bin/quintess --version
-          QUINTESS_SCREENSHOT="$GITHUB_WORKSPACE/screenshot-tarball.png" timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" ~/.local/bin/quintess-app "$GITHUB_WORKSPACE/sample.pdf"
+          QUINTESS_SCREENSHOT="$GITHUB_WORKSPACE/screenshot-tarball.png" timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" ~/.local/bin/quintess "$GITHUB_WORKSPACE/sample.pdf"
           ~/.local/lib/quintess/uninstall.sh
           test ! -e ~/.local/bin/quintess
       - uses: actions/upload-artifact@v4

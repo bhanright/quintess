@@ -4678,7 +4678,6 @@ dependencies = [
  "serde_json",
  "ttf-parser",
  "tts",
- "winresource",
 ]
 
 [[package]]
@@ -4688,11 +4687,17 @@ dependencies = [
  "anyhow",
  "clap",
  "image",
+ "quintess-app",
+ "quintess-console",
  "quintess-core",
  "regex",
  "serde_json",
  "winresource",
 ]
+
+[[package]]
+name = "quintess-console"
+version = "0.2.0"
 
 [[package]]
 name = "quintess-core"

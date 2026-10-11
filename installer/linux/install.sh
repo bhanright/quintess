@@ -2,14 +2,14 @@
 # Installs Quintess from this unpacked folder.
 #
 #   ./install.sh                 for you only, in ~/.local (no administrator rights)
-#   sudo ./install.sh --system   for everyone: /opt/quintess, with the commands
+#   sudo ./install.sh --system   for everyone: /opt/quintess, with the command
 #                                in /usr/local/bin and menu entries in /usr/local/share
 #
-# The programs and their files (PDFium, dictionaries, recognition models,
-# licenses) go in one folder; `quintess` and `quintess-app` are linked from
-# a bin folder, and a menu entry and icons are added. Installing again
-# replaces an earlier version. To remove it, run uninstall.sh, which is
-# also copied into the program folder.
+# The program and its files (PDFium, dictionaries, recognition models,
+# licenses) go in one folder; `quintess` (the app, and with a command the
+# command-line tool) is linked from a bin folder, and a menu entry and icons
+# are added. Installing again replaces an earlier version. To remove it, run
+# uninstall.sh, which is also copied into the program folder.
 
 set -eu
 
@@ -46,37 +46,42 @@ else
     share_folder="${XDG_DATA_HOME:-$HOME/.local/share}"
 fi
 
-if [ ! -f "$here/program/quintess-app" ]; then
-    echo "install.sh: run this from the unpacked Quintess folder (program/quintess-app is missing)" >&2
+if [ ! -f "$here/program/quintess" ]; then
+    echo "install.sh: run this from the unpacked Quintess folder (program/quintess is missing)" >&2
     exit 1
 fi
 
 # An earlier installation is removed first, so no stale files are left.
+# Its list of installed files includes the quintess-app link of versions
+# before 0.3.0, when the app was a separate program.
 if [ -f "$program_folder/installed-files.txt" ]; then
     while IFS= read -r installed; do
         [ -n "$installed" ] && rm -f "$installed"
     done < "$program_folder/installed-files.txt"
+fi
+# Should that list be missing, a quintess-app link into this program folder
+# would be left pointing at nothing.
+if [ -L "$bin_folder/quintess-app" ] && [ "$(readlink "$bin_folder/quintess-app")" = "$program_folder/quintess-app" ]; then
+    rm -f "$bin_folder/quintess-app"
 fi
 rm -rf "$program_folder"
 
 mkdir -p "$program_folder" "$bin_folder" "$share_folder/applications"
 cp -R "$here/program/." "$program_folder/"
 cp "$here/uninstall.sh" "$program_folder/uninstall.sh"
-chmod 755 "$program_folder/quintess" "$program_folder/quintess-app" "$program_folder/uninstall.sh"
+chmod 755 "$program_folder/quintess" "$program_folder/uninstall.sh"
 
 manifest="$program_folder/installed-files.txt"
 : > "$manifest"
 
-for command in quintess quintess-app; do
-    ln -sf "$program_folder/$command" "$bin_folder/$command"
-    echo "$bin_folder/$command" >> "$manifest"
-done
+ln -sf "$program_folder/quintess" "$bin_folder/quintess"
+echo "$bin_folder/quintess" >> "$manifest"
 
 # The menu entry names the installed program by its full path, so it works
 # even when the bin folder is not on the PATH.
 desktop_file="$share_folder/applications/quintess.desktop"
-sed -e "s|^Exec=quintess-app|Exec=\"$program_folder/quintess-app\"|" \
-    -e "s|^TryExec=.*|TryExec=$program_folder/quintess-app|" \
+sed -e "s|^Exec=quintess |Exec=\"$program_folder/quintess\" |" \
+    -e "s|^TryExec=.*|TryExec=$program_folder/quintess|" \
     "$here/share/applications/quintess.desktop" > "$desktop_file"
 echo "$desktop_file" >> "$manifest"
 
@@ -96,7 +101,7 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1 && [ -f "$share_folder/icons
 fi
 
 echo "Quintess is installed in $program_folder."
-echo "Commands: $bin_folder/quintess-app (the app) and $bin_folder/quintess (the command-line tool)."
+echo "Command: $bin_folder/quintess opens the app (quintess file.pdf); with a command it is the command-line tool (quintess --help)."
 
 case ":$PATH:" in
     *":$bin_folder:"*) ;;
@@ -105,7 +110,7 @@ esac
 
 # Shared libraries the programs need that this system lacks.
 if command -v ldd >/dev/null 2>&1; then
-    missing=$(ldd "$program_folder/quintess-app" "$program_folder/quintess" 2>/dev/null | awk '/not found/ { print $1 }' | sort -u)
+    missing=$(ldd "$program_folder/quintess" 2>/dev/null | awk '/not found/ { print $1 }' | sort -u)
     if [ -n "$missing" ]; then
         echo "Warning: these libraries are missing: $(echo $missing)"
         echo "  On Debian and Ubuntu: sudo apt install libspeechd2 libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0"

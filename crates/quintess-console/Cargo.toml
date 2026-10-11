@@ -1,0 +1,13 @@
+[package]
+name = "quintess-console"
+description = "Decides whether `quintess` was asked for the app or the command-line tool, and the small Windows console launcher (installed as quintess.com) that gives the command-line tool a proper terminal."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# No dependencies on purpose: the launcher should stay a few hundred KB, and
+# the `quintess` program reads the same rule from this library.
+
+[[bin]]
+name = "quintess-console"
+path = "src/main.rs"

@@ -18,15 +18,15 @@ Press **Ctrl+K** and type what you want, such as "rotate", "watermark" or "redac
 
 ## Installing on Windows
 
-Download the installer (`Quintess-<version>-setup.exe`) from the releases page at github.com/bhanright/quintess/releases and run it. It installs for your user account only, with no administrator rights needed, and offers Quintess for opening PDFs without changing your default. The installer isn't code-signed yet, so Windows may show a SmartScreen warning. Remove Quintess from Windows Settings ▸ Apps.
+Download the installer (`Quintess-<version>-setup.exe`) from the releases page at github.com/bhanright/quintess/releases and run it. It installs for your user account only, with no administrator rights needed, offers Quintess for opening PDFs without changing your default, and puts the `quintess` command on your PATH so it can be typed in a terminal. The installer isn't code-signed yet, so Windows may show a SmartScreen warning. Remove Quintess from Windows Settings ▸ Apps.
 
 ## Installing on Linux
 
 Quintess runs on 64-bit Linux with glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and newer. Download one of the two packages from the releases page at github.com/bhanright/quintess/releases.
 
-**Debian, Ubuntu, Mint and other apt systems**: download `quintess_<version>_amd64.deb`, then in a terminal in that folder run `sudo apt install ./quintess_<version>_amd64.deb`. apt installs the libraries it needs. Quintess appears in your applications menu and under **Open with** for PDF files; the commands are `quintess-app` and `quintess`. Remove it with `sudo apt remove quintess`.
+**Debian, Ubuntu, Mint and other apt systems**: download `quintess_<version>_amd64.deb`, then in a terminal in that folder run `sudo apt install ./quintess_<version>_amd64.deb`. apt installs the libraries it needs. Quintess appears in your applications menu and under **Open with** for PDF files; the command is `quintess` (on its own or with files it opens the app, and followed by a command it is the command-line tool). Remove it with `sudo apt remove quintess`.
 
-**Any other distribution**: download `quintess-<version>-linux-x86_64.tar.gz`, unpack it with `tar -xzf quintess-<version>-linux-x86_64.tar.gz`, go into the `quintess-<version>-linux-x86_64` folder and run `./install.sh`. This installs for you only, into `~/.local` (the program in `~/.local/lib/quintess`, the commands in `~/.local/bin`, a menu entry and icons). `sudo ./install.sh --system` installs for everyone into `/opt/quintess` instead, with the commands in `/usr/local/bin`. Remove it with `~/.local/lib/quintess/uninstall.sh` (or `sudo /opt/quintess/uninstall.sh`). The tarball needs `libspeechd2` (Fedora: `speech-dispatcher-libs`), which most desktops already have; `install.sh` names any missing library.
+**Any other distribution**: download `quintess-<version>-linux-x86_64.tar.gz`, unpack it with `tar -xzf quintess-<version>-linux-x86_64.tar.gz`, go into the `quintess-<version>-linux-x86_64` folder and run `./install.sh`. This installs for you only, into `~/.local` (the program in `~/.local/lib/quintess`, the `quintess` command in `~/.local/bin`, a menu entry and icons). `sudo ./install.sh --system` installs for everyone into `/opt/quintess` instead, with the command in `/usr/local/bin`. Remove it with `~/.local/lib/quintess/uninstall.sh` (or `sudo /opt/quintess/uninstall.sh`). The tarball needs `libspeechd2` (Fedora: `speech-dispatcher-libs`), which most desktops already have; `install.sh` names any missing library.
 
 Each download has a `.sha256` file beside it; `sha256sum -c quintess_<version>_amd64.deb.sha256` checks the download.
 
@@ -717,7 +717,7 @@ The status bar shows the count and a **Stop** button; **Tools ▸ Stop watching 
 
 ## The command line
 
-The `quintess` command does most of what the app does, for scripts and batch work. Run `quintess --help` for the list, and `quintess <command> --help` for each one. A few examples:
+The `quintess` command does most of what the app does, for scripts and batch work. Run `quintess --help` for the list, and `quintess <command> --help` for each one. The app and the command-line tool are one program: `quintess` on its own, or followed by files (`quintess report.pdf`), opens the app; followed by a command, it is the command-line tool. To open a file named like a command, write `quintess -- merge` or `quintess ./merge`. A few examples:
 
 - `quintess merge a.pdf b.pdf -o both.pdf`
 - `quintess redact contract.pdf --text "Jane Roe" -o redacted.pdf`

@@ -9,21 +9,21 @@ each with a matching .sha256 file ("<hex>  <name>", as sha256sum writes it).
     python3 tools/package_linux.py [--skip-build] [--pdfium DIR] [--models DIR] [--output DIR]
 
 Run it on Linux (the release workflow uses Ubuntu 22.04, whose glibc 2.35
-sets the oldest system the programs run on). It needs Rust, and for the
+sets the oldest system the program runs on). It needs Rust, and for the
 build the packages listed in docs/BUILDING.md. It does not need dpkg: both
 archives are written here, with root ownership and exact permissions.
 
 Layout, mirroring the Windows installer (installer/quintess.iss), where
-everything sits in one folder beside the programs:
+everything sits in one folder beside the program:
 
-    <program folder>/quintess, quintess-app, libpdfium.so
+    <program folder>/quintess, libpdfium.so
     <program folder>/dictionaries/   Hunspell dictionaries
     <program folder>/models/         OCR models
     <program folder>/licenses/       LICENSE-MIT, LICENSE-APACHE, notices, PDFium's licenses
 
 The program folder is /usr/lib/quintess for the .deb (linked from
 /usr/bin), and ~/.local/lib/quintess or /opt/quintess for the tarball.
-The programs find these files through their own location, following the
+The program finds these files through its own location, following the
 links, so nothing is configured at install time.
 """
 
@@ -45,7 +45,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "installer" / "linux"
 ICONS = ROOT / "assets" / "linux" / "icons" / "hicolor"
 DICTIONARIES = ROOT / "assets" / "dictionaries"
-PROGRAMS = ["quintess", "quintess-app"]
+# One program: the app, and with a command the command-line tool.
+PROGRAMS = ["quintess"]
 
 # The OCR models, checked against the checksums the program itself demands
 # (crates/quintess-core/src/ocr.rs).
@@ -73,7 +74,7 @@ RUNTIME_OPENED_PACKAGES = [
     "libwayland-egl1",
 ]
 
-# Debian packages that provide each library the programs link directly.
+# Debian packages that provide each library the program links directly.
 LINKED_LIBRARY_PACKAGES = {
     "libc.so.6": "libc6",
     "libm.so.6": "libc6",
@@ -109,8 +110,8 @@ DESCRIPTION = """Private PDF reader and editor
  redact for real, fill and create forms, organize pages, OCR scans, compare,
  convert and automate. No account and no uploads; it works offline.
  .
- This package contains the desktop app (quintess-app) and the command-line
- tool (quintess)."""
+ The quintess command opens the desktop app (quintess file.pdf) and, given
+ a command, is the command-line tool (quintess --help)."""
 
 
 def workspace_version():
@@ -189,7 +190,7 @@ def debian_depends(binaries):
 
 
 def build(target, cargo_command):
-    command = ["cargo", cargo_command, "--release", "-j", "6", "-p", "quintess-app", "-p", "quintess-cli"]
+    command = ["cargo", cargo_command, "--release", "-j", "6", "-p", "quintess-cli"]
     if target:
         command += ["--target", target]
     print("+", " ".join(command), flush=True)
@@ -311,8 +312,9 @@ Install for everyone (into /opt/quintess):
 Remove:
     ~/.local/lib/quintess/uninstall.sh   (or: sudo /opt/quintess/uninstall.sh)
 
-Then start Quintess from your desktop's menu, or run quintess-app; the
-command-line tool is quintess (quintess --help).
+Then start Quintess from your desktop's menu, or run quintess (quintess file.pdf
+opens a file). Followed by a command, quintess is the command-line tool
+(quintess --help lists them).
 
 Needs glibc {glibc} or later (see ldd --version) and libspeechd2. Optional: cups-client (printing), sane-utils (scanning),
 speech-dispatcher (read aloud), LibreOffice (converting Office files).
@@ -340,6 +342,8 @@ def ar_archive(members):
 def make_deb(output, version, binaries, pdfium, models):
     tree = Tree()
     program_folder_files(tree, "usr/lib/quintess", binaries, pdfium, models)
+    # Upgrading from a version before 0.3.0, dpkg removes that package's
+    # quintess-app program and its /usr/bin link, which this one lacks.
     for binary in binaries:
         tree.link(f"usr/bin/{binary.name}", f"../lib/quintess/{binary.name}")
     desktop_integration_files(tree, "usr/share")

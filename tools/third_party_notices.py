@@ -18,7 +18,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "licenses" / "THIRD-PARTY-NOTICES.txt"
-PROGRAMS = ["quintess-app", "quintess-cli"]
+# The packages whose programs ship: quintess-cli builds `quintess` (which
+# includes quintess-app) and quintess-console the Windows launcher, quintess.com.
+PROGRAMS = ["quintess-cli", "quintess-console"]
 PLATFORMS = {"x86_64-pc-windows-msvc": "Windows", "x86_64-unknown-linux-gnu": "Linux"}
 LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
 

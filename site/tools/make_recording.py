@@ -57,7 +57,7 @@ def program(name: str) -> pathlib.Path:
 
 def frame(setup: str, path: pathlib.Path, document: pathlib.Path) -> None:
     environment = dict(os.environ, QUINTESS_SCREENSHOT=str(path), QUINTESS_SETUP=setup)
-    subprocess.run([str(program("quintess-app")), str(document)], env=environment, check=True, timeout=120)
+    subprocess.run([str(program("quintess")), str(document)], env=environment, check=True, timeout=120)
 
 
 def main() -> None:
