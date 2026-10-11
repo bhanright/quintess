@@ -163,9 +163,15 @@ fn thumbnails(ui: &mut egui::Ui, tab: &mut DocumentTab, worker: &RenderWorker, n
 }
 
 fn bookmarks(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, actions: &mut Vec<SidebarAction>) {
-    ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut state.new_bookmark_title).hint_text("New bookmark title").desired_width(ui.available_width() - 50.0));
-        if ui.button("Add").on_hover_text("Bookmark the current page").clicked() && !state.new_bookmark_title.trim().is_empty() {
+    // The button is laid out first (right to left) so the field takes only
+    // the width that's left: a field sized from a guess at the button's
+    // width makes the row wider than the panel, and the panel then grows
+    // to fit it on every frame.
+    let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let add = ui.button("Add").on_hover_text("Bookmark the current page");
+        ui.add(egui::TextEdit::singleline(&mut state.new_bookmark_title).hint_text("New bookmark title").desired_width(ui.available_width()));
+        if add.clicked() && !state.new_bookmark_title.trim().is_empty() {
             let mut entries = tab.bookmarks.clone();
             let entry = BookmarkEntry { title: state.new_bookmark_title.trim().to_string(), page: tab.current_page as u32 + 1, children: Vec::new() };
             quintess_core::bookmarks::insert_by_page(&mut entries, entry);
@@ -313,10 +319,13 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
                     ui.label(RichText::new(format!("↳ {}: {}", reply.author, reply.contents)).italics());
                 }
                 if selected {
-                    ui.horizontal(|ui| {
-                        let width = ui.available_width() - 50.0;
+                    // Button first, then the field in the width that's left (see bookmarks).
+                    let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+                    ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let send = ui.button("Send");
+                        let width = ui.available_width();
                         crate::spell::text_field(ui, &mut state.reply_draft, false, 1, width, "Reply");
-                        if ui.button("Send").clicked() && !state.reply_draft.trim().is_empty() {
+                        if send.clicked() && !state.reply_draft.trim().is_empty() {
                             actions.push(SidebarAction::ReplyToAnnotation(comment.id, std::mem::take(&mut state.reply_draft)));
                         }
                     });
