@@ -264,6 +264,10 @@ pub enum Change {
     /// Moves to the front or back of the page's drawing order.
     BringToFront,
     SendToBack,
+    /// One step up or down the page's drawing order, past the next object
+    /// that overlaps it.
+    BringForward,
+    SendBackward,
     /// See-through drawing (0 invisible to 1 solid) and how colors mix
     /// with what is underneath (a PDF blend mode such as "Multiply").
     Appearance { opacity: f32, blend_mode: BlendMode },
@@ -431,6 +435,41 @@ pub fn change_objects(pdf: &mut Pdf, page_number: u32, selected: &[PageObject], 
                     operations[object.start - 1] = Operation::new("gs", vec![Object::Name(name.as_bytes().to_vec())]);
                 } else {
                     wrap(&mut operations, object, vec![Operation::new("q", vec![]), Operation::new("gs", vec![Object::Name(name.as_bytes().to_vec())])]);
+                }
+            }
+        }
+        Change::BringForward | Change::SendBackward => {
+            if ordered.len() != 1 {
+                bail!("move one object at a time up or down the order");
+            }
+            let object = ordered[0];
+            let overlaps = |other: &PageObject| other.bounds[0] < object.bounds[2] && other.bounds[2] > object.bounds[0] && other.bounds[1] < object.bounds[3] && other.bounds[3] > object.bounds[1];
+            let neighbor = if *change == Change::BringForward {
+                current.iter().filter(|other| other.start >= object.end && overlaps(other)).min_by_key(|other| other.start)
+            } else {
+                current.iter().filter(|other| other.end <= object.start && overlaps(other)).max_by_key(|other| other.start)
+            };
+            let Some(neighbor) = neighbor.cloned() else { bail!("nothing overlapping is {} it", if *change == Change::BringForward { "in front of" } else { "behind" }) };
+            // Lift the object with its look, expressed relative to the
+            // transformation in force where it lands (the neighbor's).
+            let landing = invert(neighbor.ctm).context("the neighboring object can't be used as a reference")?;
+            let mut piece = vec![Operation::new("q", vec![]), matrix_operation(multiply(object.ctm, landing))];
+            piece.extend(state_before(&operations, object.start));
+            let lifted: Vec<Operation> = operations[object.start..object.end].to_vec();
+            piece.extend(lifted);
+            piece.push(Operation::new("Q", vec![]));
+            let length = object.end - object.start;
+            if *change == Change::BringForward {
+                // Insert after the neighbor first, then remove the original
+                // (which comes before it, so the neighbor's position holds).
+                for (offset, operation) in piece.into_iter().enumerate() {
+                    operations.insert(neighbor.end + offset, operation);
+                }
+                operations.drain(object.start..object.start + length);
+            } else {
+                operations.drain(object.start..object.end);
+                for (offset, operation) in piece.into_iter().enumerate() {
+                    operations.insert(neighbor.start + offset, operation);
                 }
             }
         }

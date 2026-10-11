@@ -1635,6 +1635,45 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let author = self.tool_settings.author.clone();
                     self.edit("Reply", |pdf| reply_to_annotation(pdf, id, &text, &author).map(|_| ()));
                 }
+                SidebarAction::UpdateLayer(layer) => {
+                    self.edit("Change layer", |pdf| quintess_core::layers::update_layer(pdf, &layer));
+                }
+                SidebarAction::NewLayer => {
+                    let count = self.tabs.get(self.active).map_or(0, |tab| tab.layers().len());
+                    self.edit("New layer", |pdf| quintess_core::layers::create_layer(pdf, &format!("Layer {}", count + 1)).map(|_| ()));
+                }
+                SidebarAction::ReorderLayers(order) => self.edit("Reorder layers", |pdf| quintess_core::layers::reorder_layers(pdf, &order)),
+                SidebarAction::DeleteLayer(layer, content) => {
+                    let label = if content == quintess_core::layers::LayerContent::Remove { "Delete layer and its drawing" } else { "Delete layer" };
+                    if content == quintess_core::layers::LayerContent::Remove {
+                        self.edit_removing(label, |pdf| quintess_core::layers::delete_layer(pdf, layer, content));
+                    } else {
+                        self.edit(label, |pdf| quintess_core::layers::delete_layer(pdf, layer, content));
+                    }
+                }
+                SidebarAction::MoveSelectionToLayer(layer) => {
+                    let Some(tab) = self.tabs.get(self.active) else { continue };
+                    let (page_index, selected) = self.viewer_states.get(&tab.id).map(|state| state.objects.selection()).unwrap_or_default();
+                    if selected.is_empty() {
+                        self.error("Select pictures or shapes first, with Edit pictures and shapes.");
+                        continue;
+                    }
+                    let expected: Vec<_> = selected.iter().map(|object| (object.kind, object.bounds)).collect();
+                    if self.try_edit("Move to layer", |pdf| quintess_core::layers::move_objects_to_layer(pdf, page_index as u32 + 1, &selected, layer)) {
+                        self.reselect_objects(page_index, &expected);
+                    }
+                }
+                SidebarAction::SelectObject { page_index, object } => {
+                    self.tool = Tool::EditObjects;
+                    self.reselect_objects(page_index, &[(object.kind, object.bounds)]);
+                }
+                SidebarAction::RestackObject { page_index, object, forward } => {
+                    let change = if forward { quintess_core::objects::Change::BringForward } else { quintess_core::objects::Change::SendBackward };
+                    let expected = [(object.kind, object.bounds)];
+                    if self.try_edit(if forward { "Bring forward" } else { "Send backward" }, |pdf| quintess_core::objects::change_objects(pdf, page_index as u32 + 1, &[object], &change)) {
+                        self.reselect_objects(page_index, &expected);
+                    }
+                }
                 SidebarAction::FillField(name, value) => {
                     let values = std::collections::BTreeMap::from([(name, value)]);
                     self.edit("Fill field", |pdf| forms::fill_fields(pdf, &values).map(|_| ()));

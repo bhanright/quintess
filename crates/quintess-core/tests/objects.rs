@@ -142,3 +142,46 @@ fn opacity_lets_the_page_show_through() {
     // Half red over white is pink.
     assert!(color[0] > 200 && color[1] > 110 && color[1] < 170, "{color:?}");
 }
+
+#[test]
+fn layers_hide_print_and_remove_what_is_in_them() {
+    use quintess_core::layers::{LayerContent, create_layer, delete_layer, list_layers, move_objects_to_layer, object_layers, update_layer};
+    let mut pdf = page();
+    let layer = create_layer(&mut pdf, "Logo").unwrap();
+    let picture = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Image).unwrap();
+    move_objects_to_layer(&mut pdf, 1, &[picture], layer).unwrap();
+    assert!(is_red(color_at(&bytes_of(&mut pdf), 200.0, 450.0)), "visible while the layer is on");
+    let picture = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Image).unwrap();
+    assert_eq!(object_layers(&pdf, 1).unwrap(), vec![(picture.start, layer)]);
+
+    let mut hidden = list_layers(&pdf)[0].clone();
+    hidden.visible = false;
+    update_layer(&mut pdf, &hidden).unwrap();
+    assert!(is_white(color_at(&bytes_of(&mut pdf), 200.0, 450.0)), "hidden with its layer");
+    assert!(!text_of(&bytes_of(&mut pdf)).is_empty(), "the rest of the page still shows");
+
+    // Deleting the layer and its content removes the picture for good.
+    hidden.visible = true;
+    update_layer(&mut pdf, &hidden).unwrap();
+    delete_layer(&mut pdf, layer, LayerContent::Remove).unwrap();
+    assert!(is_white(color_at(&bytes_of(&mut pdf), 200.0, 450.0)));
+    assert!(list_objects(&pdf, 1).unwrap().iter().all(|o| o.kind != ObjectKind::Image));
+    assert!(list_layers(&pdf).is_empty());
+}
+
+#[test]
+fn one_step_forward_and_back() {
+    let mut pdf = page();
+    let shape = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Shape).unwrap();
+    change_objects(&mut pdf, 1, &[shape], &Change::Transform(translation(-200.0, 20.0))).unwrap();
+    let shape = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Shape).unwrap();
+    change_objects(&mut pdf, 1, &[shape], &Change::SendBackward).unwrap();
+    assert!(is_red(color_at(&bytes_of(&mut pdf), 200.0, 440.0)), "the rectangle went behind the picture");
+    let shape = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Shape).unwrap();
+    change_objects(&mut pdf, 1, &[shape.clone()], &Change::BringForward).unwrap();
+    let blue = color_at(&bytes_of(&mut pdf), 200.0, 440.0);
+    assert!(blue[2] > 180 && blue[0] < 90, "and came forward again: {blue:?}");
+    // It kept its place on the page.
+    let moved = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Shape).unwrap();
+    assert!(moved.bounds.iter().zip(shape.bounds.iter()).all(|(a, b)| (a - b).abs() < 0.01));
+}

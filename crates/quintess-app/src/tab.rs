@@ -103,6 +103,8 @@ pub struct DocumentTab {
     line_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::edit_text::EditableLine>>>>,
     paragraph_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::edit_text::EditableParagraph>>>>,
     object_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::objects::PageObject>>>>,
+    layer_cache: RefCell<Option<Rc<Vec<quintess_core::layers::Layer>>>>,
+    object_layer_cache: RefCell<HashMap<usize, Rc<Vec<(usize, (u32, u16))>>>>,
     /// Rendered pages: (page, resolution key) → texture.
     pub textures: HashMap<(usize, u32), egui::TextureHandle>,
     pub pending: HashSet<(usize, u32)>,
@@ -161,6 +163,8 @@ impl DocumentTab {
             line_cache: RefCell::new(HashMap::new()),
             paragraph_cache: RefCell::new(HashMap::new()),
             object_cache: RefCell::new(HashMap::new()),
+            layer_cache: RefCell::new(None),
+            object_layer_cache: RefCell::new(HashMap::new()),
             textures: HashMap::new(),
             pending: HashSet::new(),
             texture_night_mode: false,
@@ -213,6 +217,8 @@ impl DocumentTab {
         self.line_cache.borrow_mut().clear();
         self.paragraph_cache.borrow_mut().clear();
         self.object_cache.borrow_mut().clear();
+        *self.layer_cache.borrow_mut() = None;
+        self.object_layer_cache.borrow_mut().clear();
         self.textures.clear();
         self.pending.clear();
         self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
@@ -343,6 +349,33 @@ impl DocumentTab {
         let objects = Rc::new(self.load_pdf().ok().and_then(|pdf| quintess_core::objects::list_objects(&pdf, page_index as u32 + 1).ok()).unwrap_or_default());
         self.object_cache.borrow_mut().insert(page_index, objects.clone());
         objects
+    }
+
+    /// The document's layers, read once and cached.
+    pub fn layers(&self) -> Rc<Vec<quintess_core::layers::Layer>> {
+        if let Some(layers) = self.layer_cache.borrow().as_ref() {
+            return layers.clone();
+        }
+        let layers = Rc::new(self.load_pdf().map(|pdf| quintess_core::layers::list_layers(&pdf)).unwrap_or_default());
+        *self.layer_cache.borrow_mut() = Some(layers.clone());
+        layers
+    }
+
+    /// Which layer each object on a page belongs to (by the object's start).
+    pub fn object_layers(&self, page_index: usize) -> Rc<Vec<(usize, (u32, u16))>> {
+        if let Some(owners) = self.object_layer_cache.borrow().get(&page_index) {
+            return owners.clone();
+        }
+        let owners = Rc::new(self.load_pdf().ok().and_then(|pdf| quintess_core::layers::object_layers(&pdf, page_index as u32 + 1).ok()).unwrap_or_default());
+        self.object_layer_cache.borrow_mut().insert(page_index, owners.clone());
+        owners
+    }
+
+    /// The objects on a page that can be picked: those not on a locked layer.
+    pub fn pickable_objects(&self, page_index: usize) -> Vec<quintess_core::objects::PageObject> {
+        let locked: Vec<(u32, u16)> = self.layers().iter().filter(|layer| layer.locked).map(|layer| layer.id).collect();
+        let owners = self.object_layers(page_index);
+        self.page_objects(page_index).iter().filter(|object| !owners.iter().any(|(start, layer)| *start == object.start && locked.contains(layer))).cloned().collect()
     }
 
     pub fn pdfium_document(&self) -> Option<&PdfDocument<'static>> {

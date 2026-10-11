@@ -22,6 +22,7 @@ pub enum SidebarPage {
     Fields,
     Search,
     Attachments,
+    Layers,
 }
 
 /// Edits requested from the sidebar.
@@ -34,6 +35,17 @@ pub enum SidebarAction {
     AddAttachment,
     SaveAttachment(String),
     RemoveAttachment(String),
+    /// A layer's visibility, printing, lock or name changed.
+    UpdateLayer(quintess_core::layers::Layer),
+    NewLayer,
+    ReorderLayers(Vec<(u32, u16)>),
+    DeleteLayer((u32, u16), quintess_core::layers::LayerContent),
+    /// Put the objects selected with Edit pictures and shapes into a layer.
+    MoveSelectionToLayer((u32, u16)),
+    /// Select an object from the Objects list.
+    SelectObject { page_index: usize, object: quintess_core::objects::PageObject },
+    /// Move an object one step up or down the page's order.
+    RestackObject { page_index: usize, object: quintess_core::objects::PageObject, forward: bool },
 }
 
 #[derive(Default)]
@@ -45,6 +57,8 @@ pub struct SidebarState {
     new_bookmark_title: String,
     field_drafts: std::collections::HashMap<String, String>,
     drafts_version: (u64, u64),
+    /// The layer being renamed, and the name typed so far.
+    renaming_layer: Option<((u32, u16), String)>,
 }
 
 pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, worker: &RenderWorker, night_mode: bool) -> Vec<SidebarAction> {
@@ -56,6 +70,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
         (SidebarPage::Fields, "Fields", crate::theme::icon::FORM),
         (SidebarPage::Search, "Search", crate::theme::icon::SEARCH),
         (SidebarPage::Attachments, "Files", crate::theme::icon::ATTACHMENT),
+        (SidebarPage::Layers, "Layers", crate::theme::icon::LAYERS),
     ];
     if crate::theme::is_studio(ui.ctx()) {
         // Icons in a segmented row, and the section's name in small capitals.
@@ -93,6 +108,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
         SidebarPage::Fields => fields(ui, tab, state, &mut actions),
         SidebarPage::Search => search(ui, tab),
         SidebarPage::Attachments => attachments(ui, tab, &mut actions),
+        SidebarPage::Layers => layers(ui, tab, state, &mut actions),
     }
     actions
 }
@@ -410,6 +426,127 @@ fn attachments(ui: &mut egui::Ui, tab: &mut DocumentTab, actions: &mut Vec<Sideb
                     }
                     if attachment.page.is_none() && ui.small_button("Remove").clicked() {
                         actions.push(SidebarAction::RemoveAttachment(attachment.name.clone()));
+                    }
+                });
+            });
+        }
+    });
+}
+
+/// Layers (show, print, lock, rename, order, delete) and the current
+/// page's pictures and drawings in their stacking order.
+fn layers(ui: &mut egui::Ui, tab: &DocumentTab, state: &mut SidebarState, actions: &mut Vec<SidebarAction>) {
+    use quintess_core::layers::LayerContent;
+    let layers = tab.layers();
+    ui.horizontal(|ui| {
+        if ui.button("New layer").clicked() {
+            actions.push(SidebarAction::NewLayer);
+        }
+        if !layers.is_empty() {
+            ui.menu_button("Move selection to", |ui| {
+                ui.weak("Selected with Edit pictures and shapes");
+                for layer in layers.iter() {
+                    if ui.button(&layer.name).clicked() {
+                        actions.push(SidebarAction::MoveSelectionToLayer(layer.id));
+                        ui.close();
+                    }
+                }
+            });
+        }
+    });
+    if layers.is_empty() {
+        ui.weak("This document has no layers. New layer adds one; move pictures and shapes into it to show, hide or lock them together.");
+    }
+    let order: Vec<(u32, u16)> = layers.iter().map(|layer| layer.id).collect();
+    for (index, layer) in layers.iter().enumerate() {
+        ui.horizontal(|ui| {
+            let mut changed = layer.clone();
+            let eye = if layer.visible { "👁" } else { "–" };
+            if ui.small_button(eye).on_hover_text(if layer.visible { "Shown: click to hide" } else { "Hidden: click to show" }).clicked() {
+                changed.visible = !changed.visible;
+            }
+            if ui.small_button(if layer.prints { "🖨" } else { "⊘" }).on_hover_text(if layer.prints { "Prints: click to keep it off paper" } else { "Doesn't print: click to print it" }).clicked() {
+                changed.prints = !changed.prints;
+            }
+            if ui.small_button(if layer.locked { "🔒" } else { "🔓" }).on_hover_text(if layer.locked { "Locked: its pictures and shapes can't be picked" } else { "Unlocked" }).clicked() {
+                changed.locked = !changed.locked;
+            }
+            match state.renaming_layer.as_mut().filter(|(id, _)| *id == layer.id) {
+                Some((_, name)) => {
+                    let response = ui.add(egui::TextEdit::singleline(name).desired_width(110.0));
+                    if response.lost_focus() {
+                        changed.name = name.trim().to_string();
+                        state.renaming_layer = None;
+                    } else if !response.has_focus() {
+                        response.request_focus();
+                    }
+                }
+                None => {
+                    let label = if layer.visible { RichText::new(&layer.name) } else { RichText::new(&layer.name).weak() };
+                    if ui.add(egui::Label::new(label).sense(Sense::click())).on_hover_text("Double-click to rename").double_clicked() {
+                        state.renaming_layer = Some((layer.id, layer.name.clone()));
+                    }
+                }
+            }
+            if changed != *layer && !changed.name.is_empty() {
+                actions.push(SidebarAction::UpdateLayer(changed));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button("⋯", |ui| {
+                    if ui.button("Delete, keeping its drawing").clicked() {
+                        actions.push(SidebarAction::DeleteLayer(layer.id, LayerContent::Keep));
+                        ui.close();
+                    }
+                    if ui.button("Delete with its drawing").clicked() {
+                        actions.push(SidebarAction::DeleteLayer(layer.id, LayerContent::Remove));
+                        ui.close();
+                    }
+                    for other in layers.iter().filter(|other| other.id != layer.id) {
+                        if ui.button(format!("Merge into {}", other.name)).clicked() {
+                            actions.push(SidebarAction::DeleteLayer(layer.id, LayerContent::MoveTo(other.id)));
+                            ui.close();
+                        }
+                    }
+                });
+                if index + 1 < order.len() && ui.small_button("↓").clicked() {
+                    let mut reordered = order.clone();
+                    reordered.swap(index, index + 1);
+                    actions.push(SidebarAction::ReorderLayers(reordered));
+                }
+                if index > 0 && ui.small_button("↑").clicked() {
+                    let mut reordered = order.clone();
+                    reordered.swap(index, index - 1);
+                    actions.push(SidebarAction::ReorderLayers(reordered));
+                }
+            });
+        });
+    }
+    ui.add_space(10.0);
+    ui.separator();
+    let page_index = tab.current_page;
+    ui.label(RichText::new(format!("Objects on page {}", page_index + 1)).strong());
+    let objects = tab.page_objects(page_index);
+    let owners = tab.object_layers(page_index);
+    if objects.is_empty() {
+        ui.weak("No pictures or drawings on this page.");
+        return;
+    }
+    egui::ScrollArea::vertical().id_salt(("objects", tab.id)).max_height(320.0).show(ui, |ui| {
+        // Top of the stack first, as in an image editor's layer list.
+        for object in objects.iter().rev() {
+            ui.horizontal(|ui| {
+                let size = format!("{:.0}×{:.0} pt", object.bounds[2] - object.bounds[0], object.bounds[3] - object.bounds[1]);
+                let layer_name = owners.iter().find(|(start, _)| *start == object.start).and_then(|(_, id)| layers.iter().find(|layer| layer.id == *id)).map(|layer| format!(" · {}", layer.name)).unwrap_or_default();
+                let label = format!("{} · {size}{layer_name}", object.kind.describe());
+                if ui.selectable_label(false, label).clicked() {
+                    actions.push(SidebarAction::SelectObject { page_index, object: object.clone() });
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("↓").on_hover_text("Send backward").clicked() {
+                        actions.push(SidebarAction::RestackObject { page_index, object: object.clone(), forward: false });
+                    }
+                    if ui.small_button("↑").on_hover_text("Bring forward").clicked() {
+                        actions.push(SidebarAction::RestackObject { page_index, object: object.clone(), forward: true });
                     }
                 });
             });

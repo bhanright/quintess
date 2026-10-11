@@ -118,6 +118,11 @@ impl ObjectToolState {
         self.selected.dedup();
     }
 
+    /// The page and objects currently selected.
+    pub fn selection(&self) -> (usize, Vec<PageObject>) {
+        (self.page_index, self.selected.clone())
+    }
+
     pub fn clear(&mut self) {
         self.selected.clear();
         self.gesture = None;
@@ -172,7 +177,7 @@ pub fn input(ui: &egui::Ui, tab: &DocumentTab, state: &mut ObjectToolState, page
     let pointer = response.interact_pointer_pos().or(response.hover_pos());
     let point = pointer.map(|p| to_page(geometry, page_rect, zoom, p));
     let shift = ui.input(|i| i.modifiers.shift);
-    let objects = tab.page_objects(page_index);
+    let objects = tab.pickable_objects(page_index);
     let on_this_page = state.page_index == page_index && !state.selected.is_empty();
 
     // The pointer's shape says what a drag would do.
@@ -323,7 +328,7 @@ pub fn draw(ui: &mut egui::Ui, tab: &DocumentTab, state: &mut ObjectToolState, p
     // A faint outline under the pointer shows what a click would pick.
     if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| page_rect.contains(*p)) {
         let point = to_page(geometry, page_rect, zoom, pointer);
-        if let Some(object) = object_at(&tab.page_objects(page_index), point.0, point.1) {
+        if let Some(object) = object_at(&tab.pickable_objects(page_index), point.0, point.1) {
             if !state.selected.contains(object) {
                 painter.rect_stroke(screen_rect_of(geometry, page_rect, zoom, object.bounds), 0.0, Stroke::new(1.0, faint), StrokeKind::Outside);
             }
@@ -382,6 +387,7 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
     };
     let (cropping, all_pictures) = (state.cropping, pictures == state.selected.len());
     let starting_opacity = state.selected.first().map_or(1.0, |object| object.opacity);
+    let state_single = state.selected.len() == 1;
     let (mut toggle_crop, mut replace, mut outcome) = (false, false, None);
     // Keep the bar inside the view, using its width from the last frame.
     let bar_id = ui.id().with(("object toolbar", page_index));
@@ -434,6 +440,12 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
                     }
                 });
                 ui.ctx().data_mut(|data| data.insert_temp(look_id, (opacity, blend_mode)));
+                if state_single && ui.button("↑").on_hover_text("Bring forward one step").clicked() {
+                    push("Bring forward", Change::BringForward, Some(quintess_core::objects::IDENTITY));
+                }
+                if state_single && ui.button("↓").on_hover_text("Send backward one step").clicked() {
+                    push("Send backward", Change::SendBackward, Some(quintess_core::objects::IDENTITY));
+                }
                 if ui.button("Front").on_hover_text("Bring to front").clicked() {
                     push("Bring to front", Change::BringToFront, None);
                 }
