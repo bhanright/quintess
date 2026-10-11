@@ -231,6 +231,12 @@ pub fn check_pdfa(pdf: &Pdf) -> Vec<PreflightIssue> {
 }
 
 /// Checks the rules of one PDF/A level that matter in practice.
+/// Whether the file's XMP metadata declares this PDF/A level (part and
+/// conformance), whatever else a check may say about it.
+pub fn declares_pdfa_level(pdf: &Pdf, level: PdfALevel) -> bool {
+    metadata::read_standards_claims(pdf).pdfa.is_some_and(|claim| claim.part == level.part() && claim.conformance.as_deref().map(str::to_ascii_uppercase) == level.claim().conformance)
+}
+
 pub fn check_pdfa_level(pdf: &Pdf, level: PdfALevel) -> Vec<PreflightIssue> {
     let mut issues = Vec::new();
     let label = level.label();

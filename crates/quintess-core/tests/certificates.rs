@@ -13,11 +13,11 @@ fn visible() -> SignOptions {
 }
 
 fn options_trusting(pki: &Pki) -> VerifyOptions {
-    VerifyOptions { trust: TrustStore::empty().with_certificate(pki.root.der.clone()), now: chrono::Utc::now() }
+    VerifyOptions { trust: TrustStore::empty().with_certificate(pki.root.der.clone()), now: chrono::Utc::now(), password: None }
 }
 
 fn options_trusting_nothing() -> VerifyOptions {
-    VerifyOptions { trust: TrustStore::empty(), now: chrono::Utc::now() }
+    VerifyOptions { trust: TrustStore::empty(), now: chrono::Utc::now(), password: None }
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn trusting_only_the_intermediate_is_enough_and_a_missing_root_is_found_in_the_s
     // The trusted root supplies the missing link.
     assert_eq!(verify_with(&signed, &options_trusting(&pki)).unwrap()[0].verdict, SignatureVerdict::Valid);
 
-    let intermediate_only = VerifyOptions { trust: TrustStore::empty().with_certificate(pki.intermediate.der.clone()), now: chrono::Utc::now() };
+    let intermediate_only = VerifyOptions { trust: TrustStore::empty().with_certificate(pki.intermediate.der.clone()), now: chrono::Utc::now(), password: None };
     let check = &verify_with(&signed, &intermediate_only).unwrap()[0];
     assert_eq!(check.verdict, SignatureVerdict::Valid, "{:?}", check.reasons);
     assert_eq!(check.chain.len(), 2);
@@ -124,7 +124,7 @@ fn the_trusted_list_in_a_folder_is_used_and_can_be_edited() {
     let signed = sign(&sample_document(), &pki.identity(), &visible()).unwrap();
     let folder = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("trusted-certificates-test");
     let _ = std::fs::remove_dir_all(&folder);
-    let verdict = |folder: &std::path::Path| verify_with(&signed, &VerifyOptions { trust: TrustStore::empty().with_trusted_folder(folder), now: chrono::Utc::now() }).unwrap()[0].verdict;
+    let verdict = |folder: &std::path::Path| verify_with(&signed, &VerifyOptions { trust: TrustStore::empty().with_trusted_folder(folder), now: chrono::Utc::now(), password: None }).unwrap()[0].verdict;
 
     assert_eq!(verdict(&folder), SignatureVerdict::ValidButUntrusted);
     let added = validation::add_trusted_certificates(&folder, pki.root.pem().as_bytes()).unwrap();
@@ -154,7 +154,7 @@ fn a_certificate_not_meant_for_signing_documents_is_flagged() {
 fn a_test_authority_is_not_trusted_by_mozillas_list() {
     let pki = Pki::new(LeafOptions::default());
     let signed = sign(&sample_document(), &pki.identity(), &visible()).unwrap();
-    let check = &verify_with(&signed, &VerifyOptions { trust: TrustStore::mozilla(), now: chrono::Utc::now() }).unwrap()[0];
+    let check = &verify_with(&signed, &VerifyOptions { trust: TrustStore::mozilla(), now: chrono::Utc::now(), password: None }).unwrap()[0];
     assert_eq!(check.verdict, SignatureVerdict::ValidButUntrusted);
 }
 
@@ -171,7 +171,7 @@ fn rsa_keys_in_openssl_made_pfx_files_sign_with_modern_and_legacy_encryption() {
         let identity = SigningIdentity::from_pkcs12(&fixture(file), "quintess-test").unwrap_or_else(|e| panic!("{file}: {e:#}"));
         assert_eq!(identity.signer_name(), "Rita RSA Signer", "{file}");
         let signed = sign(&sample_document(), &identity, &visible()).unwrap();
-        let trust = VerifyOptions { trust: TrustStore::empty().with_certificate(validation::certificates_from_bytes(&root).unwrap().remove(0)), now: chrono::Utc::now() };
+        let trust = VerifyOptions { trust: TrustStore::empty().with_certificate(validation::certificates_from_bytes(&root).unwrap().remove(0)), now: chrono::Utc::now(), password: None };
         let check = &verify_with(&signed, &trust).unwrap()[0];
         assert!(check.intact, "{file}: {check:?}");
         assert_eq!(check.chain.len(), 2, "{file}");

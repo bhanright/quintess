@@ -110,6 +110,9 @@ pub struct DocumentTab {
     object_layer_cache: RefCell<HashMap<usize, Rc<Vec<(usize, (u32, u16))>>>>,
     /// Per page, where the pictures that text wraps around are.
     wrap_cache: RefCell<HashMap<usize, Rc<Vec<[f32; 4]>>>>,
+    /// The drawing's own scale at the last point asked about (page and
+    /// point), so measuring doesn't re-read the file every frame.
+    drawing_scale_cache: RefCell<Option<((usize, (f32, f32)), Option<quintess_core::measure::Scale>)>>,
     tag_cache: RefCell<Option<Rc<quintess_core::tag_tree::TagTree>>>,
     reading_order_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::tag_tree::ReadingOrderRegion>>>>,
     /// Number the tagged regions of each page in reading order (Tags panel).
@@ -210,6 +213,7 @@ impl DocumentTab {
             layer_cache: RefCell::new(None),
             object_layer_cache: RefCell::new(HashMap::new()),
             wrap_cache: RefCell::new(HashMap::new()),
+            drawing_scale_cache: RefCell::new(None),
             tag_cache: RefCell::new(None),
             reading_order_cache: RefCell::new(HashMap::new()),
             show_reading_order: false,
@@ -271,6 +275,7 @@ impl DocumentTab {
         *self.layer_cache.borrow_mut() = None;
         self.object_layer_cache.borrow_mut().clear();
         self.wrap_cache.borrow_mut().clear();
+        *self.drawing_scale_cache.borrow_mut() = None;
         *self.tag_cache.borrow_mut() = None;
         self.reading_order_cache.borrow_mut().clear();
         self.textures.clear();
@@ -442,7 +447,6 @@ impl DocumentTab {
         owners
     }
 
-    /// The objects on a page that can be picked: those not on a locked layer.
     /// The accessibility tag tree, with text read through PDFium.
     pub fn tag_tree(&self) -> Rc<quintess_core::tag_tree::TagTree> {
         if let Some(tree) = self.tag_cache.borrow().as_ref() {
@@ -487,15 +491,32 @@ impl DocumentTab {
         bounds
     }
 
+    /// The scale a measurement starting at `point` uses: the drawing's own
+    /// (CAD viewports) when it has one there, else `chosen`. The live value
+    /// and the saved measurement both use this, so they agree.
+    pub fn measuring_scale(&self, page_index: usize, point: (f32, f32), chosen: &quintess_core::measure::Scale) -> quintess_core::measure::Scale {
+        let key = (page_index, point);
+        if let Some((cached_key, scale)) = self.drawing_scale_cache.borrow().as_ref() {
+            if *cached_key == key {
+                return scale.clone().unwrap_or_else(|| chosen.clone());
+            }
+        }
+        let drawing = self.load_pdf().ok().and_then(|pdf| quintess_core::measure::viewport_scale(&pdf, page_index as u32 + 1, point));
+        *self.drawing_scale_cache.borrow_mut() = Some((key, drawing.clone()));
+        drawing.unwrap_or_else(|| chosen.clone())
+    }
+
     /// Whether text wraps around a picture at these bounds (within a point).
     pub fn text_wraps_around(&self, page_index: usize, bounds: [f32; 4]) -> bool {
         self.wrapping_bounds(page_index).iter().any(|wrapped| wrapped.iter().zip(bounds).all(|(a, b)| (a - b).abs() < 1.0))
     }
 
+    /// The objects on a page that can be picked: those not on a locked
+    /// layer, nor on a hidden one (which would be picked unseen).
     pub fn pickable_objects(&self, page_index: usize) -> Vec<quintess_core::objects::PageObject> {
-        let locked: Vec<(u32, u16)> = self.layers().iter().filter(|layer| layer.locked).map(|layer| layer.id).collect();
+        let out_of_reach: Vec<(u32, u16)> = self.layers().iter().filter(|layer| layer.locked || !layer.visible).map(|layer| layer.id).collect();
         let owners = self.object_layers(page_index);
-        self.page_objects(page_index).iter().filter(|object| !owners.iter().any(|(start, layer)| *start == object.start && locked.contains(layer))).cloned().collect()
+        self.page_objects(page_index).iter().filter(|object| !owners.iter().any(|(start, layer)| *start == object.start && out_of_reach.contains(layer))).cloned().collect()
     }
 
     pub fn pdfium_document(&self) -> Option<&PdfDocument<'static>> {
@@ -640,6 +661,24 @@ mod tests {
         assert!(checks.iter().all(|check| check.intact), "{checks:?}");
         assert_eq!(tab.take_signature_notice(), Some(SignatureNotice::KeptValid));
         assert_eq!(tab.take_signature_notice(), None, "told once");
+    }
+
+    /// The live value and the saved measurement both ask this, so a CAD
+    /// drawing's own scale is used for both.
+    #[test]
+    fn measuring_uses_the_drawings_scale_where_it_has_one() {
+        use quintess_core::lopdf::{Object, dictionary};
+        use quintess_core::measure::Scale;
+        let mut pdf = quintess_core::create::blank_document(1, (612.0, 792.0)).unwrap();
+        let page_id = pdf.page_id(1).unwrap();
+        let measure = Scale::parse("1 in = 4 ft").unwrap().measure_dictionary();
+        let viewport = dictionary! { "Type" => "Viewport", "BBox" => vec![Object::Real(50.0), Object::Real(50.0), Object::Real(550.0), Object::Real(700.0)], "Measure" => measure };
+        pdf.doc.get_dictionary_mut(page_id).unwrap().set("VP", vec![Object::Dictionary(viewport)]);
+        let tab = DocumentTab::open(1, None, pdf.to_bytes(&SaveSettings::default()).unwrap(), None).unwrap();
+        let chosen = Scale::parse("1 in = 10 ft").unwrap();
+        assert_eq!(tab.measuring_scale(0, (300.0, 300.0), &chosen).label(), "1 in = 4 ft");
+        assert_eq!(tab.measuring_scale(0, (300.0, 300.0), &chosen).label(), "1 in = 4 ft", "from the cache too");
+        assert_eq!(tab.measuring_scale(0, (10.0, 10.0), &chosen).label(), "1 in = 10 ft", "outside the drawing");
     }
 
     #[test]

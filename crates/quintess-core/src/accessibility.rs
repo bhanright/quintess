@@ -80,7 +80,7 @@ pub fn check(pdf: &Pdf, document: &pdfium_render::prelude::PdfDocument) -> Vec<C
     checks.push(Check {
         name: "Tagged PDF",
         status: if tagged { CheckStatus::Passed } else { CheckStatus::Failed },
-        detail: if tagged { "The document has a structure tree for screen readers.".into() } else { "No structure tags: screen readers must guess the reading order. Re-export from the authoring program with tags turned on.".into() },
+        detail: if tagged { "The document has a structure tree for screen readers.".into() } else { "No structure tags: screen readers must guess the reading order. Add tags from the layout (Tools ▸ Accessibility ▸ Add tags to document, or `quintess tags --autotag`) and check them in the Tags panel, or re-export from the authoring program with tags turned on.".into() },
         fixable: false,
     });
     let info = crate::metadata::read_info(pdf);

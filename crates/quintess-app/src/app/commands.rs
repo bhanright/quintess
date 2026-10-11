@@ -188,7 +188,7 @@ pub(super) const COMMANDS: &[Command] = &[
     }),
     command("Tools ▸ Sign", "Check signatures", |app, _| {
         if let Some(tab) = app.tabs.get(app.active) {
-            let result = quintess_core::signatures::verify(&tab.bytes);
+            let result = quintess_core::signatures::verify_protected(&tab.bytes, tab.password.as_deref());
             if let Some(checks) = app.report(result) {
                 app.dialogs.push(Dialog::SignatureResults(checks));
             }

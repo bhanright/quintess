@@ -198,6 +198,15 @@ fn profile_usable_for(level: PdfXLevel, profile: &ProfileSummary) -> bool {
     }
 }
 
+/// Whether the file declares this PDF/X level, in both places the standard
+/// asks for (the information dictionary and the XMP metadata).
+pub fn declares_pdfx_level(pdf: &Pdf, level: PdfXLevel) -> bool {
+    let label = level.label();
+    let info = pdf.info_dictionary().unwrap_or_default();
+    let in_info = info.get(b"GTS_PDFXVersion").ok().and_then(crate::strings::object_to_text).as_deref() == Some(label);
+    in_info && metadata::read_standards_claims(pdf).pdfx_version.as_deref() == Some(label)
+}
+
 /// Checks a file against `level`, assuming the conversion would be given no output profile.
 pub fn check_pdfx(pdf: &Pdf, level: PdfXLevel) -> Vec<PreflightIssue> {
     check_pdfx_with(pdf, level, &PdfXOptions::default())

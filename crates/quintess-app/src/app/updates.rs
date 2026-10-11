@@ -42,16 +42,21 @@ impl QuintessApp {
     /// always reports its result; an automatic one speaks only when there is
     /// something new (and not a version the person chose to skip).
     pub(super) fn check_for_updates(&mut self, ctx: &egui::Context, manual: bool) {
-        self.settings.last_update_check = Some(chrono::Local::now().to_rfc3339());
-        let _ = self.settings.save();
         self.start_job(ctx, "Checking for updates", move |_| match updates::newer_release() {
-            Ok(found) => Ok(JobOutcome::UpdateChecked { found, manual }),
+            Ok(found) => Ok(JobOutcome::UpdateChecked { found, manual, reached: true }),
             Err(error) if manual => Err(error),
-            Err(_) => Ok(JobOutcome::UpdateChecked { found: None, manual: false }),
+            // An automatic check fails quietly, and is tried again at the next start.
+            Err(_) => Ok(JobOutcome::UpdateChecked { found: None, manual: false, reached: false }),
         });
     }
 
-    pub(super) fn update_checked(&mut self, found: Option<Release>, manual: bool) {
+    /// `reached`: GitHub answered. Only then does the next automatic check
+    /// wait a day; a failed one is tried again the next time Quintess starts.
+    pub(super) fn update_checked(&mut self, found: Option<Release>, manual: bool, reached: bool) {
+        if reached {
+            self.settings.last_update_check = Some(chrono::Local::now().to_rfc3339());
+            let _ = self.settings.save();
+        }
         match found {
             Some(release) if manual || self.settings.skipped_version.as_deref() != Some(release.version.as_str()) => self.update_window = Some(UpdateWindow::Available(release)),
             Some(_) => {}

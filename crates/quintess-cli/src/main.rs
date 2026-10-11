@@ -1034,7 +1034,7 @@ fn save_removing(pdf: &mut Pdf, input: &Input, output: &Output) -> Result<PathBu
 pub(crate) fn save_edit(pdf: &mut Pdf, input: &Input, output: &Output, edit: Edit) -> Result<PathBuf> {
     let target = output.output.clone().unwrap_or_else(|| input.input.clone());
     let original = std::fs::read(&input.input).unwrap_or_default();
-    let signed = !original.is_empty() && quintess_core::signatures::verify(&original).is_ok_and(|checks| !checks.is_empty());
+    let signed = !original.is_empty() && quintess_core::signatures::verify_protected(&original, input.password.as_deref()).is_ok_and(|checks| !checks.is_empty());
     if edit == Edit::Unprotects {
         pdf.forget_encryption();
     } else if pdf.original_encryption().is_none() {

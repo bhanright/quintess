@@ -37,7 +37,13 @@ pub(super) struct ReadAloud {
 }
 
 impl ReadAloud {
+    /// Reads the current passage from its start, unless paused: Skip, a
+    /// new speed or a new voice while paused wait for Resume, so the button
+    /// keeps telling the truth and reading moves on afterwards.
     fn speak_current(&mut self) {
+        if self.paused {
+            return;
+        }
         if let Some(passage) = &self.current {
             let _ = self.speaker.speak(passage.text.clone(), true);
             self.started_at = Instant::now();

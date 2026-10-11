@@ -104,7 +104,8 @@ fn screen_point(geometry: &PageGeometry, page_rect: Rect, zoom: f32, (x, y): (f3
 }
 
 /// The points so far, the line to the pointer, and the live value.
-pub fn draw(ui: &egui::Ui, state: &MeasureToolState, settings: &MeasureSettings, page_index: usize, geometry: &PageGeometry, page_rect: Rect, zoom: f32) {
+#[allow(clippy::too_many_arguments)]
+pub fn draw(ui: &egui::Ui, tab: &crate::tab::DocumentTab, state: &MeasureToolState, settings: &MeasureSettings, page_index: usize, geometry: &PageGeometry, page_rect: Rect, zoom: f32) {
     let painter = ui.painter_at(page_rect);
     let accent = crate::theme::highlight();
     let pointer = ui.ctx().pointer_hover_pos().filter(|p| page_rect.contains(*p));
@@ -130,7 +131,9 @@ pub fn draw(ui: &egui::Ui, state: &MeasureToolState, settings: &MeasureSettings,
     }
     // The value next to the pointer.
     let shown_points = if kind == MeasureKind::Distance { &points[points.len().saturating_sub(2)..] } else { &points[..] };
-    let value = if state.calibrating { "calibrating: measure a known length".to_string() } else { measure(kind, shown_points, &settings.scale) };
+    // The scale the saved measurement will use, so the two agree.
+    let scale = tab.measuring_scale(page_index, state.points[0], &settings.scale);
+    let value = if state.calibrating { "calibrating: measure a known length".to_string() } else { measure(kind, shown_points, &scale) };
     if let Some(at) = on_screen.last() {
         let galley = painter.layout_no_wrap(value, egui::FontId::proportional(13.0), Color32::WHITE);
         let plate = Rect::from_min_size(*at + vec2(14.0, 10.0), galley.size() + vec2(10.0, 6.0));

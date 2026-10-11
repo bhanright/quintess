@@ -516,7 +516,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
                     crate::object_tool::draw(ui, tab, &mut state.objects, page_index, geometry, screen_rect, zoom, &mut actions);
                 }
                 if tool == Tool::Measure {
-                    crate::measure_tool::draw(ui, &state.measure, &settings.measure, page_index, geometry, screen_rect, zoom);
+                    crate::measure_tool::draw(ui, tab, &state.measure, &settings.measure, page_index, geometry, screen_rect, zoom);
                 }
             }
         }

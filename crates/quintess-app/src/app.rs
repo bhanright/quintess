@@ -949,7 +949,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             if report.pages_recognized.is_empty() {
                 return Ok(JobOutcome::Message("Every page already has text; nothing to recognize.".into()));
             }
-            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words)", report.words), bytes: pdf.to_bytes(&SaveSettings::default())?, removes_content: false })
+            // Pages that already had text are left alone; say so.
+            let pages = |count: usize| if count == 1 { "1 page".to_string() } else { format!("{count} pages") };
+            let skipped = match report.pages_skipped.len() {
+                0 => String::new(),
+                1 => format!("; page {} already had text", report.pages_skipped[0]),
+                count => format!("; {} already had text", pages(count)),
+            };
+            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words on {}{skipped})", report.words, pages(report.pages_recognized.len())), bytes: pdf.to_bytes(&SaveSettings::default())?, removes_content: false })
         };
         if record {
             self.start_recorded_job(ctx, "Recognizing text", quintess_core::batch::Step::Ocr { dpi: None }, work);
@@ -971,10 +978,21 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn start_compare(&mut self, ctx: &egui::Context) {
-        let Some((_, bytes, password, title)) = self.job_input() else { return };
         let Some(other) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_title("Compare with which version?").pick_file() else { return };
+        let Some(other_bytes) = self.report(std::fs::read(&other).map_err(anyhow::Error::from)) else { return };
+        // A protected older version needs its own password first.
+        if quintess_core::security::inspect_security(&other_bytes).needs_password_to_open {
+            self.dialogs.push(Dialog::ComparePassword { path: other, password: String::new(), error: String::new() });
+            return;
+        }
+        self.compare_with(ctx, other, other_bytes, None);
+    }
+
+    /// Compares the active document with an older version of it.
+    fn compare_with(&mut self, ctx: &egui::Context, other: PathBuf, other_bytes: Vec<u8>, other_password: Option<String>) {
+        let Some((_, bytes, password, title)) = self.job_input() else { return };
         self.start_job(ctx, "Comparing", move |_| {
-            let old_document = quintess_core::engine::open_document(std::fs::read(&other)?, None)?;
+            let old_document = quintess_core::engine::open_document(other_bytes, other_password.as_deref())?;
             let new_document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
             let result = quintess_core::compare::compare(&old_document, &new_document, 100.0)?;
             let other_name = other.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1021,22 +1039,25 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         anyhow::bail!("no tables were found in this document");
                     }
                     for (index, table) in tables.iter().enumerate() {
-                        std::fs::write(path.join(format!("{stem} page {} table {}.csv", table.page_index + 1, index + 1)), table.to_csv()?)?;
+                        let file = path.join(format!("{stem} page {} table {}.csv", table.page_index + 1, index + 1));
+                        quintess_core::document::write_file_safely(&file, table.to_csv()?.as_bytes())?;
                     }
                     return Ok(JobOutcome::Message(format!("Wrote {} table{} to {}", tables.len(), if tables.len() == 1 { "" } else { "s" }, path.display())));
                 }
                 _ => {}
             }
             let structure = quintess_core::convert::analyze(&document, true)?;
-            match format {
-                "docx" => std::fs::write(&path, quintess_core::convert::to_docx(&structure)?)?,
-                "html" => std::fs::write(&path, quintess_core::convert::to_html(&structure, &stem))?,
+            // Through a temporary file, so a failure midway never leaves half a file.
+            let bytes = match format {
+                "docx" => quintess_core::convert::to_docx(&structure)?,
+                "html" => quintess_core::convert::to_html(&structure, &stem).into_bytes(),
                 _ => {
                     let folder = path.with_file_name(format!("{stem}-images"));
                     let link = format!("{stem}-images/");
-                    std::fs::write(&path, quintess_core::convert::to_markdown(&structure, Some((folder.as_path(), link.as_str())))?)?
+                    quintess_core::convert::to_markdown(&structure, Some((folder.as_path(), link.as_str())))?.into_bytes()
                 }
-            }
+            };
+            quintess_core::document::write_file_safely(&path, &bytes)?;
             Ok(JobOutcome::Message(format!("Exported to {}", path.display())))
         });
     }
@@ -1144,7 +1165,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             JobOutcome::Comparison { summary, report_path } => self.dialogs.push(Dialog::ComparisonResult { summary, report_path }),
             JobOutcome::Message(message) => self.info(message),
             JobOutcome::FolderSearch(results) => self.dialogs.push(Dialog::FolderResults(results)),
-            JobOutcome::UpdateChecked { found, manual } => self.update_checked(found, manual),
+            JobOutcome::UpdateChecked { found, manual, reached } => self.update_checked(found, manual, reached),
             JobOutcome::UpdateDownloaded { path, verified, version } => self.update_window = Some(updates::UpdateWindow::Ready { path, verified, version }),
             JobOutcome::Spelling { tab_id, found } => self.spelling_checked(tab_id, found),
             JobOutcome::Signatures(checks) => self.dialogs.push(Dialog::SignatureResults(checks)),
@@ -1385,7 +1406,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let before = tab.bytes.len();
         let result = tab.load_pdf().and_then(|mut pdf| {
             let bytes = pdf.to_bytes(&SaveSettings { compress_streams: true, use_object_streams: true, remove_unused_objects: true })?;
-            std::fs::write(&path, &bytes)?;
+            quintess_core::document::write_file_safely(&path, &bytes)?;
             Ok(bytes.len())
         });
         if let Some(after) = self.report(result) {
@@ -1592,8 +1613,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// Tags the document from its layout, reading text through PDFium, and
     /// says what was guessed.
     fn auto_tag(&mut self, replace_existing_tags: bool) {
-        // Used only when the document names no language: the one chosen for spelling.
-        let language = Some(self.settings.spelling_language.clone()).filter(|language| !language.is_empty());
+        // Used only when the document names no language: the Document language
+        // preference, the same one Fix automatically uses.
+        let language = Some(self.settings.language.clone()).filter(|language| !language.trim().is_empty());
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let options = quintess_core::auto_tag::AutoTagOptions { language, replace_existing_tags };
         let result = tab.load_pdf().and_then(|mut pdf| {
@@ -2037,10 +2059,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 ViewerAction::AddMeasurement { page_index, kind, points } => {
-                    // A drawing's own scale wins over the one chosen here.
+                    // A drawing's own scale wins over the one chosen here,
+                    // as in the live value shown while measuring.
                     let page = page_index as u32 + 1;
-                    let drawing_scale = self.tab().and_then(|tab| tab.load_pdf().ok()).and_then(|pdf| quintess_core::measure::viewport_scale(&pdf, page, points[0]));
-                    let scale = drawing_scale.unwrap_or_else(|| self.tool_settings.measure.scale.clone());
+                    let chosen = self.tool_settings.measure.scale.clone();
+                    let Some(scale) = self.tabs.get(self.active).map(|tab| tab.measuring_scale(page_index, points[0], &chosen)) else { continue };
                     let annotation = quintess_core::annotations::NewAnnotation::new(quintess_core::annotations::AnnotationKind::Measurement { kind, points, scale, border_width: self.tool_settings.stroke_width.min(2.0) }).with_color(self.tool_settings.color);
                     self.edit("Measure", |pdf| quintess_core::annotations::add_annotation(pdf, page, &annotation).map(|_| ()));
                 }
@@ -2176,6 +2199,15 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 AppRequest::RemoveProtection { owner_password } => self.remove_protection(Some(owner_password)),
+                AppRequest::CompareWithPassword { path, password } => {
+                    let Some(bytes) = self.report(std::fs::read(&path).map_err(anyhow::Error::from)) else { continue };
+                    if quintess_core::Pdf::from_bytes(&bytes, Some(&password)).is_err() {
+                        self.dialogs.push(Dialog::ComparePassword { path, password: String::new(), error: "That password is not correct.".into() });
+                        continue;
+                    }
+                    let ctx = self.worker_context.clone();
+                    self.compare_with(&ctx, path, bytes, Some(password));
+                }
                 AppRequest::SaveAndClose { tab_ids, quitting } => self.save_and_close(tab_ids, quitting),
                 AppRequest::CloseDiscarding { tab_ids, quitting } => self.close_discarding(tab_ids, quitting),
                 AppRequest::StartOptimize { settings, step } => {
@@ -2294,7 +2326,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     if self.report(result).is_some() {
                         self.info("Trusted. Signatures by this certificate, or certificates it issued, now show as valid. Edit ▸ Preferences can remove it.");
                         if let Some(tab) = self.tabs.get(self.active) {
-                            let checks = quintess_core::signatures::verify(&tab.bytes);
+                            let checks = quintess_core::signatures::verify_protected(&tab.bytes, tab.password.as_deref());
                             if let Some(checks) = self.report(checks) {
                                 // The results shown before trusting give way to fresh ones.
                                 self.dialogs.retain(|dialog| !matches!(dialog, Dialog::SignatureResults(_)));
@@ -2312,10 +2344,10 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
                 AppRequest::CheckRevocation => {
                     let Some(tab) = self.tabs.get(self.active) else { continue };
-                    let bytes = tab.bytes.clone();
+                    let (bytes, password) = (tab.bytes.clone(), tab.password.clone());
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Checking for revocation", move |_| {
-                        let mut checks = quintess_core::signatures::verify(&bytes)?;
+                        let mut checks = quintess_core::signatures::verify_protected(&bytes, password.as_deref())?;
                         let transport = quintess_core::net::NetworkTransport::new(std::time::Duration::from_secs(20));
                         for check in &mut checks {
                             quintess_core::signatures::check_revocation_online(check, &transport);
@@ -2416,7 +2448,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.start_job(&ctx, "Printing", move |progress| {
                         let document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
                         quintess_core::print::print(&document, &title, &settings, |done, total| progress(done, total))?;
-                        Ok(JobOutcome::Message(format!("Sent {} sheets to {printer}.", settings.pages.len() as u32 * settings.copies.max(1))))
+                        // Pages, not sheets: two-sided and fit settings change the sheet count.
+                        let pages = settings.pages.len();
+                        let copies = settings.copies.max(1);
+                        let copies_note = if copies > 1 { format!(", {copies} copies") } else { String::new() };
+                        Ok(JobOutcome::Message(format!("Sent {pages} page{}{copies_note} to {printer}.", if pages == 1 { "" } else { "s" })))
                     });
                 }
                 AppRequest::StartFindReplace { pattern, replacement } => {
@@ -2457,7 +2493,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         continue;
                     }
                     self.record(quintess_core::batch::Step::PdfA);
-                    self.dialogs.push(Dialog::PreflightResults(remaining));
+                    // Read back from the converted file rather than guessed from the list.
+                    let marked = self.tabs.get(self.active).and_then(|tab| tab.load_pdf().ok()).is_some_and(|pdf| quintess_core::preflight::declares_pdfa_level(&pdf, quintess_core::preflight::PdfALevel::A2b));
+                    self.dialogs.push(Dialog::PdfAConversion { issues: remaining, marked });
                 }
             }
         }

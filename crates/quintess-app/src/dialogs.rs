@@ -32,6 +32,8 @@ pub enum AppRequest {
     UnlockAndOpen { path: PathBuf, bytes: Vec<u8>, password: String },
     /// Remove the protection, with the permissions password typed for it.
     RemoveProtection { owner_password: String },
+    /// Compare with an older version that needs this password to open.
+    CompareWithPassword { path: PathBuf, password: String },
     /// Save these documents (by tab id), then close them, or quit when
     /// `quitting`. Stops at the first one not saved.
     SaveAndClose { tab_ids: Vec<u64>, quitting: bool },
@@ -169,6 +171,8 @@ pub enum Dialog {
     Password { path: PathBuf, bytes: Vec<u8>, password: String, error: String },
     /// Asks for the permissions (owner) password before protection comes off.
     PermissionsPassword { password: String, error: String },
+    /// Asks for the password of the older version chosen for Compare.
+    ComparePassword { path: PathBuf, password: String, error: String },
     /// Closing a document, or quitting, with changes not saved. Tabs are
     /// named by id, since closing others moves their positions.
     UnsavedChanges { tab_ids: Vec<u64>, titles: Vec<String>, quitting: bool },
@@ -200,7 +204,9 @@ pub enum Dialog {
     /// Making a PDF from another kind of file, or a web page.
     Convert(Box<ConvertDialog>),
     AccessibilityResults(Vec<quintess_core::accessibility::Check>),
-    PreflightResults(Vec<quintess_core::preflight::PreflightIssue>),
+    /// After Convert to PDF/A-2b: whether the file is now marked as
+    /// PDF/A-2b, and the problems the check still lists.
+    PdfAConversion { issues: Vec<quintess_core::preflight::PreflightIssue>, marked: bool },
     ComparisonResult { summary: String, report_path: PathBuf },
     Print(PrintDialog),
     FindReplace { find: String, replace: String, use_regex: bool, match_case: bool },
@@ -373,6 +379,7 @@ impl Dialog {
             Dialog::Password { .. } => "Password required",
             Dialog::ConfirmTrust { .. } => "Trust this certificate?",
             Dialog::PermissionsPassword { .. } => "Permissions password required",
+            Dialog::ComparePassword { .. } => "Password required",
             Dialog::UnsavedChanges { .. } => "Unsaved changes",
             Dialog::About => "About Quintess",
             Dialog::Preferences(_) => "Preferences",
@@ -398,7 +405,7 @@ impl Dialog {
             Dialog::Convert(convert) if convert.web_page => "Create a PDF from a web page",
             Dialog::Convert(_) => "Create a PDF from a file",
             Dialog::AccessibilityResults(_) => "Accessibility check",
-            Dialog::PreflightResults(_) => "PDF/A check",
+            Dialog::PdfAConversion { .. } => "Convert to PDF/A-2b",
             Dialog::ComparisonResult { .. } => "Comparison",
             Dialog::Print(_) => "Print",
             Dialog::FindReplace { .. } => "Find and replace text",
@@ -1402,20 +1409,22 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             return Ok(());
         }
-        Dialog::PreflightResults(issues) => {
-            if issues.is_empty() {
-                ui.label("No PDF/A problems were found by this check. A full validator such as veraPDF examines more rules.");
-            }
+        Dialog::PdfAConversion { issues, marked } => {
+            let headline = match (*marked, issues.is_empty()) {
+                (true, true) => "Converted and marked as PDF/A-2b. Save to keep it.",
+                (true, false) => "Converted and marked as PDF/A-2b; save to keep it. The check still lists these items, which Quintess could not settle:",
+                (false, _) => "Converted what could be fixed, but the document is not marked as PDF/A-2b, because these problems remain:",
+            };
+            ui.label(RichText::new(headline).strong());
             for issue in issues.iter() {
                 ui.label(RichText::new(issue.rule).strong());
                 ui.label(&issue.detail);
                 ui.add_space(4.0);
             }
+            if *marked {
+                ui.weak("A full validator such as veraPDF examines more rules than this check.");
+            }
             ui.horizontal(|ui| {
-                if issues.iter().any(|i| i.fixable) && ui.button("Convert to PDF/A-2b").clicked() {
-                    outcome.requests.push(AppRequest::ConvertToPdfA);
-                    outcome.keep_open = false;
-                }
                 if ui.button("Close").clicked() {
                     outcome.keep_open = false;
                 }
@@ -1478,6 +1487,20 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.weak("Edit ▸ Preferences lists the certificates you trust, and removes them.");
             if buttons(ui, "Trust", outcome) {
                 outcome.requests.push(AppRequest::TrustCertificate(certificate_der.clone()));
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::ComparePassword { path, password, error } => {
+            ui.label(format!("{} is protected. Enter its password to compare with it.", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
+            let response = ui.add(egui::TextEdit::singleline(password).password(true).desired_width(f32::INFINITY));
+            response.request_focus();
+            if !error.is_empty() {
+                ui.colored_label(egui::Color32::from_rgb(200, 60, 60), error.as_str());
+            }
+            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if buttons(ui, "Compare", outcome) || pressed_enter {
+                outcome.requests.push(AppRequest::CompareWithPassword { path: path.clone(), password: password.clone() });
                 outcome.keep_open = false;
             }
             return Ok(());
@@ -2589,12 +2612,17 @@ impl ConvertDialog {
     pub fn new(web_page: bool, file: Option<std::path::PathBuf>) -> Self {
         let providers = quintess_core::conversion::available_providers();
         let mut dialog = ConvertDialog { web_page, file, address: String::new(), providers, provider: None, allow_office: false };
-        dialog.provider = dialog.suitable().first().map(|info| info.provider);
-        // Prefer a higher-fidelity converter when one is installed.
-        if let Some(better) = dialog.suitable().into_iter().find(|info| info.provider != quintess_core::conversion::Provider::BuiltIn && info.provider != quintess_core::conversion::Provider::MicrosoftOffice) {
-            dialog.provider = Some(better.provider);
-        }
+        dialog.provider = dialog.preferred_provider();
         dialog
+    }
+
+    /// The converter to start with: a higher-fidelity one when installed,
+    /// except Microsoft Office, which is used only when chosen by hand.
+    fn preferred_provider(&self) -> Option<quintess_core::conversion::Provider> {
+        use quintess_core::conversion::Provider;
+        let suitable = self.suitable();
+        let without_office = || suitable.iter().filter(|info| info.provider != Provider::MicrosoftOffice);
+        without_office().find(|info| info.provider != Provider::BuiltIn).or_else(|| without_office().next()).or(suitable.first()).map(|info| info.provider)
     }
 
     fn format(&self) -> Option<quintess_core::conversion::InputFormat> {
@@ -2627,11 +2655,10 @@ impl ConvertDialog {
                     ui.weak(format.description());
                 }
                 if ui.button("Choose…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().add_filter("Documents", &["docx", "doc", "odt", "rtf", "xlsx", "xls", "xlsb", "ods", "csv", "tsv", "pptx", "ppt", "odp", "html", "htm", "md", "txt"]).pick_file() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Documents and pictures", quintess_core::conversion::InputFormat::EXTENSIONS).pick_file() {
                         self.file = Some(path);
-                        let suitable = self.suitable();
-                        if !suitable.iter().any(|info| Some(info.provider) == self.provider) {
-                            self.provider = suitable.first().map(|info| info.provider);
+                        if !self.suitable().iter().any(|info| Some(info.provider) == self.provider) {
+                            self.provider = self.preferred_provider();
                         }
                     }
                 }
@@ -2640,7 +2667,9 @@ impl ConvertDialog {
         ui.add_space(6.0);
         ui.label(RichText::new("Converter").strong());
         let suitable = self.suitable();
-        if suitable.is_empty() {
+        if suitable.is_empty() && self.web_page {
+            ui.label("Web pages are printed with Microsoft Edge or Google Chrome, and neither was found. Install one of them to make PDFs from web pages.");
+        } else if suitable.is_empty() {
             ui.label("No installed converter handles this kind of file. Installing LibreOffice (free) adds presentations, older Office files and more.");
         }
         for info in &suitable {
@@ -2658,7 +2687,13 @@ impl ConvertDialog {
         if self.provider == Some(Provider::MicrosoftOffice) {
             ui.checkbox(&mut self.allow_office, "Let Quintess open this document in Microsoft Office to convert it");
         }
-        ui.weak("Converters run with the network blocked for files on your computer and are stopped after two minutes. Quintess says which one it used and what it left out.");
+        let network_note = match self.provider {
+            _ if self.web_page => "The browser fetches the page from the internet.",
+            Some(Provider::MicrosoftOffice) => "Microsoft Office opens the document as it normally would, network included.",
+            Some(Provider::BuiltIn) => "The built-in converter never uses the network.",
+            _ => "It runs with the network blocked.",
+        };
+        ui.weak(format!("{network_note} Converters are stopped after two minutes. Quintess says which one it used and what it left out."));
     }
 
     fn check(&self) -> anyhow::Result<()> {

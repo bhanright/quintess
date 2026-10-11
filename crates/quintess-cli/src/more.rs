@@ -662,31 +662,31 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     let image_folder = path.with_file_name(format!("{stem}-images"));
                     let link = format!("{stem}-images/");
                     let markdown = convert::to_markdown(&structure, (!no_images).then_some((image_folder.as_path(), link.as_str())))?;
-                    std::fs::write(&path, markdown)?;
+                    quintess_core::document::write_file_safely(&path, markdown.as_bytes())?;
                     println!("wrote {}", path.display());
                 }
                 "html" => {
                     let structure = convert::analyze(&document, !no_images)?;
                     let path = target("html");
-                    std::fs::write(&path, convert::to_html(&structure, &stem))?;
+                    quintess_core::document::write_file_safely(&path, convert::to_html(&structure, &stem).as_bytes())?;
                     println!("wrote {}", path.display());
                 }
                 "docx" | "word" => {
                     let structure = convert::analyze(&document, !no_images)?;
                     let path = target("docx");
-                    std::fs::write(&path, convert::to_docx(&structure)?)?;
+                    quintess_core::document::write_file_safely(&path, &convert::to_docx(&structure)?)?;
                     println!("wrote {}", path.display());
                 }
                 "xlsx" | "excel" => {
                     let path = target("xlsx");
                     let bytes = if tables_only { spreadsheet::document_tables_to_xlsx(&document) } else { spreadsheet::document_to_xlsx(&document) };
-                    std::fs::write(&path, bytes.context("could not make the workbook")?)?;
+                    quintess_core::document::write_file_safely(&path, &bytes.context("could not make the workbook")?)?;
                     println!("wrote {}", path.display());
                 }
                 "pptx" | "powerpoint" => {
                     let path = target("pptx");
                     let mode = if editable { SlideMode::Editable } else { SlideMode::Pictures };
-                    std::fs::write(&path, presentation::document_to_pptx(&document, &PresentationSettings { mode, picture_dpi: dpi })?)?;
+                    quintess_core::document::write_file_safely(&path, &presentation::document_to_pptx(&document, &PresentationSettings { mode, picture_dpi: dpi })?)?;
                     println!("wrote {}", path.display());
                 }
                 "csv" => {
@@ -700,14 +700,14 @@ pub fn run(command: MoreCommand) -> Result<()> {
                             bail!("there is no table {wanted}; {} found (see `quintess tables`)", found.len());
                         };
                         let path = target("csv");
-                        std::fs::write(&path, chosen.to_csv()?)?;
+                        quintess_core::document::write_file_safely(&path, chosen.to_csv()?.as_bytes())?;
                         println!("wrote {}", path.display());
                     } else {
                         let folder = output.clone().unwrap_or_else(|| input.input.with_file_name(format!("{stem}-tables")));
                         std::fs::create_dir_all(&folder)?;
                         for (chosen, number) in found.iter().zip(numbers) {
                             let path = folder.join(format!("{stem}-page{}-table{number}.csv", chosen.page_index + 1));
-                            std::fs::write(&path, chosen.to_csv()?)?;
+                            quintess_core::document::write_file_safely(&path, chosen.to_csv()?.as_bytes())?;
                             println!("wrote {}", path.display());
                         }
                     }
@@ -866,7 +866,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             println!("wrote {} (signed by {}{})", target.display(), identity.signer_name(), if timestamp.is_some() { ", with a trusted timestamp" } else { "" });
         }
         MoreCommand::Verify { input, check_revocation, json } => {
-            let mut checks = signatures::verify(&std::fs::read(&input.input)?)?;
+            let mut checks = signatures::verify_protected(&std::fs::read(&input.input)?, input.password.as_deref())?;
             if check_revocation {
                 let transport = quintess_core::net::NetworkTransport::default();
                 for check in &mut checks {

@@ -115,6 +115,11 @@ pub enum InputFormat {
 }
 
 impl InputFormat {
+    /// Every file extension `from_path` recognizes, for file pickers.
+    pub const EXTENSIONS: &'static [&'static str] = &[
+        "docx", "docm", "dotx", "doc", "rtf", "odt", "xlsx", "xlsm", "xlsb", "xls", "ods", "csv", "tsv", "pptx", "ppt", "odp", "html", "htm", "xhtml", "txt", "text", "log", "md", "markdown", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp",
+    ];
+
     pub fn from_path(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
         Some(match extension.as_str() {
@@ -509,6 +514,16 @@ mod tests {
         assert_eq!(InputFormat::from_path(Path::new("b.ods")), Some(InputFormat::Spreadsheet));
         assert_eq!(InputFormat::from_path(Path::new("c.htm")), Some(InputFormat::Html));
         assert_eq!(InputFormat::from_path(Path::new("d.xyz")), None);
+    }
+
+    #[test]
+    fn the_picker_list_matches_what_is_recognized() {
+        for extension in InputFormat::EXTENSIONS {
+            assert!(InputFormat::from_path(Path::new(&format!("file.{extension}"))).is_some(), "{extension} is listed but not recognized");
+        }
+        for extension in ["docm", "dotx", "xlsm", "xhtml", "markdown", "log", "png", "webp"] {
+            assert!(InputFormat::EXTENSIONS.contains(&extension), "{extension} is recognized but not offered");
+        }
     }
 
     #[test]

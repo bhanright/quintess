@@ -158,10 +158,13 @@ fn pdfa_1_refuses_transparency_and_says_so_while_later_parts_accept_it() {
     assert!(remaining.iter().any(|issue| issue.rule == "No transparency" && !issue.fixable), "{remaining:#?}");
     assert!(remaining.iter().any(|issue| issue.rule == "PDF/A identification" && issue.detail.contains("Not declared")));
     assert!(metadata::read_standards_claims(&pdf).pdfa.is_none(), "no false claim");
+    assert!(!preflight::declares_pdfa_level(&pdf, PdfALevel::A1b));
 
     let mut pdf = transparent_page().with_title().pdf;
     assert!(preflight::convert_to_pdfa_level(&mut pdf, PdfALevel::A2b).unwrap().is_empty());
     assert!(metadata::read_standards_claims(&pdf).pdfa.is_some());
+    assert!(preflight::declares_pdfa_level(&pdf, PdfALevel::A2b));
+    assert!(!preflight::declares_pdfa_level(&pdf, PdfALevel::A2u), "the conformance letter counts");
 }
 
 #[test]
@@ -292,6 +295,7 @@ fn pdfx_4_converts_a_plain_file_with_srgb_when_no_profile_is_given() {
     assert!(rules.contains(&"Output intent") && rules.contains(&"Trim box") && rules.contains(&"PDF/X identification") && rules.contains(&"Trapped"), "{rules:?}");
     let conversion = pdfx::convert_to_pdfx(&mut pdf, PdfXLevel::X4, &PdfXOptions::default()).unwrap();
     assert!(conversion.remaining.is_empty() && conversion.declared, "{conversion:#?}");
+    assert!(pdfx::declares_pdfx_level(&pdf, PdfXLevel::X4) && !pdfx::declares_pdfx_level(&pdf, PdfXLevel::X1a2003));
     let page_id = pdf.page_ids()[0];
     assert!(pdf.doc.get_dictionary(page_id).unwrap().has(b"TrimBox"));
     let info = pdf.info_dictionary().unwrap();
@@ -311,7 +315,7 @@ fn pdfx_4_converts_a_plain_file_with_srgb_when_no_profile_is_given() {
 fn pdfx_1a_needs_a_cmyk_profile_and_says_so_without_one() {
     let mut pdf = Builder::new(TEXT).with_title().pdf;
     let conversion = pdfx::convert_to_pdfx(&mut pdf, PdfXLevel::X1a2003, &PdfXOptions::default()).unwrap();
-    assert!(!conversion.declared);
+    assert!(!conversion.declared && !pdfx::declares_pdfx_level(&pdf, PdfXLevel::X1a2003));
     assert!(conversion.remaining.iter().any(|issue| issue.rule == "Output intent" && !issue.fixable), "{conversion:#?}");
     assert!(metadata::read_standards_claims(&pdf).pdfx_version.is_none());
     // An RGB profile does not satisfy X-1a.
@@ -339,6 +343,7 @@ fn pdfx_1a_converts_rgb_colors_and_images_to_cmyk() {
     let options = PdfXOptions { output_profile: Some(fake_profile(b"CMYK", b"prtr", "Coated FOGRA39")), ..Default::default() };
     let conversion = pdfx::convert_to_pdfx(&mut pdf, PdfXLevel::X1a2003, &options).unwrap();
     assert!(conversion.remaining.is_empty() && conversion.declared, "{conversion:#?}");
+    assert!(pdfx::declares_pdfx_level(&pdf, PdfXLevel::X1a2003) && !pdfx::declares_pdfx_level(&pdf, PdfXLevel::X4));
     assert!(conversion.fixes.iter().any(|fix| fix.contains("RGB images")), "{:?}", conversion.fixes);
 
     let content = pdf.doc.get_page_contents(pdf.page_ids()[0]).into_iter().filter_map(|id| pdf.doc.get_object(id).ok()?.as_stream().ok()?.decompressed_content().ok()).map(|bytes| String::from_utf8_lossy(&bytes).into_owned()).collect::<String>();
@@ -367,11 +372,12 @@ fn pdfx_1a_forbids_transparency_but_x4_allows_it() {
     let options = PdfXOptions { output_profile: Some(fake_profile(b"CMYK", b"prtr", "Coated FOGRA39")), ..Default::default() };
     let conversion = pdfx::convert_to_pdfx(&mut pdf, PdfXLevel::X1a2003, &options).unwrap();
     assert!(conversion.remaining.iter().any(|issue| issue.rule == "No transparency" && !issue.fixable), "{conversion:#?}");
-    assert!(!conversion.declared);
+    assert!(!conversion.declared && !pdfx::declares_pdfx_level(&pdf, PdfXLevel::X1a2003));
 
     let mut pdf = transparent_page().with_title().pdf;
     let conversion = pdfx::convert_to_pdfx(&mut pdf, PdfXLevel::X4, &options).unwrap();
     assert!(conversion.remaining.is_empty() && conversion.declared, "{conversion:#?}");
+    assert!(pdfx::declares_pdfx_level(&pdf, PdfXLevel::X4) && !pdfx::declares_pdfx_level(&pdf, PdfXLevel::X1a2003));
 }
 
 #[test]

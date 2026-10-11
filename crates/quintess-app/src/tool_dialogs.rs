@@ -399,14 +399,23 @@ impl StandardsDialog {
                 }
                 Ok(())
             })?;
-            let marked = remaining.is_empty();
+            // Marked means the file now declares the level, read back from
+            // it, not merely that no problems were listed.
+            let converted = tab.load_pdf()?;
+            let marked = match standard {
+                Standard::Archive(level) => quintess_core::preflight::declares_pdfa_level(&converted, level),
+                Standard::Print(level) => quintess_core::pdfx::declares_pdfx_level(&converted, level),
+            };
             self.results = Some(remaining);
             self.converted = Some((fixes, marked));
         }
         if let Some((fixes, marked)) = &self.converted {
             ui.separator();
-            if *marked {
-                ui.label(RichText::new(format!("Converted. The document is now marked as {name}; save to keep it.")).strong());
+            let remaining_count = self.results.as_ref().map_or(0, Vec::len);
+            if *marked && remaining_count > 0 {
+                ui.label(RichText::new(format!("Converted and marked as {name}; save to keep it. The check still lists these items, which Quintess could not settle:")).strong());
+            } else if *marked {
+                ui.label(RichText::new(format!("Converted and marked as {name}. Save to keep it.")).strong());
             } else {
                 ui.label(RichText::new(format!("Converted what could be fixed. The document is not marked as {name}, because these problems remain:")).strong());
             }

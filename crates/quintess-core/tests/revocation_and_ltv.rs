@@ -10,7 +10,7 @@ use quintess_core::validation::TrustStore;
 use support::{CRL_URL, FakeServices, LeafOptions, OCSP_URL, Pki, TSA_URL, sample_document};
 
 fn trusting(pki: &Pki) -> VerifyOptions {
-    VerifyOptions { trust: TrustStore::empty().with_certificate(pki.root.der.clone()), now: chrono::Utc::now() }
+    VerifyOptions { trust: TrustStore::empty().with_certificate(pki.root.der.clone()), now: chrono::Utc::now(), password: None }
 }
 
 fn visible() -> SignOptions {
