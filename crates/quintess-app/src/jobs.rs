@@ -19,6 +19,8 @@ pub enum JobOutcome {
     Spelling { tab_id: u64, found: Vec<quintess_core::spelling::DocumentMisspelling> },
     /// Signature checks to show (after an online revocation check).
     Signatures(Vec<quintess_core::signatures::SignatureCheck>),
+    /// A document made from another kind of file, and what the converter said.
+    Converted { title: String, bytes: Vec<u8>, note: String },
     /// `manual` checks report even when nothing is new.
     UpdateChecked { found: Option<quintess_core::updates::Release>, manual: bool },
     UpdateDownloaded { path: std::path::PathBuf, verified: bool, version: String },

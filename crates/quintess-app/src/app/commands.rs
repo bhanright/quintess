@@ -46,6 +46,8 @@ pub(super) const COMMANDS: &[Command] = &[
     command("File ▸ Create", "Blank document", |app, _| app.create_blank()).always(),
     command("File ▸ Create", "From images…", |app, _| app.create_from_images()).always(),
     command("File ▸ Create", "From text or Markdown…", |app, _| app.create_from_text()).always(),
+    command("File ▸ Create", "From a file (Word, Excel, PowerPoint, web page…)…", |app, _| app.dialogs.push(Dialog::Convert(Box::new(dialogs::ConvertDialog::new(false, None))))).always().hint("Turn Word, OpenDocument, spreadsheets, presentations, HTML, text and Markdown into PDF"),
+    command("File ▸ Create", "From a web page…", |app, _| app.dialogs.push(Dialog::Convert(Box::new(dialogs::ConvertDialog::new(true, None))))).always().hint("Print a web page to PDF with Edge or Chrome"),
     command("File ▸ Create", "Combine files…", |app, _| app.combine_files()).always(),
     command("File", "Save", |app, _| app.save(false)).shortcut("Ctrl+S"),
     command("File", "Save as…", |app, _| app.save(true)).shortcut("Ctrl+Shift+S"),

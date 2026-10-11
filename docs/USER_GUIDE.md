@@ -191,6 +191,12 @@ Page ranges accept forms like `1-3, 7, odd, even, 10-end`.
 
 Click a field to type in it; checkboxes and radio buttons toggle with a click. Fields are listed in the sidebar.
 
+## Forms that calculate
+
+Many forms (tax forms, invoices, order forms) add up totals, check what you type and show amounts as currency or dates in a set pattern. Quintess runs these form scripts as Acrobat does. When you finish typing in a field, totals update and amounts show formatted ("$1,234.50"). A value the form won't accept (out of range, a date that doesn't exist, letters in a phone number) is refused with the form's own message, and the field keeps its old value. Importing data, filling from a spreadsheet and **Clear all fields** recalculate too.
+
+Only the calculation, checking and formatting scripts attached to fields ever run. Scripts a PDF asks to run when it opens, when a page is shown or when a link is clicked are never run. Form scripts can't read or write files, reach the internet or start programs, and a script that runs too long is stopped.
+
 ## Making forms
 
 - **Tools ▸ Forms ▸ Detect fields automatically** turns blank lines (____) and boxes into fields.
@@ -239,13 +245,27 @@ Notes:
 
 # Digital signatures
 
-1. **Tools ▸ Sign ▸ Create signing identity** makes a personal certificate (once).
-2. **Sign here**: drag a box where the signature should appear.
-3. **Check signatures** verifies every signature: whether the signed content is unchanged, who signed and when.
+## Signing
+
+**Sign here**: drag a box where the signature should appear, then choose what to sign with:
+
+- **A certificate file** (.pfx or .p12) from a certificate authority, with its password. The password is used for this signature only and never saved.
+- **A certificate installed in Windows**, including smart cards and keys that can't be copied (Windows may ask for your PIN).
+- **Your own Quintess identity** (**Tools ▸ Sign ▸ Create signing identity** makes one). Other programs show it as unverified, since no authority vouches for it.
+
+Tick **Add a trusted timestamp** to have a timestamp server vouch for when you signed, so the signature stays provably on time even after your certificate expires. Only a fingerprint of the signature is sent.
 
 Edits after signing are added after the signature, which stays valid; readers show that the document changed after signing. Redacting or removing content rewrites the file and invalidates the signature.
 
-Self-made identities show as unverified in other programs, since no authority vouches for them.
+## Checking signatures
+
+**Check signatures** shows each signature as:
+
+- **Valid**: the document is unchanged and the signer's certificate leads to an authority you trust.
+- **Intact, but the signer isn't trusted**: unchanged, but no trusted authority vouches for the signer, or the certificate had expired or wasn't meant for signing when the signature was made. The reasons are listed.
+- **INVALID**: the document or signature was altered, or the certificate was revoked.
+
+Quintess trusts the same authorities as Firefox and, on Windows, the system's. **Trust…** under a signature trusts its certificate from then on. Checking never uses the network; **Check for revocation** asks the issuers online whether a certificate was revoked, and **Add long-term validation** stores the certificates and those answers in the document, so the signatures can still be checked years from now without a network.
 
 # Scanned documents (OCR)
 
@@ -258,6 +278,15 @@ Self-made identities show as unverified in other programs, since no authority vo
 - **Web address**: the site's name is shown large, with warnings for tricks (a name before "@", a bare number address, look-alike letters, unencrypted links). Open it only if it's what you expect.
 - **Wi-Fi network**: the network name and password, ready to copy.
 - **Email**, **phone number**, **text message**, **map location**, **contact card** (save it as a .vcf file) or plain text.
+
+# Converting documents to PDF
+
+**File ▸ Create ▸ From a file** turns Word, OpenDocument, spreadsheets, CSV, presentations, web pages, text and Markdown into PDFs; **From a web page** prints a page from the internet. The dialog lists the converters on your computer and how faithful each is:
+
+- **Built-in** is always there and never uses the network. Word documents get a built-in page layout (approximate; fonts you don't have are replaced). OpenDocument text, simple web pages and Markdown become a simplified document; spreadsheets and CSV become a table of their values.
+- **LibreOffice** (free to install), **Microsoft Office** and **a browser** (Edge or Chrome) give higher fidelity when installed. Office opens the document invisibly in Word, Excel or PowerPoint, and asks your permission each time.
+
+Converters run with the network blocked for files on your computer and are stopped after two minutes. Quintess always says which converter it used and what it left out.
 
 # Compare, convert and export
 

@@ -49,6 +49,8 @@ pub enum AppRequest {
     DownloadDictionary(String),
     /// Sign with the choices made in the Sign dialog.
     Sign(Box<SignDialog>),
+    /// Convert with the choices made in the Convert dialog.
+    Convert(Box<ConvertDialog>),
     /// Trust a certificate (DER) from now on, then check the signatures again.
     TrustCertificate(Vec<u8>),
     /// Ask the certificates' issuers whether any was revoked (online).
@@ -154,6 +156,8 @@ pub enum Dialog {
     SignatureResults(Vec<quintess_core::signatures::SignatureCheck>),
     /// Choosing how to sign, before signing in a drawn box.
     Sign(Box<SignDialog>),
+    /// Making a PDF from another kind of file, or a web page.
+    Convert(Box<ConvertDialog>),
     AccessibilityResults(Vec<quintess_core::accessibility::Check>),
     PreflightResults(Vec<quintess_core::preflight::PreflightIssue>),
     ComparisonResult { summary: String, report_path: PathBuf },
@@ -239,6 +243,8 @@ impl Dialog {
             Dialog::TextResult { title, .. } => title,
             Dialog::SignatureResults(_) => "Signatures",
             Dialog::Sign(_) => "Sign",
+            Dialog::Convert(convert) if convert.web_page => "Create a PDF from a web page",
+            Dialog::Convert(_) => "Create a PDF from a file",
             Dialog::AccessibilityResults(_) => "Accessibility check",
             Dialog::PreflightResults(_) => "PDF/A check",
             Dialog::ComparisonResult { .. } => "Comparison",
@@ -1148,6 +1154,16 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     outcome.keep_open = false;
                 }
             });
+            return Ok(());
+        }
+        Dialog::Convert(convert) => {
+            convert.show(ui);
+            let label = if convert.web_page { "Create PDF" } else { "Convert" };
+            if buttons(ui, label, outcome) {
+                convert.check()?;
+                outcome.requests.push(AppRequest::Convert(convert.clone()));
+                outcome.keep_open = false;
+            }
             return Ok(());
         }
         Dialog::Sign(sign) => {
@@ -2185,5 +2201,112 @@ impl SignDialog {
             SignSource::OwnIdentity if self.identity_file.is_none() => anyhow::bail!("create or choose a signing identity first"),
             _ => Ok(()),
         }
+    }
+}
+
+/// Choosing a converter for a file or a web page. The person always sees
+/// which converter will run and how faithful its result is.
+#[derive(Clone)]
+pub struct ConvertDialog {
+    pub web_page: bool,
+    pub file: Option<std::path::PathBuf>,
+    pub address: String,
+    pub providers: Vec<quintess_core::conversion::ProviderInfo>,
+    pub provider: Option<quintess_core::conversion::Provider>,
+    /// Office opens the document in Word, Excel or PowerPoint; only with
+    /// the person's say-so, each time.
+    pub allow_office: bool,
+}
+
+impl ConvertDialog {
+    pub fn new(web_page: bool, file: Option<std::path::PathBuf>) -> Self {
+        let providers = quintess_core::conversion::available_providers();
+        let mut dialog = ConvertDialog { web_page, file, address: String::new(), providers, provider: None, allow_office: false };
+        dialog.provider = dialog.suitable().first().map(|info| info.provider);
+        // Prefer a higher-fidelity converter when one is installed.
+        if let Some(better) = dialog.suitable().into_iter().find(|info| info.provider != quintess_core::conversion::Provider::BuiltIn && info.provider != quintess_core::conversion::Provider::MicrosoftOffice) {
+            dialog.provider = Some(better.provider);
+        }
+        dialog
+    }
+
+    fn format(&self) -> Option<quintess_core::conversion::InputFormat> {
+        if self.web_page {
+            return None;
+        }
+        self.file.as_deref().and_then(quintess_core::conversion::InputFormat::from_path)
+    }
+
+    /// The installed converters that can handle the chosen input.
+    fn suitable(&self) -> Vec<quintess_core::conversion::ProviderInfo> {
+        let format = self.format();
+        self.providers
+            .iter()
+            .filter(|info| info.available && if self.web_page { info.provider.is_browser() } else { format.is_some_and(|format| info.provider.supports(format)) })
+            .cloned()
+            .collect()
+    }
+
+    fn show(&mut self, ui: &mut egui::Ui) {
+        use quintess_core::conversion::Provider;
+        ui.set_min_width(480.0);
+        if self.web_page {
+            ui.label("Web address");
+            ui.add(egui::TextEdit::singleline(&mut self.address).desired_width(f32::INFINITY).hint_text("https://"));
+        } else {
+            ui.horizontal(|ui| {
+                ui.label(self.file.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "No file chosen".into()));
+                if let Some(format) = self.format() {
+                    ui.weak(format.description());
+                }
+                if ui.button("Choose…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Documents", &["docx", "doc", "odt", "rtf", "xlsx", "xls", "xlsb", "ods", "csv", "tsv", "pptx", "ppt", "odp", "html", "htm", "md", "txt"]).pick_file() {
+                        self.file = Some(path);
+                        let suitable = self.suitable();
+                        if !suitable.iter().any(|info| Some(info.provider) == self.provider) {
+                            self.provider = suitable.first().map(|info| info.provider);
+                        }
+                    }
+                }
+            });
+        }
+        ui.add_space(6.0);
+        ui.label(RichText::new("Converter").strong());
+        let suitable = self.suitable();
+        if suitable.is_empty() {
+            ui.label("No installed converter handles this kind of file. Installing LibreOffice (free) adds presentations, older Office files and more.");
+        }
+        for info in &suitable {
+            let quality = match info.provider {
+                Provider::BuiltIn => match self.format() {
+                    Some(quintess_core::conversion::InputFormat::WordDocument) => "built-in layout, approximate",
+                    Some(quintess_core::conversion::InputFormat::Spreadsheet | quintess_core::conversion::InputFormat::Csv) => "table export of the values",
+                    _ => "simplified document",
+                },
+                _ => "higher fidelity",
+            };
+            let version = info.version.as_deref().map(|v| format!(" {v}")).unwrap_or_default();
+            ui.radio_value(&mut self.provider, Some(info.provider), format!("{}{version}: {quality}", info.provider.name()));
+        }
+        if self.provider == Some(Provider::MicrosoftOffice) {
+            ui.checkbox(&mut self.allow_office, "Let Quintess open this document in Microsoft Office to convert it");
+        }
+        ui.weak("Converters run with the network blocked for files on your computer and are stopped after two minutes. Quintess says which one it used and what it left out.");
+    }
+
+    fn check(&self) -> anyhow::Result<()> {
+        if self.web_page && !(self.address.starts_with("http://") || self.address.starts_with("https://")) {
+            anyhow::bail!("enter a web address starting with https://");
+        }
+        if !self.web_page && self.file.is_none() {
+            anyhow::bail!("choose a file to convert");
+        }
+        if self.provider.is_none() {
+            anyhow::bail!("there is no converter for this kind of file");
+        }
+        if self.provider == Some(quintess_core::conversion::Provider::MicrosoftOffice) && !self.allow_office {
+            anyhow::bail!("tick the box to let Quintess use Microsoft Office, or choose another converter");
+        }
+        Ok(())
     }
 }

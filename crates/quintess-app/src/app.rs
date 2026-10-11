@@ -290,6 +290,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 "spelling" => self.start_spell_check(ctx),
                 "read-aloud" => self.start_reading(false),
                 "sign-dialog" => self.sign_here(1, [350.0, 80.0, 550.0, 140.0]),
+                "convert-file" => self.dialogs.push(Dialog::Convert(Box::new(dialogs::ConvertDialog::new(false, Some(value.into()))))),
                 "inspect" => {
                     // x;y on the current page
                     let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
@@ -1023,6 +1024,10 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             JobOutcome::UpdateDownloaded { path, verified, version } => self.update_window = Some(updates::UpdateWindow::Ready { path, verified, version }),
             JobOutcome::Spelling { tab_id, found } => self.spelling_checked(tab_id, found),
             JobOutcome::Signatures(checks) => self.dialogs.push(Dialog::SignatureResults(checks)),
+            JobOutcome::Converted { title, bytes, note } => {
+                self.open_new_document(title, bytes);
+                self.info(note);
+            }
             JobOutcome::QrCodes { tab_id, version, codes } => {
                 let count = codes.len();
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -1905,6 +1910,33 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 AppRequest::SetMeasureScale(scale) => {
                     self.info(format!("Measuring at {}.", scale.label()));
                     self.tool_settings.measure.scale = scale;
+                }
+                AppRequest::Convert(choice) => {
+                    let ctx = self.worker_context.clone();
+                    let choice = *choice;
+                    let options = quintess_core::conversion::ConversionOptions {
+                        provider: quintess_core::conversion::ProviderChoice::Use(choice.provider.expect("checked by the dialog")),
+                        allow_office_automation: choice.allow_office,
+                        ..Default::default()
+                    };
+                    let title = if choice.web_page {
+                        format!("{}.pdf", choice.address.trim_start_matches("https://").trim_start_matches("http://").split(['/', '?']).next().unwrap_or("page"))
+                    } else {
+                        format!("{}.pdf", choice.file.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())
+                    };
+                    self.start_job(&ctx, "Converting", move |_| {
+                        let cancellation = quintess_core::conversion::Cancellation::new();
+                        let result = if choice.web_page {
+                            quintess_core::conversion::convert_url(choice.address.trim(), &options, &cancellation)?
+                        } else {
+                            quintess_core::conversion::convert_file(choice.file.as_deref().expect("checked by the dialog"), &options, &cancellation)?
+                        };
+                        let mut note = result.summary();
+                        if !result.warnings.is_empty() {
+                            note.push_str(&format!(" Left out: {}", result.warnings.join("; ")));
+                        }
+                        Ok(JobOutcome::Converted { title, bytes: result.pdf, note })
+                    });
                 }
                 AppRequest::Sign(choice) => {
                     let ctx = self.worker_context.clone();
