@@ -9,8 +9,17 @@ William asked for them to be removed on 2026-10-10, so do not add any.
 - `crates/quintess-core`: the engine. `lopdf` is the editable object model,
   PDFium (`vendor/pdfium/bin/pdfium.dll`, chromium/8086, gitignored) does
   rendering and positioned text. `engine.rs` lists where the DLL is found.
-- `crates/quintess-cli`: the `quintess` command-line tool (`quintess --help`).
-- `crates/quintess-app`: the egui desktop app (`quintess-app [files]`).
+- `crates/quintess-cli`: the command-line tool (library, `run_cli`) and the
+  one program, `quintess` (`src/main.rs`): with a command or an option it
+  runs the tool (`quintess --help`), otherwise the app (`quintess [files]`;
+  `quintess -- merge` opens a file named "merge"). Merged for 0.3.0 to
+  halve the download; before, the app was a separate `quintess-app`.
+- `crates/quintess-app`: the egui desktop app (library, `run_app`).
+- `crates/quintess-console`: the app-or-tool rule (`choose_mode`,
+  `COMMAND_NAMES`, checked against the tool by a test), attaching to the
+  terminal's console on Windows (`quintess.exe` is a GUI program), and the
+  Windows console launcher installed as `quintess.com` (see
+  docs/BUILDING.md, "Windows console").
 
 Toolchain: rustup stable (1.99, MSVC) installed by winget. Add
 `%USERPROFILE%\.cargo\bin` to PATH in a fresh shell. **C: is almost full on
@@ -19,7 +28,7 @@ The website is in `site/` (see `site/README.md`).
 Build with `cargo build -j 6`: this PC has intermittent memory faults under
 heavy load, so treat a one-off compiler crash as hardware and rerun it.
 
-Visual checks: `QUINTESS_SCREENSHOT=out.png QUINTESS_SETUP="..." quintess-app file.pdf`
+Visual checks: `QUINTESS_SCREENSHOT=out.png QUINTESS_SETUP="..." quintess file.pdf`
 saves a picture of the window and exits (setup options are documented on
 `SelfCheck` in `app.rs`).
 
@@ -146,10 +155,12 @@ saves a picture of the window and exits (setup options are documented on
   right-to-left text relies on glyph order (readers reverse it), with
   ligature text stored reversed. Edited lines draw words in bidi order.
 - Release: `cargo build --release -j 6` (thin LTO, stripped; about 8
-  minutes). The icon (`assets/`, drawn by a script) is embedded by each
-  crate's `build.rs` and set as the window icon. `installer/quintess.iss` is
+  minutes). The icon (`assets/`, drawn by a script) is embedded by
+  quintess-cli's `build.rs` and set as the window icon. `installer/quintess.iss` is
   an Inno Setup script (per-user install, Open with registration, Default
-  Programs capabilities, optional PATH entry); it has not been compiled.
+  Programs capabilities, PATH entry on by default, `quintess.com` beside
+  `quintess.exe`; upgrades from 0.2.0 delete `quintess-app.exe` and its
+  "Open with" key).
 - Looks (`theme.rs`, `app/studio.rs`): "Studio" (default) is a dark or
   light interface with an electric violet accent, hairline borders, Segoe
   UI Variable text, Bahnschrift headings, Cascadia Mono numbers and Segoe

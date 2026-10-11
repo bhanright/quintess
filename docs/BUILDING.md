@@ -1,9 +1,21 @@
 # Building Quintess
 
-Quintess is a Rust workspace: `crates/quintess-core` (the engine),
-`crates/quintess-cli` (the `quintess` command) and `crates/quintess-app` (the
-desktop app). It builds on Windows 10 and 11 (x64) and on 64-bit Linux
-(see "Linux" below).
+Quintess is a Rust workspace that builds one program, `quintess`, which is
+both the desktop app and the command-line tool:
+
+- `crates/quintess-core`: the engine.
+- `crates/quintess-app`: the desktop app, a library (`run_app`).
+- `crates/quintess-cli`: the command-line tool, a library (`run_cli`), and
+  the `quintess` program itself (`src/main.rs`), which runs the tool when
+  the first argument is a command or an option and starts the app
+  otherwise (`quintess report.pdf`; `quintess -- merge` opens a file named
+  "merge").
+- `crates/quintess-console`: that rule, shared, and on Windows the console
+  launcher `quintess-console.exe`, installed as `quintess.com` (see
+  "Windows console" below).
+
+It builds on Windows 10 and 11 (x64) and on 64-bit Linux (see "Linux"
+below).
 
 ## What you need
 
@@ -39,6 +51,24 @@ another drive, make `target` a directory junction to a folder there
 
 The OCR test runs only when the OCR models are present (installed, or
 downloaded once by `quintess ocr`); tests never use the network.
+
+Visual check of the app: `QUINTESS_SCREENSHOT=out.png quintess file.pdf`
+saves a picture of the window and exits (`QUINTESS_SETUP` options are
+documented on `SelfCheck` in `crates/quintess-app/src/app.rs`).
+
+## Windows console
+
+On Windows `quintess.exe` is a Windows (GUI) program, in debug builds too,
+so opening a PDF from Explorer or the Start menu shows no console window.
+Run with a command from a terminal, it joins the terminal's console
+(`AttachConsole`) and writes there, keeping any redirected streams; but cmd
+and PowerShell don't wait for a GUI program, so its output can land after
+the next prompt. `quintess-console.exe`, installed as `quintess.com` beside
+it, fixes that: both shells try `.com` before `.exe`, and the launcher runs
+`quintess.exe` with its own console streams, waits and returns the exit
+code (for the app it starts it and returns at once). To try it from a
+build, copy `target\release\quintess-console.exe` to `quintess.com` in the
+same folder.
 
 ## Release
 
@@ -77,17 +107,17 @@ QUINTESS_PDFIUM_DIR=$PWD/vendor/pdfium-linux/lib cargo test -j 6 --workspace
 ```
 
 Packages: with the OCR models in `vendor/ocrs-models` and the notices
-regenerated, `python3 tools/package_linux.py` builds the release binaries
+regenerated, `python3 tools/package_linux.py` builds the release program
 and writes `installer/output/quintess_<version>_amd64.deb` and
 `quintess-<version>-linux-x86_64.tar.gz`, each with a `.sha256` file. It
-reads the glibc version the programs need and the libraries they link from
-the built files, and writes the .deb's dependencies from them. The programs
-need the glibc of the system they were built on or later, so releases are
+reads the glibc version the program needs and the libraries it links from
+the built file, and writes the .deb's dependencies from them. The program
+needs the glibc of the system it was built on or later, so releases are
 built on Ubuntu 22.04 (glibc 2.35) by `.github/workflows/linux-release.yml`,
 which also installs both packages, takes self-check screenshots under Xvfb
 and attaches the packages to the release on version tags.
 
-From Windows, the Linux programs can be cross-built (not run) with zig:
+From Windows, the Linux program can be cross-built (not run) with zig:
 `pip install ziglang cargo-zigbuild libclang`, the headers and library of
 Ubuntu's `libspeechd-dev`/`libspeechd2` unpacked into a sysroot, then
 `cargo zigbuild --target x86_64-unknown-linux-gnu.2.31` with `LIBCLANG_PATH`,
@@ -95,12 +125,13 @@ Ubuntu's `libspeechd-dev`/`libspeechd2` unpacked into a sysroot, then
 `-L <sysroot>/usr/lib/x86_64-linux-gnu` set. `tools/package_linux.py
 --skip-build --target x86_64-unknown-linux-gnu.2.31` then packages them.
 
-Install layout (the same on Windows: everything beside the programs):
-the programs, `libpdfium.so`, `dictionaries/`, `models/` and `licenses/`
-live in one folder, `/usr/lib/quintess` for the .deb and
+Install layout (the same on Windows: everything beside the program):
+the `quintess` program, `libpdfium.so`, `dictionaries/`, `models/` and
+`licenses/` live in one folder, `/usr/lib/quintess` for the .deb and
 `~/.local/lib/quintess` or `/opt/quintess` for the tarball, with
-`quintess` and `quintess-app` linked from a `bin` folder. The programs find
-their files through their own (link-resolved) location. Settings go to
+`quintess` linked from a `bin` folder (there is no console launcher on
+Linux). The program finds its files through its own (link-resolved)
+location. Settings go to
 `~/.config/quintess`, data (models, recovered documents, crash log) to
 `~/.local/share/quintess`, following `XDG_CONFIG_HOME` and `XDG_DATA_HOME`.
 

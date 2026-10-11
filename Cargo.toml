@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/quintess-core", "crates/quintess-cli", "crates/quintess-app"]
+members = ["crates/quintess-core", "crates/quintess-cli", "crates/quintess-app", "crates/quintess-console"]
 
 [workspace.package]
 version = "0.2.1"

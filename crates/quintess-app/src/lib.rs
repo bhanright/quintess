@@ -1,7 +1,9 @@
 //! Quintess, the desktop PDF reader and editor.
-
-// No console window behind the app in release builds on Windows.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//!
+//! This is a library: the `quintess` program (crates/quintess-cli) starts
+//! the app with `run_app` when it isn't given a command-line command, so
+//! the app and the command-line tool share one executable and one copy of
+//! quintess-core.
 
 mod app;
 mod crash;
@@ -18,9 +20,23 @@ mod object_tool;
 mod tool_dialogs;
 mod viewer;
 
-fn main() -> eframe::Result {
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+/// Opens the app's window with these files (none for an empty window) and
+/// returns when it closes.
+pub fn run_app(files: Vec<PathBuf>) -> ExitCode {
     crash::install_handler();
-    let files: Vec<std::path::PathBuf> = std::env::args_os().skip(1).map(Into::into).collect();
+    match run_window(files) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Quintess couldn't open its window: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_window(files: Vec<PathBuf>) -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default().with_title("Quintess").with_app_id("quintess").with_inner_size([1280.0, 860.0]).with_min_inner_size([640.0, 420.0]).with_drag_and_drop(true);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/quintess-256.png")) {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));

@@ -73,7 +73,7 @@ The first run of each program read the file from disk; later runs found it in th
 
 1. Build Quintess, or install it, and run `python tools/benchmark/make_fixtures.py` to make the two documents.
 2. Close the program you will measure.
-3. Run `powershell -File tools/benchmark/benchmark.ps1 -Program <path to the program> -File <document> -ProcessNames <names>`, with the process names without ".exe" (for Quintess, `quintess-app`; for Acrobat, `Acrobat,AcroCEF`).
+3. Run `powershell -File tools/benchmark/benchmark.ps1 -Program <path to the program> -File <document> -ProcessNames <names>`, with the process names without ".exe" (for Quintess, `quintess`; for Acrobat, `Acrobat,AcroCEF`). The 0.2.0 results above were measured when the app was a separate program, `quintess-app`; from 0.3.0 the app and the command-line tool are one program, and its process is named `quintess`.
 4. Run `powershell -File tools/benchmark/system_info.ps1 -Programs <paths>` and keep its output with the results.
 
 The scripts are Windows PowerShell. Corrections and results from other computers are welcome as issues on GitHub.

@@ -1,13 +1,9 @@
 [package]
 name = "quintess-app"
-description = "The Quintess desktop application: view, annotate, fill, organize and secure PDF files."
+description = "The Quintess desktop application: view, annotate, fill, organize and secure PDF files. A library, started by the `quintess` program (crates/quintess-cli)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-[[bin]]
-name = "quintess-app"
-path = "src/main.rs"
 
 [dependencies]
 quintess-core = { path = "../quintess-core" }
@@ -22,9 +18,6 @@ serde_json = "1"
 regex = "1"
 chrono = "0.4.45"
 tts = "0.26.3"
-
-[build-dependencies]
-winresource = "0.1.31"
 
 [dev-dependencies]
 ttf-parser = "0.25"
