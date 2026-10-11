@@ -2,10 +2,11 @@
 //! (CID) fonts with Identity-H encoding and a ToUnicode map, so the text
 //! renders everywhere and stays searchable and copyable.
 //!
-//! Each character is drawn with the first font in a fallback chain that has
-//! a glyph for it (Latin and Cyrillic, then symbols, Indic, Chinese,
-//! Japanese, Korean, emoji). Characters are mapped one to one; there is no
-//! complex shaping, so ligatures and right-to-left reordering are not applied.
+//! Each word is drawn with the first font in a fallback chain that has its
+//! characters (Latin and Cyrillic, then symbols, Indic, Chinese, Japanese,
+//! Korean, emoji), and shaped with rustybuzz: right-to-left stretches are
+//! put in visual order, Indic conjuncts form, Arabic letters join, and
+//! glyph positions are written with TJ adjustments and text rise.
 //!
 //! [`TextSetter`] is the entry point: it uses a standard 14 font when the
 //! text fits WinAnsi (no embedding, smallest files) and embedded fonts

@@ -8,7 +8,12 @@ use vellum_core::{Pdf, SaveSettings};
 
 #[test]
 fn scanned_page_becomes_searchable() {
-    ocr::download_models().expect("models download");
+    // Tests don't use the network: without the models (installed or
+    // downloaded once with `vellum ocr`), there is nothing to test.
+    if !ocr::models_present() {
+        eprintln!("skipped: the OCR models are not on this machine");
+        return;
+    }
     let folder = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("ocr");
     std::fs::create_dir_all(&folder).unwrap();
     // Make a "scan": a page of text rendered to a picture, then wrapped as an image-only PDF.

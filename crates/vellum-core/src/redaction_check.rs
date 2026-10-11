@@ -452,8 +452,10 @@ fn hidden_strings(pdf: &Pdf, texts: &[String], checked: &HashSet<ObjectId>) -> C
             Object::Stream(stream) => Some(&stream.dict),
             _ => None,
         };
-        let is_file_spec = dict.and_then(|d| d.get(b"Type").ok()).and_then(|t| t.as_name().ok()) == Some(b"Filespec".as_slice());
-        if is_file_spec {
+        // File specifications are covered by the attachments check; fonts and
+        // font descriptors hold font names, not document text.
+        let kind = dict.and_then(|d| d.get(b"Type").ok()).and_then(|t| t.as_name().ok());
+        if matches!(kind, Some(b"Filespec" | b"Font" | b"FontDescriptor")) {
             continue;
         }
         let mut entries: Vec<(Vec<u8>, String)> = Vec::new();

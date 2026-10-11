@@ -388,7 +388,8 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
     // Fit modes compute the zoom from the space available last frame.
     let widest = tab.pages.iter().map(|p| p.display_size.0).fold(1.0f32, f32::max);
     let tallest = tab.pages.iter().map(|p| p.display_size.1).fold(1.0f32, f32::max);
-    if state.last_viewport_width > 0.0 {
+    // A document without pages has nothing to fit.
+    if state.last_viewport_width > 0.0 && !tab.pages.is_empty() {
         match tab.fit {
             FitMode::Width => tab.zoom = ((state.last_viewport_width - PAGE_GAP * 2.0 - 16.0) / widest).clamp(0.1, 8.0),
             FitMode::Page => tab.zoom = ((state.last_viewport_width - PAGE_GAP * 2.0 - 16.0) / widest).min((state.last_viewport_height - PAGE_GAP * 2.0) / tallest).clamp(0.1, 8.0),
@@ -609,7 +610,9 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
             egui::Rect::from_min_size(rect.min - vec2(2.0, 2.0), vec2((rect.width() + 80.0).max(160.0), rect.height().max(14.0) + 4.0))
         };
         let snapshot = editing.rich.clone();
-        let text_color = ui.visuals().text_color();
+        // The editor sits on the page, so it looks like paper (dark text on
+        // white) whatever the interface's brightness.
+        let text_color = Color32::from_gray(20);
         // Shows each character in its style (bold, italic, color) while editing.
         let mut layouter = move |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
             let current = buffer.as_str();
@@ -636,7 +639,13 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         } else {
             egui::TextEdit::singleline(&mut editing.text).font(egui::FontId::proportional(font_size))
         };
-        let response = ui.put(editor_rect, editor.margin(vec2(2.0, 0.0)));
+        let response = ui
+            .scope(|ui| {
+                ui.visuals_mut().extreme_bg_color = Color32::WHITE;
+                ui.visuals_mut().override_text_color = Some(text_color);
+                ui.put(editor_rect, editor.margin(vec2(2.0, 0.0)))
+            })
+            .inner;
         // Keep the styles in step with what was typed.
         if let Some(rich) = editing.rich.as_mut() {
             if rich.text != editing.text {

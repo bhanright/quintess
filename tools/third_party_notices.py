@@ -1,0 +1,100 @@
+"""Writes licenses/THIRD-PARTY-NOTICES.txt: every library compiled into the
+Vellum programs, with its license and the license text it ships, plus
+PDFium and the OCR models. Run it before each release:
+
+    python tools/third_party_notices.py
+
+It reads `cargo metadata`, follows only the dependencies that end up in the
+programs (not test-only or build-only ones) and copies each crate's own
+LICENSE / COPYING / NOTICE files. Identical texts are printed once and
+referred to afterwards.
+"""
+
+import hashlib
+import json
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+OUTPUT = ROOT / "licenses" / "THIRD-PARTY-NOTICES.txt"
+PROGRAMS = ["vellum-app", "vellum-cli"]
+LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
+
+
+def shipped_packages(metadata):
+    """Packages reachable from the programs through normal dependencies."""
+    packages = {p["id"]: p for p in metadata["packages"]}
+    nodes = {n["id"]: n for n in metadata["resolve"]["nodes"]}
+    workspace = set(metadata["workspace_members"])
+    start = [pid for pid in workspace if packages[pid]["name"] in PROGRAMS]
+    seen, stack = set(), list(start)
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        for dep in nodes[pid]["deps"]:
+            # Only dependencies used by the built program, not dev or build ones.
+            if any(kind["kind"] is None for kind in dep["dep_kinds"]):
+                stack.append(dep["pkg"])
+    return sorted((packages[pid] for pid in seen if pid not in workspace), key=lambda p: (p["name"].lower(), p["version"]))
+
+
+def license_texts(folder):
+    files = [f for f in sorted(folder.iterdir()) if f.is_file() and f.name.lower().startswith(LICENSE_FILE_PREFIXES)]
+    return [(f.name, f.read_text(encoding="utf-8", errors="replace").strip()) for f in files]
+
+
+def main():
+    metadata = json.loads(subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--filter-platform", "x86_64-pc-windows-msvc"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+    packages = shipped_packages(metadata)
+    lines = [
+        "Third-party software in Vellum",
+        "==============================",
+        "",
+        "Vellum is licensed under MIT OR Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE).",
+        "It includes the software listed below, each under its own license.",
+        "",
+        "PDFium (rendering and text): BSD-3-Clause and the licenses of its parts, below.",
+        "Binary build from pdfium-binaries by Benoit Blanchon (MIT), below.",
+        "OCR models (text-detection.onnx, text-recognition.onnx): by Robert Knight,",
+        "  from https://huggingface.co/robertknight/ocrs, licensed CC BY-SA 4.0",
+        "  (https://creativecommons.org/licenses/by-sa/4.0/); trained on the HierText",
+        "  dataset (CC BY-SA 4.0). They are included unmodified.",
+        "",
+        f"Rust crates ({len(packages)}):",
+        "",
+    ]
+    for package in packages:
+        lines.append(f"  {package['name']} {package['version']}  -  {package.get('license') or 'see its license file'}")
+    lines.append("")
+    printed = {}
+    for package in packages:
+        folder = Path(package["manifest_path"]).parent
+        header = f"{package['name']} {package['version']} ({package.get('license') or 'license file'})"
+        lines += ["", "-" * 78, header, "-" * 78]
+        texts = license_texts(folder)
+        if not texts:
+            lines.append(f"No license file is included in the crate; its declared license is {package.get('license')}.")
+        for name, text in texts:
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            if digest in printed:
+                lines.append(f"{name}: the same text as {printed[digest]} above.")
+            else:
+                printed[digest] = f"{package['name']} ({name})"
+                lines += [f"{name}:", "", text, ""]
+    pdfium = ROOT / "vendor" / "pdfium"
+    lines += ["", "=" * 78, "PDFium and its components", "=" * 78]
+    for path in [pdfium / "LICENSE"] + sorted((pdfium / "licenses").glob("*")):
+        if path.is_file():
+            title = "pdfium-binaries build scripts" if path.parent == pdfium else path.stem
+            lines += ["", "-" * 78, title, "-" * 78, path.read_text(encoding="utf-8", errors="replace").strip()]
+    OUTPUT.parent.mkdir(exist_ok=True)
+    OUTPUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"wrote {OUTPUT} ({len(packages)} crates)")
+
+
+if __name__ == "__main__":
+    main()

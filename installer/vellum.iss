@@ -2,14 +2,21 @@
 ; administrator rights needed), registers Vellum as a program that opens
 ; PDFs, and can put the command-line tool on the PATH.
 ;
-; Build the release first (cargo build --release -j 6), then compile this
-; script with Inno Setup 6:  ISCC installer\vellum.iss
-; The installer is written to installer\output.
+; Before compiling (see docs/BUILDING.md):
+;   1. cargo build --release -j 6
+;   2. python tools/third_party_notices.py
+;   3. put the OCR models (text-detection.onnx, text-recognition.onnx) in
+;      vendor\ocrs-models; `vellum ocr` downloads them once to
+;      %LOCALAPPDATA%\Vellum\models, from where they can be copied
+; then compile with Inno Setup 6:  ISCC installer\vellum.iss
+; The installer is written to installer\output. Set VELLUM_BUILD to the
+; Cargo target folder when it isn't ..\target.
 
 #define AppName "Vellum"
 #define AppVersion "0.1.0"
-#define BuildFolder "E:\VellumBuild\release"
+#define BuildFolder (GetEnv("VELLUM_BUILD") != "" ? GetEnv("VELLUM_BUILD") : "..\target") + "\release"
 #define PdfiumFolder "..\vendor\pdfium"
+#define ModelsFolder "..\vendor\ocrs-models"
 
 [Setup]
 AppId={{AF179668-D50B-46E6-8245-EADEE685D488}
@@ -41,8 +48,14 @@ Name: "addtopath"; Description: "Add the vellum command-line tool to the PATH"; 
 Source: "{#BuildFolder}\vellum-app.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildFolder}\vellum.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PdfiumFolder}\bin\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#PdfiumFolder}\LICENSE"; DestDir: "{app}\licenses"; DestName: "pdfium.txt"
+Source: "{#ModelsFolder}\text-detection.onnx"; DestDir: "{app}\models"; Flags: ignoreversion
+Source: "{#ModelsFolder}\text-recognition.onnx"; DestDir: "{app}\models"; Flags: ignoreversion
+Source: "..\LICENSE-MIT"; DestDir: "{app}\licenses"
+Source: "..\LICENSE-APACHE"; DestDir: "{app}\licenses"
+Source: "..\licenses\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}\licenses"
+; PDFium's own licenses, and the MIT license of the scripts that built the binary.
 Source: "{#PdfiumFolder}\licenses\*"; DestDir: "{app}\licenses\pdfium"
+Source: "{#PdfiumFolder}\LICENSE"; DestDir: "{app}\licenses\pdfium"; DestName: "pdfium-binaries-build-scripts.txt"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\vellum-app.exe"

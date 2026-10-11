@@ -332,7 +332,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
         }
         MoreCommand::Ocr { input, pages, dpi, force, text, output } => {
             if !ocr::models_present() {
-                println!("Downloading the recognition models (about 12 MB, once)…");
+                println!("The recognition models weren't installed; downloading them (about 12 MB, once, checked against known checksums)…");
                 ocr::download_models()?;
             }
             let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;

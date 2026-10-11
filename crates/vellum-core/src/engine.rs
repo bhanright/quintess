@@ -56,9 +56,13 @@ fn candidate_folders() -> Vec<PathBuf> {
             roots.push(folder.to_path_buf());
         }
     }
-    if let Ok(working) = std::env::current_dir() {
-        folders.push(working.clone());
-        roots.push(working);
+    // The working folder and its parents are searched only in development
+    // builds: an installed program must not load a DLL planted beside a document.
+    if cfg!(debug_assertions) {
+        if let Ok(working) = std::env::current_dir() {
+            folders.push(working.clone());
+            roots.push(working);
+        }
     }
     for root in roots {
         let mut cursor: Option<&Path> = Some(&root);
@@ -67,8 +71,10 @@ fn candidate_folders() -> Vec<PathBuf> {
             cursor = folder.parent();
         }
     }
-    // The repository's own copy, for builds whose output lives elsewhere.
-    folders.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("vendor").join("pdfium").join("bin"));
+    // The repository's own copy, for development builds whose output lives elsewhere.
+    if cfg!(debug_assertions) {
+        folders.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("vendor").join("pdfium").join("bin"));
+    }
     folders
 }
 

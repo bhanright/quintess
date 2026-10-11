@@ -88,7 +88,8 @@ pub struct DocumentTab {
     pub annotations: Vec<AnnotationSummary>,
     pub fields: Vec<FieldInfo>,
     pub attachments: Vec<vellum_core::attachments::Attachment>,
-    /// The document carries signatures, which a full rewrite would invalidate.
+    /// The document carries signatures: ordinary edits are added as updates
+    /// after the signed bytes so they stay valid; removal edits rewrite it.
     pub signed: bool,
     /// The last edit was saved as an update that left the signatures valid.
     pub last_edit_kept_signatures: bool,

@@ -164,8 +164,6 @@ fn intersects(a: [f32; 4], b: [f32; 4]) -> bool {
     intersection_area(a, b) > 0.0
 }
 
-/// A glyph is removed when its center is inside a box or more than a third
-/// of it is covered.
 /// Whether a glyph's center lies inside any area.
 fn center_is_inside(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
     let (x, y) = ((glyph[0] + glyph[2]) / 2.0, (glyph[1] + glyph[3]) / 2.0);
@@ -1168,7 +1166,7 @@ pub fn verify(pdf: &mut Pdf, areas: &[RedactionArea]) -> Result<Vec<u32>> {
 fn rasterize_page(pdf: &mut Pdf, page_number: u32, areas: &[RedactionArea], settings: &RedactionSettings) -> Result<()> {
     let bytes = pdf.to_bytes(&crate::SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?;
     let document = engine::open_document(bytes, None)?;
-    let mut image = DynamicImage::ImageRgba8(engine::render_page(&document, page_number as u16 as usize - 1, &RenderOptions { dpi: settings.rasterize_dpi, ..Default::default() })?);
+    let mut image = DynamicImage::ImageRgba8(engine::render_page(&document, page_number as usize - 1, &RenderOptions { dpi: settings.rasterize_dpi, ..Default::default() })?);
     drop(document);
     let page_id = pdf.page_id(page_number)?;
     let bounds = pdf.page_box(page_id)?;

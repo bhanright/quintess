@@ -122,7 +122,7 @@ fn device_mode(printer: &str, input: Option<&[u8]>, show_dialog: Option<isize>) 
 }
 
 /// Shows the printer driver's properties dialog (paper, tray, quality…).
-/// Returns the updated settings, or `None` if the person cancelled.
+/// Returns the updated settings, or `None` if the person canceled.
 pub fn printer_properties(printer: &str, parent_window: isize, current: Option<&[u8]>) -> Result<Option<Vec<u8>>> {
     device_mode(printer, current, Some(parent_window))
 }

@@ -171,13 +171,17 @@ pub fn fix(pdf: &mut Pdf, fallback_title: &str, language: &str) -> Result<Vec<St
         done.push("Show the title in the window bar".into());
     }
     catalog.set("ViewerPreferences", preferences);
+    let mut tab_order_set = 0;
     for page_id in pdf.page_ids() {
         let page = pdf.doc.get_dictionary_mut(page_id)?;
         if page.has(b"Annots") && page.get(b"Tabs").ok().and_then(|t| t.as_name().ok()) != Some(b"S") {
             page.set("Tabs", "S");
+            tab_order_set += 1;
         }
     }
-    done.push("Set structure-based tab order on pages with links and fields".into());
+    if tab_order_set > 0 {
+        done.push(format!("Set structure-based tab order on {tab_order_set} pages with links and fields"));
+    }
     // Field tooltips from field names: "first_name" becomes "First name".
     for field in crate::forms::list_fields(pdf) {
         if field.tooltip.trim().is_empty() {

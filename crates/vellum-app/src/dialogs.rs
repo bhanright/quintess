@@ -44,6 +44,7 @@ pub enum AppRequest {
     OpenDialog(Box<Dialog>),
     ShowRedactionCheck(vellum_core::redaction_check::RedactionCheck),
     StartFolderSearch(FolderQuery),
+    DownloadOcrModels,
     /// Turn to a page and outline a box there (display points from the top left).
     ShowOnPage { page_index: usize, display_rect: [f32; 4] },
     StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf> },
@@ -150,6 +151,8 @@ pub enum Dialog {
     FolderSearch { folder: Option<PathBuf>, text: String, use_regex: bool, match_case: bool, whole_words: bool, subfolders: bool },
     FolderResults(Box<FolderResults>),
     QrCode(vellum_core::qr::FoundCode),
+    /// Asks before downloading the OCR models, when they weren't installed.
+    DownloadOcrModels,
     QrResults(Vec<vellum_core::qr::FoundCode>),
     Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
     CheckForText { texts: String },
@@ -229,6 +232,7 @@ impl Dialog {
             Dialog::FolderResults(_) => "Folder search results",
             Dialog::QrCode(code) => code.kind.describe(),
             Dialog::QrResults(_) => "QR codes",
+            Dialog::DownloadOcrModels => "Download the recognition models?",
             Dialog::Watch { .. } => "Watch a folder",
             Dialog::CheckForText { .. } => "Check for leftover text",
         };
@@ -664,9 +668,20 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.heading("Vellum");
             ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
             ui.label("A PDF reader and editor written in Rust, using PDFium for rendering.");
-            if ui.button("Close").clicked() {
-                outcome.keep_open = false;
-            }
+            ui.add_space(6.0);
+            ui.weak("Licensed under MIT or Apache-2.0. Built on PDFium (BSD), about 400 open-source Rust libraries, and the ocrs recognition models by Robert Knight (CC BY-SA 4.0).");
+            ui.horizontal(|ui| {
+                // The installer puts the licenses in a folder beside the program.
+                let licenses = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join("licenses")));
+                if let Some(folder) = licenses.filter(|folder| folder.is_dir()) {
+                    if ui.button("Open-source licenses…").clicked() {
+                        let _ = std::process::Command::new("explorer").arg(&folder).spawn();
+                    }
+                }
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
             return Ok(());
         }
         Dialog::Preferences(settings) => {
@@ -841,6 +856,15 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         }
         Dialog::QrCode(code) => {
             qr_code_body(ui, code, outcome);
+            return Ok(());
+        }
+        Dialog::DownloadOcrModels => {
+            ui.label("Recognizing text needs two models (about 12 MB) that weren't installed with this copy of Vellum.");
+            ui.label("They come from the ocrs project (by Robert Knight, CC BY-SA 4.0) and are checked against known checksums. Recognition itself runs on your machine.");
+            if buttons(ui, "Download", outcome) {
+                outcome.requests.push(AppRequest::DownloadOcrModels);
+                outcome.keep_open = false;
+            }
             return Ok(());
         }
         Dialog::QrResults(codes) => {

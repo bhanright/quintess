@@ -32,7 +32,7 @@ saves a picture of the window and exits (setup options are documented on
 - Stamps: watermarks, headers/footers, Bates numbering, image stamps, backgrounds.
 - Creation: images, plain text, Markdown, blank documents.
 - Unicode text everywhere (subset Type 0 fonts with ToUnicode, system font
-  fallback chain); no complex shaping, so Devanagari and Arabic do not shape.
+  fallback chain), shaped (see "Shaping" below).
 - Annotations with appearance streams (13 kinds), replies, summaries.
 - Forms: fill, create, auto-detect, JSON/XFDF/CSV, reset, flatten.
 - True redaction (glyph-level, image pixels, verification with raster fallback).
@@ -157,6 +157,23 @@ saves a picture of the window and exits (setup options are documented on
   its contents, warnings for suspicious links (user name before "@", bare
   number address, look-alike letters, plain http), and Open / Copy / Save
   contact. CLI: `vellum qr file.pdf [--json]`.
+- Audit fixes (2026-10-10, from a blind audit): removal edits rewrite
+  signed files; saves keep the original encryption (`Pdf::to_bytes_keeping_encryption`,
+  `DocumentTab::original_encryption`) and write through a temporary file
+  (`write_file_safely`); unsigned files save without earlier versions;
+  redaction flattens a page instead of deleting an undecodable image or
+  keeping a detailed shape that crosses a box (simple shapes are clipped);
+  find and replace terminates; signature byte ranges are checked safely and
+  must leave only the signature value unsigned; PDF/A identification only
+  when nothing unrepairable remains; lossless optimizing keeps scripts;
+  crash handler (`crash.rs`) saves unsaved documents and a log; static C
+  runtime; OCR models bundled by the installer and verified by SHA-256
+  (asking before any download); LICENSE-MIT, LICENSE-APACHE and
+  `tools/third_party_notices.py`; `docs/BUILDING.md`.
+- Known limitations: a line mixing right-to-left and left-to-right text
+  copies out in PDFium's order (whole line reversed when mostly
+  right-to-left); XFDF import reads flat fields only; signature checks do
+  not validate certificate chains or revocation (self-signed is flagged).
 - Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).

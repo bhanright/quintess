@@ -279,25 +279,33 @@ pub fn to_layout_text(document: &PdfDocument) -> Result<String> {
             let widths: Vec<f32> = text.chars.iter().filter(|c| !c.character.is_whitespace() && c.rect[2] > c.rect[0]).map(|c| c.rect[2] - c.rect[0]).collect();
             (widths.iter().sum::<f32>() / widths.len().max(1) as f32).max(1.0)
         };
-        let mut lines: Vec<(f32, Vec<(f32, char)>)> = Vec::new();
+        // Each line: its baseline, and characters as (left, right, character).
+        let mut lines: Vec<(f32, Vec<(f32, f32, char)>)> = Vec::new();
         for item in text.chars.iter().filter(|c| c.rect != [0.0; 4] && !c.generated && c.character != '\r' && c.character != '\n') {
             let baseline = item.rect[1];
             let height = (item.rect[3] - item.rect[1]).max(1.0);
             match lines.iter_mut().find(|(y, _)| (y - baseline).abs() < height * 0.5) {
-                Some((_, chars)) => chars.push((item.rect[0], item.character)),
-                None => lines.push((baseline, vec![(item.rect[0], item.character)])),
+                Some((_, chars)) => chars.push((item.rect[0], item.rect[2], item.character)),
+                None => lines.push((baseline, vec![(item.rect[0], item.rect[2], item.character)])),
             }
         }
         lines.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (_, mut chars) in lines {
             chars.sort_by(|a, b| a.0.total_cmp(&b.0));
             let mut line = String::new();
-            for (x, character) in chars {
-                let column = (x / average_width).round() as usize;
-                while line.chars().count() < column {
-                    line.push(' ');
+            let mut previous_right: Option<f32> = None;
+            for (left, right, character) in chars {
+                // Letters that touch stay together; only a real gap is padded
+                // out to the column where the next text starts.
+                let touches = previous_right.is_some_and(|edge| left - edge < average_width * 0.3);
+                if !touches {
+                    let column = (left / average_width).round() as usize;
+                    while line.chars().count() < column {
+                        line.push(' ');
+                    }
                 }
                 line.push(character);
+                previous_right = Some(right);
             }
             output.push_str(line.trim_end());
             output.push('\n');

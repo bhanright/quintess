@@ -644,11 +644,13 @@ impl VellumApp {
     }
 
     fn start_ocr(&mut self, ctx: &egui::Context) {
+        // Installed copies include the models; otherwise ask before downloading.
+        if !vellum_core::ocr::models_present() {
+            self.dialogs.push(Dialog::DownloadOcrModels);
+            return;
+        }
         let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
         self.start_job(ctx, "Recognizing text", move |progress| {
-            if !vellum_core::ocr::models_present() {
-                vellum_core::ocr::download_models()?;
-            }
             let document = vellum_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
             let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
             let pages: Vec<u32> = (1..=pdf.page_count()).collect();
@@ -756,7 +758,7 @@ impl VellumApp {
         });
         if let Some(name) = self.report(result) {
             self.tool = Tool::Select;
-            self.info(format!("Signed by {name}. Save now: further edits would invalidate the signature."));
+            self.info(format!("Signed by {name}. Later edits are added after the signature, which stays valid; redacting or removing content rewrites the file and invalidates it."));
         }
     }
 
@@ -1550,6 +1552,13 @@ impl VellumApp {
                 }
                 AppRequest::ShowRedactionCheck(check) => self.dialogs.push(Dialog::RedactionCheck(check)),
                 AppRequest::Record(step) => self.record(step),
+                AppRequest::DownloadOcrModels => {
+                    let ctx = self.worker_context.clone();
+                    self.start_job(&ctx, "Downloading the recognition models", |_| {
+                        vellum_core::ocr::download_models()?;
+                        Ok(JobOutcome::Message("Downloaded the recognition models. Choose Recognize text (OCR) again to run it.".into()))
+                    });
+                }
                 AppRequest::OpenDialog(dialog) => self.dialogs.push(*dialog),
                 AppRequest::ShowOnPage { page_index, display_rect } => {
                     if let Some(tab) = self.tab() {
@@ -1675,9 +1684,6 @@ impl VellumApp {
         });
     }
 }
-
-/// Uses Segoe UI for text and Segoe UI Symbol and Emoji for the toolbar
-/// icons when Windows provides them; egui's built-in fonts lack many symbols.
 
 enum OrganizerRequest {
     Rotate(i64),

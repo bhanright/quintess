@@ -3,7 +3,11 @@
 //! and copied while it still looks exactly like the scan.
 //!
 //! Recognition runs offline with the `ocrs` engine. Its two models (about
-//! 12 MB) are downloaded once into the user's local application data folder.
+//! 12 MB, by Robert Knight, licensed CC BY-SA 4.0) are installed with
+//! Vellum in a `models` folder beside the program. When they are missing
+//! (a build run from source), they can be downloaded once into the user's
+//! local application data folder. Either way their checksums are verified
+//! before they are used.
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -23,7 +27,16 @@ use crate::unicode_text::{TextSetter, add_fonts_to_page};
 const DETECTION_MODEL_URL: &str = "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.onnx";
 const RECOGNITION_MODEL_URL: &str = "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.onnx";
 
-/// Where the recognition models live.
+/// The models' SHA-256 checksums, so a damaged or altered file is never loaded.
+const DETECTION_MODEL_SHA256: &str = "a917b23dbd9524b465df7e922641b3ff2981623df4ded5a0234004ef2fee7cfe";
+const RECOGNITION_MODEL_SHA256: &str = "86c145c2edb96c8caed5b1ebb8f44d706408922211451c309c625157dd6061c5";
+
+/// The `models` folder installed beside the program.
+fn installed_models_folder() -> Option<PathBuf> {
+    std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join("models")))
+}
+
+/// Where downloaded models are kept.
 pub fn models_folder() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("XDG_DATA_HOME")).map(PathBuf::from).unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
@@ -32,9 +45,27 @@ pub fn models_folder() -> PathBuf {
     base.join("Vellum").join("models")
 }
 
+/// The models to use: the installed ones if present, else downloaded ones.
 fn model_paths() -> (PathBuf, PathBuf) {
-    let folder = models_folder();
-    (folder.join("text-detection.onnx"), folder.join("text-recognition.onnx"))
+    let in_folder = |folder: PathBuf| (folder.join("text-detection.onnx"), folder.join("text-recognition.onnx"));
+    match installed_models_folder().map(in_folder) {
+        Some((detection, recognition)) if detection.exists() && recognition.exists() => (detection, recognition),
+        _ => in_folder(models_folder()),
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Reads a model file, refusing it unless its checksum matches.
+fn verified_model(path: &std::path::Path, expected: &str) -> Result<Vec<u8>> {
+    let bytes = std::fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    if sha256_hex(&bytes) != expected {
+        anyhow::bail!("{} is damaged or not the expected model (its checksum differs); delete it and download the models again", path.display());
+    }
+    Ok(bytes)
 }
 
 /// True when the models are already on disk.
@@ -48,12 +79,15 @@ pub fn download_models() -> Result<()> {
     let folder = models_folder();
     std::fs::create_dir_all(&folder)?;
     let (detection, recognition) = model_paths();
-    for (url, path) in [(DETECTION_MODEL_URL, detection), (RECOGNITION_MODEL_URL, recognition)] {
+    for (url, path, expected) in [(DETECTION_MODEL_URL, detection, DETECTION_MODEL_SHA256), (RECOGNITION_MODEL_URL, recognition, RECOGNITION_MODEL_SHA256)] {
         if path.exists() {
             continue;
         }
         let mut response = ureq::get(url).call().with_context(|| format!("could not download {url}"))?;
         let bytes = response.body_mut().with_config().limit(200 * 1024 * 1024).read_to_vec()?;
+        if sha256_hex(&bytes) != expected {
+            anyhow::bail!("the model downloaded from {url} is not the expected file (its checksum differs), so it was not saved");
+        }
         // Write to a temporary name first so a broken download is never mistaken for a model.
         let partial = path.with_extension("part");
         std::fs::write(&partial, bytes)?;
@@ -68,8 +102,8 @@ fn engine() -> Result<&'static Mutex<OcrEngine>> {
         .get_or_init(|| {
             let (detection, recognition) = model_paths();
             let load = || -> Result<OcrEngine> {
-                let detection_model = rten::Model::load_file(&detection).with_context(|| format!("could not load {}", detection.display()))?;
-                let recognition_model = rten::Model::load_file(&recognition).with_context(|| format!("could not load {}", recognition.display()))?;
+                let detection_model = rten::Model::load(verified_model(&detection, DETECTION_MODEL_SHA256)?).with_context(|| format!("could not load {}", detection.display()))?;
+                let recognition_model = rten::Model::load(verified_model(&recognition, RECOGNITION_MODEL_SHA256)?).with_context(|| format!("could not load {}", recognition.display()))?;
                 OcrEngine::new(OcrEngineParams { detection_model: Some(detection_model), recognition_model: Some(recognition_model), ..Default::default() })
             };
             load().map(Mutex::new).map_err(|error| format!("{error:#}"))

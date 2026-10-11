@@ -38,8 +38,9 @@ struct Cli {
 struct Input {
     /// The PDF to read.
     input: PathBuf,
-    /// Password for an encrypted input.
-    #[arg(long)]
+    /// Password for an encrypted input (or set VELLUM_PASSWORD, which keeps
+    /// it out of the command line and shell history).
+    #[arg(long, env = "VELLUM_PASSWORD", hide_env_values = true)]
     password: Option<String>,
 }
 
@@ -1345,6 +1346,15 @@ fn form(action: FormAction) -> Result<()> {
                 let (name, value) = pair.split_once('=').context("--set takes name=value")?;
                 map.insert(name.to_string(), value.to_string());
             }
+            // Names match fields regardless of capitalization, as `form merge` does.
+            let fields = forms::list_fields(&pdf);
+            let map: BTreeMap<String, String> = map
+                .into_iter()
+                .map(|(name, value)| {
+                    let actual = if fields.iter().any(|f| f.name == name) { name } else { fields.iter().find(|f| f.name.eq_ignore_ascii_case(&name)).map(|f| f.name.clone()).unwrap_or(name) };
+                    (actual, value)
+                })
+                .collect();
             let unmatched = forms::fill_fields(&mut pdf, &map)?;
             if !unmatched.is_empty() {
                 eprintln!("no field named: {}", unmatched.join(", "));

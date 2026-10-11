@@ -1001,9 +1001,9 @@ fn setters_for(pdf: &mut Pdf, page_id: lopdf::ObjectId, rich: &RichText, origina
             let setter = original.unwrap_or_else(|| {
                 let stand_in = TextSetter::for_texts(style.standard_font(), [text.as_str()]);
                 // A standard font that was never embedded, drawn again as itself, is no substitution.
-                let same_standard_font = !stand_in.uses_embedded_fonts() && StandardFont::from_name(without_subset_tag(&style.font_name)) == Some(style.standard_font());
+                let same_standard_font = !stand_in.uses_embedded_fonts() && StandardFont::from_name(crate::font_reuse::without_subset_tag(&style.font_name)) == Some(style.standard_font());
                 if !text.trim().is_empty() && !same_standard_font {
-                    let original = without_subset_tag(&style.font_name).to_string();
+                    let original = crate::font_reuse::without_subset_tag(&style.font_name).to_string();
                     let stand_in_name = stand_in.font_name();
                     if !stand_ins.iter().any(|s| s.original == original && s.stand_in == stand_in_name) {
                         let sample: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(30).collect();
@@ -1018,13 +1018,6 @@ fn setters_for(pdf: &mut Pdf, page_id: lopdf::ObjectId, rich: &RichText, origina
     (setters, stand_ins)
 }
 
-/// A font name without the "ABCDEF+" tag that marks an embedded subset.
-fn without_subset_tag(name: &str) -> &str {
-    match name.split_once('+') {
-        Some((tag, rest)) if tag.len() == 6 && tag.chars().all(|c| c.is_ascii_uppercase()) => rest,
-        _ => name,
-    }
-}
 
 /// Replaces a paragraph's text, re-wrapping it to the paragraph's width at
 /// its line spacing and alignment. Explicit line breaks in `new_text` start
