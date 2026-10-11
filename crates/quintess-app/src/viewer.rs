@@ -145,8 +145,9 @@ pub enum ViewerAction {
     /// at `expected` (kind and bounds), or clear the selection when empty.
     /// Tag the content inside a dragged box (1-based page, page space).
     TagArea { page: u32, rect: [f32; 4] },
-    /// Start or stop text wrapping around the picture at `bounds`.
-    SetTextWrap { page_index: usize, bounds: [f32; 4], on: bool },
+    /// Wrap text around the picture at `bounds` with these options (turning
+    /// it on, or changing how it wraps), or with `None` stop wrapping.
+    SetTextWrap { page_index: usize, bounds: [f32; 4], options: Option<quintess_core::text_wrap::WrapOptions> },
     ChangeObjects { page_index: usize, objects: Vec<quintess_core::objects::PageObject>, change: quintess_core::objects::Change, label: String, expected: Vec<(quintess_core::objects::ObjectKind, [f32; 4])> },
     /// Choose a picture file to put in place of these pictures.
     ReplacePicture { page_index: usize, objects: Vec<quintess_core::objects::PageObject> },

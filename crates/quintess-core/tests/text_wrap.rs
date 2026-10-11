@@ -1,11 +1,11 @@
 //! Text wrapping around pictures, and flowing again when they move.
 
-use image::{ImageFormat, Rgb, RgbImage};
+use image::{ImageFormat, Rgb, RgbImage, Rgba, RgbaImage};
 use quintess_core::create::{TextPageSettings, markdown_to_pdf};
 use quintess_core::edit_text::{Alignment, EditableLine, EditableParagraph, editable_lines, editable_paragraphs};
 use quintess_core::engine::{self, RenderOptions};
 use quintess_core::objects::{Change, ObjectKind, add_image, change_objects, list_objects, translation};
-use quintess_core::text_wrap::{WrapOptions, WrapSide, flows_for_obstacle, list_flows, obstacle_changed, wrap_around, wrap_options_for, wrapping_pictures};
+use quintess_core::text_wrap::{WrapOptions, WrapSide, WrapStyle, flows_for_obstacle, list_flows, obstacle_changed, wrap_around, wrap_options_for, wrapping_pictures};
 use quintess_core::{Pdf, SaveSettings};
 
 const GAP: f32 = 8.0;
@@ -93,7 +93,7 @@ fn lines_beside(bytes: &[u8], picture: [f32; 4]) -> Vec<EditableLine> {
 }
 
 fn options(side: WrapSide) -> WrapOptions {
-    WrapOptions { gap_points: GAP, side }
+    WrapOptions::square(side, GAP)
 }
 
 #[test]
@@ -365,4 +365,209 @@ fn a_picture_with_wrapping_on_wraps_the_text_it_is_moved_onto() {
     let (moved, report) = obstacle_changed(&on, None, 0, empty, Some(onto)).unwrap().unwrap();
     assert!(!report.flows.is_empty(), "{report:?}");
     assert!(characters_over(&moved, clear_area(onto)).is_empty());
+}
+
+// ---------------------------------------------------------------------
+// Wrap styles: tight, top and bottom; options kept across saves and moves.
+
+/// A square picture `pixels` across with a disk filling it: on a transparent
+/// background, or (`on_white`) an opaque one on plain white.
+fn disk_png(pixels: u32, on_white: bool) -> Vec<u8> {
+    let radius = pixels as f32 / 2.0;
+    let picture = RgbaImage::from_fn(pixels, pixels, |x, y| {
+        let inside = (x as f32 + 0.5 - radius).hypot(y as f32 + 0.5 - radius) <= radius;
+        match (inside, on_white) {
+            (true, _) => Rgba([200, 60, 40, 255]),
+            (false, true) => Rgba([255, 255, 255, 255]),
+            (false, false) => Rgba([0, 0, 0, 0]),
+        }
+    });
+    let mut bytes = Vec::new();
+    if on_white {
+        image::DynamicImage::ImageRgba8(picture).to_rgb8().write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png).unwrap();
+    } else {
+        picture.write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png).unwrap();
+    }
+    bytes
+}
+
+/// The justified paragraph (frame 100..500, baselines 700 down by 14) with
+/// a 100-point disk picture flush with its right edge, centered at y 660.
+fn justified_with_disk(on_white: bool) -> (Vec<u8>, [f32; 4]) {
+    let bytes = hand_set(&JUSTIFIED, Alignment::Justified);
+    let mut pdf = Pdf::from_bytes(&bytes, None).unwrap();
+    let picture = [400.0, 610.0, 500.0, 710.0];
+    add_image(&mut pdf, 1, &disk_png(200, on_white), picture).unwrap();
+    (pdf.to_bytes(&SaveSettings::default()).unwrap(), picture)
+}
+
+/// Characters closer to the disk inscribed in `picture` than `across`
+/// points beside it, at heights within `above_and_below` of the character
+/// (as the gaps are measured: left and right of the outline at each height).
+fn characters_near_disk(bytes: &[u8], picture: [f32; 4], across: f32, above_and_below: f32) -> Vec<(char, [f32; 4])> {
+    let (center_x, center_y) = ((picture[0] + picture[2]) / 2.0, (picture[1] + picture[3]) / 2.0);
+    let radius = (picture[2] - picture[0]) / 2.0;
+    characters_over(bytes, [picture[0] - across, picture[1] - above_and_below, picture[2] + across, picture[3] + above_and_below])
+        .into_iter()
+        .filter(|(_, rect)| {
+            // The disk's half-width at the height nearest its middle within reach.
+            let nearest_y = center_y.clamp(rect[1] - above_and_below, rect[3] + above_and_below);
+            let half_width = (radius * radius - (nearest_y - center_y).powi(2)).max(0.0).sqrt();
+            (nearest_y - center_y).abs() < radius && rect[0] < center_x + half_width + across && rect[2] > center_x - half_width - across
+        })
+        .collect()
+}
+
+fn tight(side: WrapSide) -> WrapOptions {
+    WrapOptions { style: WrapStyle::Tight, side, horizontal_gap_points: GAP, vertical_gap_points: 0.0 }
+}
+
+#[test]
+fn tight_lines_follow_a_transparent_circle() {
+    for on_white in [false, true] {
+        let (bytes, picture) = justified_with_disk(on_white);
+        let (wrapped, report) = wrap_around(&bytes, None, 0, picture, tight(WrapSide::Largest)).unwrap();
+        save_picture(&wrapped, if on_white { "tight-on-white" } else { "tight" });
+        assert!(report.outline_unavailable.is_none(), "{report:?}");
+        assert!(list_flows(&Pdf::from_bytes(&wrapped, None).unwrap(), 0)[0].obstacles[0].shape.is_some());
+        // No glyph comes within the gap of the disk (less a cell of the
+        // outline's grid, 1.6 points here, and rounding).
+        let near = characters_near_disk(&wrapped, picture, GAP - 2.0, 0.0);
+        assert!(near.is_empty(), "text over the disk: {near:?}");
+        assert!(page_words(&wrapped).contains(&words(&JUSTIFIED.join(" "))));
+        // Justified lines end where their row's space ends: lines near the
+        // top and bottom of the disk reach further right than at its middle.
+        let center_y = (picture[1] + picture[3]) / 2.0;
+        let beside = lines_beside(&wrapped, picture);
+        let line_end_at = |y: f32| beside.iter().min_by(|a, b| ((a.bounds[1] + a.bounds[3]) / 2.0 - y).abs().total_cmp(&((b.bounds[1] + b.bounds[3]) / 2.0 - y).abs())).map(|l| l.bounds[2]).unwrap();
+        let (middle, near_top, near_bottom) = (line_end_at(center_y), line_end_at(picture[3] - 6.0), line_end_at(picture[1] + 6.0));
+        assert!(middle <= picture[0] - GAP + 1.5, "the middle line ends at {middle}");
+        assert!(near_top > middle + 10.0 && near_bottom > middle + 10.0, "{near_top} and {near_bottom} vs {middle}: {:?}", beside.iter().map(|l| l.bounds).collect::<Vec<_>>());
+        // Square wrapping keeps every line beside the picture out of its box.
+        let (square, _) = wrap_around(&bytes, None, 0, picture, WrapOptions { style: WrapStyle::Square, ..tight(WrapSide::Largest) }).unwrap();
+        save_picture(&square, "square-disk");
+        assert!(lines_beside(&square, picture).iter().all(|l| l.bounds[2] <= picture[0] - GAP + 1.5));
+    }
+}
+
+#[test]
+fn tight_falls_back_to_square_without_a_picture() {
+    let bytes = hand_set(&JUSTIFIED, Alignment::Justified);
+    // No picture at all at this place: the box is wrapped around, and the report says why.
+    let area = [400.0, 620.0, 500.0, 690.0];
+    let (wrapped, report) = wrap_around(&bytes, None, 0, area, tight(WrapSide::Largest)).unwrap();
+    assert!(report.outline_unavailable.as_deref().is_some_and(|why| why.contains("no picture")), "{report:?}");
+    assert!(characters_over(&wrapped, [area[0] - GAP + 0.5, area[1] + 0.5, area[2], area[3] - 0.5]).is_empty());
+    assert_eq!(wrap_options_for(&Pdf::from_bytes(&wrapped, None).unwrap(), 0, area).map(|o| o.style), Some(WrapStyle::Tight));
+}
+
+#[test]
+fn top_and_bottom_leaves_no_text_beside_the_picture() {
+    let (bytes, picture) = report_with_picture("", 160.0);
+    let options = WrapOptions { style: WrapStyle::TopAndBottom, ..options(WrapSide::Largest) };
+    let (wrapped, report) = wrap_around(&bytes, None, 0, picture, options).unwrap();
+    save_picture(&wrapped, "top-and-bottom");
+    assert!(!report.flows.is_empty(), "{report:?}");
+    let clear = [picture[0], picture[1] - GAP, picture[2], picture[3] + GAP];
+    let beside = lines_of(&wrapped).into_iter().filter(|l| l.bounds[1] < clear[3] - 0.5 && l.bounds[3] > clear[1] + 0.5).collect::<Vec<_>>();
+    assert!(beside.is_empty(), "lines beside the picture: {:?}", beside.iter().map(|l| (l.text.clone(), l.bounds)).collect::<Vec<_>>());
+    assert!(page_words(&wrapped).contains(&words(MIDDLE)));
+    // The paragraph goes on below the picture.
+    assert!(lines_of(&wrapped).iter().any(|l| l.bounds[3] < picture[1] - GAP + 0.5 && MIDDLE.contains(l.text.split_whitespace().next().unwrap_or("-"))));
+}
+
+#[test]
+fn both_sides_splits_lines_around_a_centered_picture() {
+    let bytes = hand_set(&JUSTIFIED, Alignment::Justified);
+    let picture = [260.0, 610.0, 340.0, 680.0];
+    let mut pdf = Pdf::from_bytes(&bytes, None).unwrap();
+    add_image(&mut pdf, 1, &png(), picture).unwrap();
+    let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+    let (wrapped, _) = wrap_around(&bytes, None, 0, picture, options(WrapSide::Both)).unwrap();
+    save_picture(&wrapped, "both-justified");
+    assert!(characters_over(&wrapped, clear_area(picture)).is_empty());
+    assert!(page_words(&wrapped).contains(&words(&JUSTIFIED.join(" "))));
+    let beside = lines_beside(&wrapped, picture);
+    let left: Vec<_> = beside.iter().filter(|l| l.bounds[2] <= picture[0] - GAP + 1.0).collect();
+    let right: Vec<_> = beside.iter().filter(|l| l.bounds[0] >= picture[2] + GAP - 1.0).collect();
+    assert!(left.len() >= 3 && right.len() >= 3, "{:?}", beside.iter().map(|l| (l.text.clone(), l.bounds)).collect::<Vec<_>>());
+    // Justified halves reach the edges of their spaces.
+    assert!(left.iter().all(|l| (l.bounds[2] - (picture[0] - GAP)).abs() < 1.5) && right.iter().all(|l| (l.bounds[2] - 500.0).abs() < 1.5), "{:?}", beside.iter().map(|l| l.bounds).collect::<Vec<_>>());
+}
+
+#[test]
+fn changing_options_lays_the_text_out_again() {
+    let (bytes, picture) = report_with_picture("", 160.0);
+    let (square, _) = wrap_around(&bytes, None, 0, picture, options(WrapSide::Largest)).unwrap();
+    assert!(!lines_beside(&square, picture).is_empty());
+    let top_and_bottom = WrapOptions { style: WrapStyle::TopAndBottom, ..options(WrapSide::Largest) };
+    let (changed, report) = wrap_around(&square, None, 0, picture, top_and_bottom).unwrap();
+    assert!(!report.flows.is_empty(), "{report:?}");
+    assert!(lines_beside(&changed, picture).is_empty());
+    let pdf = Pdf::from_bytes(&changed, None).unwrap();
+    assert_eq!(wrap_options_for(&pdf, 0, picture), Some(top_and_bottom));
+    assert_eq!(list_flows(&pdf, 0).len(), 1);
+    assert!(page_words(&changed).contains(&words(MIDDLE)));
+}
+
+#[test]
+fn options_survive_saving_and_moving() {
+    let (bytes, picture) = justified_with_disk(false);
+    let chosen = WrapOptions { style: WrapStyle::Tight, side: WrapSide::Left, horizontal_gap_points: 12.0, vertical_gap_points: 4.0 };
+    let (wrapped, _) = wrap_around(&bytes, None, 0, picture, chosen).unwrap();
+    // Saved and opened again.
+    let path = folder().join("options-saved.pdf");
+    std::fs::write(&path, &wrapped).unwrap();
+    let reopened = std::fs::read(&path).unwrap();
+    assert_eq!(wrap_options_for(&Pdf::from_bytes(&reopened, None).unwrap(), 0, picture), Some(chosen));
+    // Moved down and left with the picture tool's change, then reflowed.
+    let mut pdf = Pdf::from_bytes(&reopened, None).unwrap();
+    let image = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Image).unwrap();
+    change_objects(&mut pdf, 1, std::slice::from_ref(&image), &Change::Transform(translation(-60.0, -20.0))).unwrap();
+    let moved_bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+    let moved = [picture[0] - 60.0, picture[1] - 20.0, picture[2] - 60.0, picture[3] - 20.0];
+    let (reflowed, _) = obstacle_changed(&moved_bytes, None, 0, picture, Some(moved)).unwrap().unwrap();
+    save_picture(&reflowed, "tight-moved");
+    let pdf = Pdf::from_bytes(&reflowed, None).unwrap();
+    assert_eq!(wrap_options_for(&pdf, 0, moved), Some(chosen));
+    let shape = list_flows(&pdf, 0)[0].obstacles[0].shape.clone().expect("the outline moves with the picture");
+    assert!((shape.picture_to_page[4] - moved[0]).abs() < 0.1 && (shape.picture_to_page[5] - moved[1]).abs() < 0.1, "{shape:?}");
+    let near = characters_near_disk(&reflowed, moved, 12.0 - 2.0, 4.0 - 1.0);
+    assert!(near.is_empty(), "text over the moved disk: {near:?}");
+}
+
+#[test]
+fn files_with_only_one_gap_still_load_and_reflow() {
+    let (bytes, picture) = report_with_picture("", 160.0);
+    let (wrapped, _) = wrap_around(&bytes, None, 0, picture, options(WrapSide::Largest)).unwrap();
+    // Rewrite the records as the version before wrap styles wrote them.
+    let old_options = serde_json::json!({ "gap_points": 10.0, "side": "Largest" });
+    let mut pdf = Pdf::from_bytes(&wrapped, None).unwrap();
+    let page_id = pdf.page_id(1).unwrap();
+    let page = pdf.doc.get_dictionary_mut(page_id).unwrap();
+    let mut pictures: serde_json::Value = serde_json::from_slice(page.get(b"QsWrapPictures").unwrap().as_str().unwrap()).unwrap();
+    for picture in pictures.as_array_mut().unwrap() {
+        picture["options"] = old_options.clone();
+    }
+    page.set("QsWrapPictures", lopdf::Object::String(serde_json::to_vec(&pictures).unwrap(), lopdf::StringFormat::Literal));
+    let mut flows = page.get(b"QsFlows").unwrap().as_array().unwrap().clone();
+    for entry in &mut flows {
+        let entry = entry.as_dict_mut().unwrap();
+        let mut record: serde_json::Value = serde_json::from_slice(entry.get(b"Record").unwrap().as_str().unwrap()).unwrap();
+        for obstacle in record["obstacles"].as_array_mut().unwrap() {
+            obstacle["options"] = old_options.clone();
+        }
+        entry.set("Record", lopdf::Object::String(serde_json::to_vec(&record).unwrap(), lopdf::StringFormat::Literal));
+    }
+    page.set("QsFlows", flows);
+    let old = pdf.to_bytes(&SaveSettings::default()).unwrap();
+    let pdf = Pdf::from_bytes(&old, None).unwrap();
+    assert_eq!(wrap_options_for(&pdf, 0, picture), Some(WrapOptions::square(WrapSide::Largest, 10.0)));
+    assert_eq!(list_flows(&pdf, 0).len(), 1);
+    // Moving the picture lays the text out with the old gap all around.
+    let moved = [picture[0], picture[1] - 15.0, picture[2], picture[3] - 15.0];
+    let (reflowed, report) = obstacle_changed(&old, None, 0, picture, Some(moved)).unwrap().unwrap();
+    assert!(!report.flows.is_empty() && report.released.is_empty(), "{report:?}");
+    assert!(characters_over(&reflowed, [moved[0] - 9.5, moved[1] - 9.5, moved[2] + 9.5, moved[3] + 9.5]).is_empty());
+    assert_eq!(wrap_options_for(&Pdf::from_bytes(&reflowed, None).unwrap(), 0, moved), Some(WrapOptions::square(WrapSide::Largest, 10.0)));
 }

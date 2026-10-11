@@ -6,6 +6,7 @@
 
 use egui::{Color32, CursorIcon, Pos2, Rect, Stroke, StrokeKind, vec2};
 use quintess_core::objects::{BlendMode, Change, Matrix, ObjectKind, PageObject, apply, object_at, objects_in, rectangle_to_rectangle, rotation_about, scaling_about, translation};
+use quintess_core::text_wrap::{WrapOptions, WrapSide, WrapStyle};
 
 use crate::tab::{DocumentTab, PageGeometry};
 use crate::viewer::{ViewerAction, screen_rect_of, to_page};
@@ -104,9 +105,29 @@ pub struct ObjectToolState {
     gesture: Option<(Gesture, (f32, f32), (f32, f32))>,
     /// The next drag draws the area to crop to.
     cropping: bool,
+    /// The Wrap text menu, while open.
+    wrap_menu: Option<WrapMenu>,
+}
+
+/// The Wrap text menu while it is open, for the picture at `bounds`: the
+/// side and distances being chosen (applied with the style or Apply).
+struct WrapMenu {
+    bounds: [f32; 4],
+    draft: WrapOptions,
 }
 
 impl ObjectToolState {
+    /// Opens the Wrap text menu for the one selected picture (used by the
+    /// screenshot self-check; the toolbar's button opens it otherwise).
+    pub fn open_wrap_menu(&mut self, tab: &DocumentTab) {
+        if let [picture] = self.selected.as_slice() {
+            if picture.kind == ObjectKind::Image {
+                let draft = tab.wrap_options_at(self.page_index, picture.bounds).unwrap_or_default();
+                self.wrap_menu = Some(WrapMenu { bounds: picture.bounds, draft });
+            }
+        }
+    }
+
     /// Selects objects after a change, by where they are expected to be.
     pub fn reselect(&mut self, tab: &DocumentTab, page_index: usize, expected: &[(ObjectKind, [f32; 4])]) {
         let objects = tab.page_objects(page_index);
@@ -127,6 +148,7 @@ impl ObjectToolState {
         self.selected.clear();
         self.gesture = None;
         self.cropping = false;
+        self.wrap_menu = None;
     }
 
     fn bounds(&self) -> Option<[f32; 4]> {
@@ -367,12 +389,81 @@ pub fn draw(ui: &mut egui::Ui, tab: &DocumentTab, state: &mut ObjectToolState, p
         let square = Rect::from_center_size(center, vec2(8.0, 8.0));
         painter.rect(square, 1.0, Color32::WHITE, Stroke::new(1.5, accent), StrokeKind::Middle);
     }
-    // Text wrap is offered for one picture at a time.
-    let wraps = (state.selected.len() == 1 && state.selected[0].kind == ObjectKind::Image).then(|| tab.text_wraps_around(page_index, state.selected[0].bounds));
+    // Text wrap is offered for one picture at a time: how text wraps around
+    // it now (`Some(None)` when it doesn't).
+    let wraps = (state.selected.len() == 1 && state.selected[0].kind == ObjectKind::Image).then(|| tab.wrap_options_at(page_index, state.selected[0].bounds));
+    // The menu belongs to the picture it was opened for.
+    if state.wrap_menu.as_ref().is_some_and(|menu| wraps.is_none() || distance(menu.bounds, state.selected[0].bounds) > 1.0) {
+        state.wrap_menu = None;
+    }
     toolbar(ui, state, page_index, shown, wraps, actions);
 }
 
-fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, selection_on_screen: Rect, wraps: Option<bool>, actions: &mut Vec<ViewerAction>) {
+/// The Wrap text menu's choices, below the toolbar's button: what was
+/// chosen (`Some(None)` to stop wrapping) and whether the menu closes.
+fn wrap_menu(ui: &egui::Ui, menu: &mut WrapMenu, current: Option<WrapOptions>, button: Rect, page_index: usize) -> (Option<Option<WrapOptions>>, bool) {
+    let mut chosen = None;
+    let mut close = false;
+    // Below the button, or above it when there's no room below (judged by
+    // the menu's height last frame).
+    let menu_id = ui.id().with(("wrap menu", page_index));
+    let menu_height = ui.ctx().memory(|memory| memory.area_rect(menu_id)).map_or(430.0, |rect| rect.height());
+    let room_below = ui.ctx().content_rect().bottom() - button.bottom() - 6.0;
+    let (position, pivot) = if room_below >= menu_height { (button.left_bottom() + vec2(0.0, 6.0), egui::Align2::LEFT_TOP) } else { (button.left_top() - vec2(0.0, 6.0), egui::Align2::LEFT_BOTTOM) };
+    let area = egui::Area::new(menu_id).order(egui::Order::Foreground).pivot(pivot).fixed_pos(position).show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).inner_margin(8.0).show(ui, |ui| {
+            ui.set_min_width(210.0);
+            if ui.radio(current.is_none(), "In line with text").on_hover_text("No wrapping: the picture sits over the text").clicked() {
+                chosen = Some(None);
+                close = true;
+            }
+            let styles = [
+                (WrapStyle::Square, "Square", "Lines stay out of the picture's box"),
+                (WrapStyle::Tight, "Tight", "Lines come up to the picture's outline, where it is transparent or plain background"),
+                (WrapStyle::TopAndBottom, "Top and bottom", "No text beside the picture: text stops above it and goes on below it"),
+            ];
+            for (style, label, hint) in styles {
+                if ui.radio(current.is_some_and(|options| options.style == style), label).on_hover_text(hint).clicked() {
+                    menu.draft.style = style;
+                    chosen = Some(Some(menu.draft));
+                    close = true;
+                }
+            }
+            ui.separator();
+            ui.weak("Wrap on");
+            // Sides mean nothing when no text goes beside the picture.
+            let beside = menu.draft.style != WrapStyle::TopAndBottom;
+            let sides = [(WrapSide::Both, "Both sides"), (WrapSide::Left, "Left only"), (WrapSide::Right, "Right only"), (WrapSide::Largest, "Largest side")];
+            for (side, label) in sides {
+                if ui.add_enabled(beside, egui::RadioButton::new(menu.draft.side == side, label)).clicked() {
+                    menu.draft.side = side;
+                    if current.is_some() {
+                        chosen = Some(Some(menu.draft));
+                    }
+                }
+            }
+            ui.separator();
+            ui.weak("Distance from text");
+            egui::Grid::new("wrap distances").num_columns(2).show(ui, |ui| {
+                ui.label("Left and right");
+                ui.add(egui::DragValue::new(&mut menu.draft.horizontal_gap_points).range(0.0..=144.0).speed(0.25).suffix(" pt"));
+                ui.end_row();
+                ui.label("Top and bottom");
+                ui.add(egui::DragValue::new(&mut menu.draft.vertical_gap_points).range(0.0..=144.0).speed(0.25).suffix(" pt"));
+                ui.end_row();
+            });
+            let hint = if current.is_some() { "Lay the text out again with these distances" } else { "Wrap text around this picture with these distances" };
+            if ui.button("Apply").on_hover_text(hint).clicked() {
+                chosen = Some(Some(menu.draft));
+            }
+        });
+    });
+    // A press anywhere else closes the menu, as menus do.
+    let pressed_elsewhere = ui.input(|input| input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|pointer| !area.response.rect.contains(pointer) && !button.contains(pointer)));
+    (chosen, close || pressed_elsewhere)
+}
+
+fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, selection_on_screen: Rect, wraps: Option<Option<WrapOptions>>, actions: &mut Vec<ViewerAction>) {
     let Some(bounds) = state.bounds() else { return };
     let center = ((bounds[0] + bounds[2]) / 2.0, (bounds[1] + bounds[3]) / 2.0);
     let height = 40.0;
@@ -390,7 +481,8 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
     let (cropping, all_pictures) = (state.cropping, pictures == state.selected.len());
     let starting_opacity = state.selected.first().map_or(1.0, |object| object.opacity);
     let state_single = state.selected.len() == 1;
-    let (mut toggle_crop, mut replace, mut toggle_wrap, mut outcome) = (false, false, false, None);
+    let (mut toggle_crop, mut replace, mut toggle_wrap_menu, mut outcome) = (false, false, false, None);
+    let mut wrap_button: Option<Rect> = None;
     // Keep the bar inside the view, using its width from the last frame.
     let bar_id = ui.id().with(("object toolbar", page_index));
     let bar_width = ui.ctx().memory(|memory| memory.area_rect(bar_id)).map_or(520.0, |rect| rect.width());
@@ -426,11 +518,13 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
                 if all_pictures && ui.button("Replace…").on_hover_text("Put another picture in its place").clicked() {
                     replace = true;
                 }
-                if let Some(on) = wraps {
-                    let hint = if on { "Text flows around this picture and follows it. Click to stop." } else { "Make the paragraphs beside this picture flow around it, and follow it when it moves" };
-                    if ui.selectable_label(on, "Wrap text").on_hover_text(hint).clicked() {
-                        toggle_wrap = true;
+                if let Some(current) = wraps {
+                    let hint = if current.is_some() { "Text flows around this picture and follows it. Choose how, or stop." } else { "Make the paragraphs beside this picture flow around it, and follow it when it moves" };
+                    let button = ui.selectable_label(current.is_some(), "Wrap text ▾").on_hover_text(hint);
+                    if button.clicked() {
+                        toggle_wrap_menu = true;
                     }
+                    wrap_button = Some(button.rect);
                 }
                 // Opacity and blend mode, chosen in a small menu and applied together.
                 let look_id = ui.id().with("object look");
@@ -471,8 +565,21 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
     if toggle_crop {
         state.cropping = !state.cropping;
     }
-    if let (true, Some(on)) = (toggle_wrap, wraps) {
-        actions.push(ViewerAction::SetTextWrap { page_index: state.page_index, bounds: state.selected[0].bounds, on: !on });
+    if let (Some(current), Some(button)) = (wraps, wrap_button) {
+        if toggle_wrap_menu {
+            state.wrap_menu = match state.wrap_menu {
+                Some(_) => None,
+                None => Some(WrapMenu { bounds: state.selected[0].bounds, draft: current.unwrap_or_default() }),
+            };
+        } else if let Some(menu) = state.wrap_menu.as_mut() {
+            let (chosen, close) = wrap_menu(ui, menu, current, button, page_index);
+            if let Some(options) = chosen {
+                actions.push(ViewerAction::SetTextWrap { page_index: state.page_index, bounds: state.selected[0].bounds, options });
+            }
+            if close {
+                state.wrap_menu = None;
+            }
+        }
     }
     if replace {
         actions.push(ViewerAction::ReplacePicture { page_index: state.page_index, objects: state.selected.clone() });

@@ -352,9 +352,17 @@ pub enum MoreCommand {
         /// The picture's box in points from the bottom left: left,bottom,right,top.
         #[arg(long)]
         around: Option<String>,
-        /// Space kept clear around the picture, in points.
+        /// How lines meet the picture: square (its box), tight (its visible
+        /// outline) or top-and-bottom (no text beside it).
+        #[arg(long, default_value = "square")]
+        style: String,
+        /// Space kept clear left and right of the picture (and above and
+        /// below it, unless --vertical-gap is given), in points.
         #[arg(long, default_value_t = 8.0)]
         gap: f32,
+        /// Space kept clear above and below the picture, in points.
+        #[arg(long)]
+        vertical_gap: Option<f32>,
         /// Which side lines beside the picture use: largest, both, left or right.
         #[arg(long, default_value = "largest")]
         side: String,
@@ -1055,8 +1063,8 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 None => println!("sent to {printer}"),
             }
         }
-        MoreCommand::Wrap { input, page, around, gap, side, reflow, from, unwrap, list, output } => {
-            use quintess_core::text_wrap::{self, FlowSelection, ObstacleChange, WrapOptions, WrapSide};
+        MoreCommand::Wrap { input, page, around, style, gap, vertical_gap, side, reflow, from, unwrap, list, output } => {
+            use quintess_core::text_wrap::{self, FlowSelection, ObstacleChange, WrapOptions, WrapSide, WrapStyle};
             let page_index = page.checked_sub(1).context("pages are numbered from 1")? as usize;
             let bytes = std::fs::read(&input.input)?;
             let password = input.password.as_deref();
@@ -1068,7 +1076,12 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     println!("Nothing on page {page} wraps.");
                 }
                 for picture in pictures {
-                    println!("picture {}  gap {} pt, {:?} side", rectangle_text(picture.bounds), picture.options.gap_points, picture.options.side);
+                    let options = picture.options;
+                    let outline = match (options.style, &picture.shape) {
+                        (WrapStyle::Tight, None) => " (outline unreadable: wraps around the box)",
+                        _ => "",
+                    };
+                    println!("picture {}  {:?}{outline}, {:?} side, gaps {} pt across and {} pt above and below", rectangle_text(picture.bounds), options.style, options.side, options.horizontal_gap_points, options.vertical_gap_points);
                 }
                 for flow in flows {
                     let preview: String = flow.text().chars().take(70).collect();
@@ -1097,8 +1110,18 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     "right" => WrapSide::Right,
                     other => bail!("--side takes largest, both, left or right, not {other}"),
                 };
-                text_wrap::wrap_around(&bytes, password, page_index, bounds, WrapOptions { gap_points: gap, side })?
+                let style = match style.as_str() {
+                    "square" => WrapStyle::Square,
+                    "tight" => WrapStyle::Tight,
+                    "top-and-bottom" => WrapStyle::TopAndBottom,
+                    other => bail!("--style takes square, tight or top-and-bottom, not {other}"),
+                };
+                let options = WrapOptions { style, side, horizontal_gap_points: gap, vertical_gap_points: vertical_gap.unwrap_or(gap) };
+                text_wrap::wrap_around(&bytes, password, page_index, bounds, options)?
             };
+            if let Some(reason) = &report.outline_unavailable {
+                println!("The picture's outline couldn't be read ({reason}), so text wraps around its box.");
+            }
             if report.flows.is_empty() {
                 println!("No text needed to move{}.", if !reflow && !unwrap { "; wrapping is on for this picture and takes effect when it is moved onto text" } else { "" });
             }

@@ -129,7 +129,7 @@ pub fn list_objects(pdf: &Pdf, page_number: u32) -> Result<Vec<PageObject>> {
 }
 
 /// The page's XObject dictionary, resolved.
-fn page_xobjects(pdf: &Pdf, page_id: ObjectId) -> Dictionary {
+pub(crate) fn page_xobjects(pdf: &Pdf, page_id: ObjectId) -> Dictionary {
     page_resource_category(pdf, page_id, b"XObject")
 }
 

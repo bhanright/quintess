@@ -16,6 +16,7 @@ use quintess_core::bookmarks::{BookmarkEntry, read_bookmarks};
 use quintess_core::engine::{self, PageText, TextMatch};
 use quintess_core::forms::{FieldInfo, list_fields};
 use quintess_core::metadata::page_labels;
+use quintess_core::text_wrap::WrapOptions;
 use quintess_core::pdfium_render::prelude::PdfDocument;
 use quintess_core::{Pdf, SaveSettings};
 
@@ -106,7 +107,7 @@ pub struct DocumentTab {
     layer_cache: RefCell<Option<Rc<Vec<quintess_core::layers::Layer>>>>,
     object_layer_cache: RefCell<HashMap<usize, Rc<Vec<(usize, (u32, u16))>>>>,
     /// Per page, where the pictures that text wraps around are.
-    wrap_cache: RefCell<HashMap<usize, Rc<Vec<[f32; 4]>>>>,
+    wrap_cache: RefCell<HashMap<usize, Rc<Vec<([f32; 4], WrapOptions)>>>>,
     tag_cache: RefCell<Option<Rc<quintess_core::tag_tree::TagTree>>>,
     reading_order_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::tag_tree::ReadingOrderRegion>>>>,
     /// Number the tagged regions of each page in reading order (Tags panel).
@@ -425,24 +426,31 @@ impl DocumentTab {
         regions
     }
 
-    /// Where the pictures that text wraps around sit on a page.
-    pub fn wrapping_bounds(&self, page_index: usize) -> Rc<Vec<[f32; 4]>> {
-        if let Some(bounds) = self.wrap_cache.borrow().get(&page_index) {
-            return bounds.clone();
+    /// Where the pictures that text wraps around sit on a page, and how
+    /// text wraps around each.
+    pub fn wrapping_pictures(&self, page_index: usize) -> Rc<Vec<([f32; 4], WrapOptions)>> {
+        if let Some(pictures) = self.wrap_cache.borrow().get(&page_index) {
+            return pictures.clone();
         }
-        let bounds: Vec<[f32; 4]> = self.load_pdf().map(|pdf| {
-            let pictures = quintess_core::text_wrap::wrapping_pictures(&pdf, page_index).into_iter().map(|picture| picture.bounds);
-            let obstacles = quintess_core::text_wrap::list_flows(&pdf, page_index).into_iter().flat_map(|flow| flow.obstacles).map(|obstacle| obstacle.bounds);
+        let pictures: Vec<([f32; 4], WrapOptions)> = self.load_pdf().map(|pdf| {
+            let pictures = quintess_core::text_wrap::wrapping_pictures(&pdf, page_index).into_iter().map(|picture| (picture.bounds, picture.options));
+            let obstacles = quintess_core::text_wrap::list_flows(&pdf, page_index).into_iter().flat_map(|flow| flow.obstacles).map(|obstacle| (obstacle.bounds, obstacle.options));
             pictures.chain(obstacles).collect()
         }).unwrap_or_default();
-        let bounds = Rc::new(bounds);
-        self.wrap_cache.borrow_mut().insert(page_index, bounds.clone());
-        bounds
+        let pictures = Rc::new(pictures);
+        self.wrap_cache.borrow_mut().insert(page_index, pictures.clone());
+        pictures
+    }
+
+    /// How text wraps around a picture at these bounds (within a point), or
+    /// `None` when it doesn't.
+    pub fn wrap_options_at(&self, page_index: usize, bounds: [f32; 4]) -> Option<WrapOptions> {
+        self.wrapping_pictures(page_index).iter().find(|(wrapped, _)| wrapped.iter().zip(bounds).all(|(a, b)| (a - b).abs() < 1.0)).map(|(_, options)| *options)
     }
 
     /// Whether text wraps around a picture at these bounds (within a point).
     pub fn text_wraps_around(&self, page_index: usize, bounds: [f32; 4]) -> bool {
-        self.wrapping_bounds(page_index).iter().any(|wrapped| wrapped.iter().zip(bounds).all(|(a, b)| (a - b).abs() < 1.0))
+        self.wrap_options_at(page_index, bounds).is_some()
     }
 
     pub fn pickable_objects(&self, page_index: usize) -> Vec<quintess_core::objects::PageObject> {
