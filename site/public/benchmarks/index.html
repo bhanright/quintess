@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speed and memory: how Quintess was measured</title>
+<meta name="description" content="How Quintess and Adobe Acrobat were measured opening two long PDFs: the files, the computer, the method and every result.">
+<link rel="canonical" href="https://quintess.cc/benchmarks/">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Quintess">
+<meta property="og:title" content="Speed and memory: how Quintess was measured">
+<meta property="og:description" content="How Quintess and Adobe Acrobat were measured opening two long PDFs: the files, the computer, the method and every result.">
+<meta property="og:image" content="https://quintess.cc/assets/img/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css?v=4a120acd72">
+</head>
+<body class="subpage">
+<a class="skip" href="#main">Skip to content</a>
+<div class="grid-lines" aria-hidden="true"></div>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="/" aria-label="Quintess home"><img src="/assets/img/mark.png" alt="" width="20" height="24"><span>quintess</span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="/#features">Features</a>
+      <a href="/#private">Privacy</a>
+      <a href="/guide/">Guide</a>
+      <a href="https://github.com/bhanright/quintess" data-track="github">GitHub</a>
+    </nav>
+    <span class="readout" aria-hidden="true"></span>
+    <a class="button button-small" href="/#download">Download</a>
+  </div>
+  <div class="progress" aria-hidden="true"><span></span></div>
+</header>
+<main id="main">
+<article class="prose bench">
+  <p class="kicker"><span class="dot"></span>speed and memory</p>
+  <h1 class="display-2">How Quintess was measured</h1>
+<section class="doc-topic" id="opening-two-long-pdfs"><h2><a href="#opening-two-long-pdfs">Opening two long PDFs</a></h2>
+<p>How long Quintess and Adobe Acrobat take to open two long documents and settle, and how much memory they use then, measured on the same Windows PC on October 11, 2026. These results cover two files on one computer. They don&#x27;t measure rendering every page, scrolling through a whole document, or editing, and they will differ with other files, hardware and settings.</p>
+<p>Adobe and Acrobat are either registered trademarks or trademarks of Adobe in the United States and/or other countries. Quintess is not affiliated with or endorsed by Adobe.</p>
+<h3 id="opening-two-long-pdfs-results">Results</h3>
+<p>Warm medians: the median of runs 2 to 5, after the first run had read the file into the system&#x27;s file cache.</p>
+<div class="table-scroll"><table><thead><tr><th>Document</th><th>Quintess: ready</th><th>Acrobat: ready</th><th>Quintess memory</th><th>Acrobat memory</th></tr></thead><tbody><tr><td>624-page text document</td><td>0.81 s</td><td>9.20 s</td><td>144 MB</td><td>591 MB</td></tr><tr><td>150-page scanned document</td><td>2.66 s</td><td>8.96 s</td><td>387 MB</td><td>807 MB</td></tr></tbody></table></div>
+<p>Quintess&#x27;s window appeared in about 0.3 seconds for both documents, with the first page shown. On the scanned document it then spends about two more seconds preparing sharp pages ahead of the one in view (decoding their pictures), within its page memory budget (768 MB by default, set in Preferences), so that scrolling through the document doesn&#x27;t wait. That work is counted in its ready time.</p>
+</section>
+<section class="doc-topic" id="the-files"><h2><a href="#the-files">The files</a></h2>
+<p>Both documents are made by a script in the Quintess repository, so anyone can rebuild them: <code>python tools/benchmark/make_fixtures.py</code>.</p>
+<ul>
+<li><b>long.pdf</b>: 624 pages of text (900 sections of six paragraphs), made from Markdown by Quintess. 492,793 bytes, SHA-256 <code>b92ff6c269e9bd4311d9ad3be8c83a5139bf27b5f7573a24c89febe8b4e11bd9</code>.</li>
+<li><b>scans.pdf</b>: the first 150 pages of long.pdf rendered at 200 dpi as JPEG pictures and put back into a PDF, as a scanner makes them, with no text layer. 69,949,301 bytes, SHA-256 <code>95ae9a8b0e1334510423be76b1e543ad718a467aada2634409aa75d41e9b43a7</code>.</li>
+</ul>
+</section>
+<section class="doc-topic" id="the-computer"><h2><a href="#the-computer">The computer</a></h2>
+<ul>
+<li>Windows 11 Home, version 10.0.26200.</li>
+<li>AMD Ryzen 7 5700X, 8 cores and 16 threads, running at about 4.4 GHz during the tests.</li>
+<li>32 GB of memory.</li>
+<li>NVIDIA GeForce RTX 3070 Ti (driver 32.0.16.1062).</li>
+<li>The files were on an Intel SSD (SSDPEKNW020T8, NVMe).</li>
+<li>Quintess 0.2.0 (release build), with default settings: page memory 768 MB, automatic graphics.</li>
+<li>Adobe Acrobat 26.2.21931.0, as installed, with its default settings.</li>
+</ul>
+<p>Other programs were open but idle. <code>tools/benchmark/system_info.ps1</code> prints these details.</p>
+</section>
+<section class="doc-topic" id="the-method"><h2><a href="#the-method">The method</a></h2>
+<p><code>tools/benchmark/benchmark.ps1</code> opens the document in the program five times, closing every process of the program between runs. Each run measures:</p>
+<ul>
+<li><b>Window</b>: the time until the program&#x27;s window appears.</li>
+<li><b>Ready</b>: the time until the program stops working on its own. Once the window is up, the processes&#x27; combined processor time is sampled every quarter second; &quot;ready&quot; is the moment it began growing by less than 0.05 seconds per sample and kept that up for 2 seconds. This doesn&#x27;t mean every page was rendered.</li>
+<li><b>Memory</b>: the sum of the working sets of every process of the program at that moment, as Task Manager&#x27;s Details tab shows them. Memory shared between processes is counted once per process. Acrobat ran as four processes (Acrobat and three AcroCEF helpers); Quintess runs as one.</li>
+</ul>
+<p>The first run of each program read the file from disk; later runs found it in the system&#x27;s file cache, so the results above use runs 2 to 5.</p>
+</section>
+<section class="doc-topic" id="every-run"><h2><a href="#every-run">Every run</a></h2>
+<div class="table-scroll"><table><thead><tr><th>Program and document</th><th>Run</th><th>Window</th><th>Ready</th><th>Memory</th><th>Peak private memory</th><th>Processes</th></tr></thead><tbody><tr><td>Quintess, long.pdf</td><td>1</td><td>0.90 s</td><td>1.47 s</td><td>162 MB</td><td>214 MB</td><td>1</td></tr><tr><td>Quintess, long.pdf</td><td>2</td><td>0.29 s</td><td>0.81 s</td><td>136 MB</td><td>200 MB</td><td>1</td></tr><tr><td>Quintess, long.pdf</td><td>3</td><td>0.29 s</td><td>0.81 s</td><td>144 MB</td><td>210 MB</td><td>1</td></tr><tr><td>Quintess, long.pdf</td><td>4</td><td>0.29 s</td><td>0.81 s</td><td>144 MB</td><td>210 MB</td><td>1</td></tr><tr><td>Quintess, long.pdf</td><td>5</td><td>0.27 s</td><td>0.80 s</td><td>145 MB</td><td>213 MB</td><td>1</td></tr><tr><td>Quintess, scans.pdf</td><td>1</td><td>0.29 s</td><td>2.66 s</td><td>386 MB</td><td>457 MB</td><td>1</td></tr><tr><td>Quintess, scans.pdf</td><td>2</td><td>0.29 s</td><td>2.66 s</td><td>388 MB</td><td>452 MB</td><td>1</td></tr><tr><td>Quintess, scans.pdf</td><td>3</td><td>0.28 s</td><td>2.65 s</td><td>386 MB</td><td>449 MB</td><td>1</td></tr><tr><td>Quintess, scans.pdf</td><td>4</td><td>0.29 s</td><td>2.66 s</td><td>387 MB</td><td>449 MB</td><td>1</td></tr><tr><td>Quintess, scans.pdf</td><td>5</td><td>0.29 s</td><td>2.66 s</td><td>387 MB</td><td>461 MB</td><td>1</td></tr><tr><td>Acrobat, long.pdf</td><td>1</td><td>0.93 s</td><td>13.63 s</td><td>573 MB</td><td>437 MB</td><td>4</td></tr><tr><td>Acrobat, long.pdf</td><td>2</td><td>0.55 s</td><td>9.25 s</td><td>590 MB</td><td>456 MB</td><td>4</td></tr><tr><td>Acrobat, long.pdf</td><td>3</td><td>0.53 s</td><td>9.20 s</td><td>591 MB</td><td>456 MB</td><td>4</td></tr><tr><td>Acrobat, long.pdf</td><td>4</td><td>0.55 s</td><td>9.20 s</td><td>591 MB</td><td>457 MB</td><td>4</td></tr><tr><td>Acrobat, long.pdf</td><td>5</td><td>0.53 s</td><td>9.21 s</td><td>591 MB</td><td>456 MB</td><td>4</td></tr><tr><td>Acrobat, scans.pdf</td><td>1</td><td>0.55 s</td><td>9.23 s</td><td>808 MB</td><td>675 MB</td><td>4</td></tr><tr><td>Acrobat, scans.pdf</td><td>2</td><td>0.54 s</td><td>8.96 s</td><td>807 MB</td><td>713 MB</td><td>4</td></tr><tr><td>Acrobat, scans.pdf</td><td>3</td><td>0.53 s</td><td>8.97 s</td><td>808 MB</td><td>772 MB</td><td>4</td></tr><tr><td>Acrobat, scans.pdf</td><td>4</td><td>0.54 s</td><td>8.73 s</td><td>803 MB</td><td>670 MB</td><td>4</td></tr><tr><td>Acrobat, scans.pdf</td><td>5</td><td>0.54 s</td><td>9.00 s</td><td>808 MB</td><td>703 MB</td><td>4</td></tr></tbody></table></div>
+</section>
+<section class="doc-topic" id="running-it-yourself"><h2><a href="#running-it-yourself">Running it yourself</a></h2>
+<ol>
+<li>Build Quintess, or install it, and run <code>python tools/benchmark/make_fixtures.py</code> to make the two documents.</li>
+<li>Close the program you will measure.</li>
+<li>Run <code>powershell -File tools/benchmark/benchmark.ps1 -Program &lt;path to the program&gt; -File &lt;document&gt; -ProcessNames &lt;names&gt;</code>, with the process names without &quot;.exe&quot; (for Quintess, <code>quintess-app</code>; for Acrobat, <code>Acrobat,AcroCEF</code>).</li>
+<li>Run <code>powershell -File tools/benchmark/system_info.ps1 -Programs &lt;paths&gt;</code> and keep its output with the results.</li>
+</ol>
+<p>The scripts are Windows PowerShell. Corrections and results from other computers are welcome as issues on GitHub.</p>
+</section>
+</article>
+</main>
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="/"><img src="/assets/img/mark.png" alt="" width="18" height="22"><span>quintess</span></a>
+    <nav aria-label="Footer">
+      <a href="/guide/">User guide</a>
+      <a href="/privacy/">Site privacy</a>
+      <a href="https://github.com/bhanright/quintess/blob/main/LICENSE-MIT">License</a>
+      <a href="https://github.com/bhanright/quintess">GitHub</a>
+    </nav>
+    <p class="mono faint keep-case">© 2026 William Hanright · MIT or Apache-2.0 · this site sets no cookies</p>
+  </div>
+</footer>
+<script src="/assets/site.js?v=ec9dd22678" defer></script>
+</body>
+</html>

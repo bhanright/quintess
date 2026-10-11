@@ -255,6 +255,7 @@ def build_benchmarks() -> str | None:
     body, _ = guide_html(source.read_text(encoding="utf-8"))
     content = f"""<article class="prose bench">
   <p class="kicker"><span class="dot"></span>speed and memory</p>
+  <h1 class="display-2">How Quintess was measured</h1>
 {body}
 </article>"""
     return page("Speed and memory: how Quintess was measured", "How Quintess and Adobe Acrobat were measured opening two long PDFs: the files, the computer, the method and every result.", content, "/benchmarks/")
