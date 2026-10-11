@@ -53,8 +53,8 @@ TEMPLATE = """<!doctype html>
   <div class="top-in">
     <a class="brand" href="/" aria-label="Quintess home"><img src="/assets/img/mark.png" alt="" width="20" height="24"><span>quintess</span></a>
     <nav class="nav" aria-label="Main">
-      <a href="/#features">Features</a>
-      <a href="/#private">Privacy</a>
+      <a href="/#speed">Speed</a>
+      <a href="/#different">What's different</a>
       <a href="/guide/"{guide_current}>Guide</a>
       <a href="https://github.com/bhanright/quintess" data-track="github">GitHub</a>
     </nav>
