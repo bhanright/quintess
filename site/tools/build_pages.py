@@ -3,6 +3,7 @@ Builds the website's generated pages from one template:
 
     guide/index.html    the program's user guide (docs/USER_GUIDE.md)
     privacy/index.html  what this website counts and why
+    benchmarks/index.html  the speed and memory comparison (docs/BENCHMARKS.md)
     404.html            the page-not-found page
     sitemap.xml         every page, with the date it last changed
 
@@ -10,7 +11,7 @@ Builds the website's generated pages from one template:
 
 The guide is the same text the program shows under F1, so the two never
 disagree. It uses a small part of Markdown: `#` topics, `##` sections,
-paragraphs, `-` and numbered lists, **bold** and `code`.
+paragraphs, `-` and numbered lists, `|` tables, **bold** and `code`.
 """
 import datetime
 import hashlib
@@ -117,9 +118,22 @@ def guide_html(markdown: str) -> tuple[str, list[tuple[str, str]]]:
     topics: list[tuple[str, str]] = []
     out: list[str] = []
     open_list: str | None = None
+    table_rows: list[list[str]] = []
+
+    def close_table() -> None:
+        # The first row is the header; a |---| row under it is skipped.
+        if not table_rows:
+            return
+        header, *rows = table_rows
+        rows = [row for row in rows if not all(re.fullmatch(r":?-+:?", cell) for cell in row)]
+        head = "".join(f"<th>{inline(cell)}</th>" for cell in header)
+        body = "".join("<tr>" + "".join(f"<td>{inline(cell)}</td>" for cell in row) + "</tr>" for row in rows)
+        out.append(f'<div class="table-scroll"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>')
+        table_rows.clear()
 
     def close_list() -> None:
         nonlocal open_list
+        close_table()
         if open_list:
             out.append(f"</{open_list}>")
             open_list = None
@@ -127,6 +141,10 @@ def guide_html(markdown: str) -> tuple[str, list[tuple[str, str]]]:
     for raw in markdown.splitlines():
         line = raw.rstrip()
         numbered = re.match(r"^(\d+)\. (.*)$", line)
+        if line.startswith("|"):
+            table_rows.append([cell.strip() for cell in line.strip().strip("|").split("|")])
+            continue
+        close_table()
         if line.startswith("# "):
             close_list()
             if topics:
@@ -191,7 +209,7 @@ def build_guide() -> str:
 """
     return page(
         "Quintess user guide: editing, redaction, signatures, forms and more",
-        "How to use every feature of Quintess, the free PDF editor for Windows: editing text, redaction, signatures, forms, OCR, QR codes, automation and the command line.",
+        "How to use every feature of Quintess, the free PDF editor for Windows and Linux: editing text and pictures, spelling, redaction, signatures, forms, OCR, conversion, printing and the command line.",
         content,
         "/guide/",
         head_extra=breadcrumbs,
@@ -225,6 +243,19 @@ def build_privacy() -> str:
     return page("Site privacy · Quintess", "What the quintess.cc website counts, and what it never collects.", body, "/privacy/")
 
 
+def build_benchmarks() -> str | None:
+    """The comparison's method and results, from docs/BENCHMARKS.md."""
+    source = REPOSITORY / "docs" / "BENCHMARKS.md"
+    if not source.exists():
+        return None
+    body, _ = guide_html(source.read_text(encoding="utf-8"))
+    content = f"""<article class="prose bench">
+  <p class="kicker"><span class="dot"></span>speed and memory</p>
+{body}
+</article>"""
+    return page("Speed and memory: how Quintess was measured", "How Quintess and Adobe Acrobat were measured opening two long PDFs: the files, the computer, the method and every result.", content, "/benchmarks/")
+
+
 def build_not_found() -> str:
     body = """<article class="prose not-found">
   <p class="kicker mono"><span class="dot"></span>error 404</p>
@@ -251,6 +282,8 @@ def build_sitemap() -> str:
         ("/guide/", last_changed(REPOSITORY / "docs" / "USER_GUIDE.md"), "0.8"),
         ("/privacy/", last_changed(SITE / "tools" / "build_pages.py"), "0.3"),
     ]
+    if (REPOSITORY / "docs" / "BENCHMARKS.md").exists():
+        entries.append(("/benchmarks/", last_changed(REPOSITORY / "docs" / "BENCHMARKS.md"), "0.4"))
     urls = "\n".join(f"  <url><loc>{ORIGIN}{path}</loc><lastmod>{date}</lastmod><priority>{priority}</priority></url>" for path, date, priority in entries)
     return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}\n</urlset>\n'
 
@@ -276,6 +309,9 @@ def stamp_assets() -> None:
 def main() -> None:
     write(PUBLIC / "guide" / "index.html", build_guide())
     write(PUBLIC / "privacy" / "index.html", build_privacy())
+    benchmarks = build_benchmarks()
+    if benchmarks:
+        write(PUBLIC / "benchmarks" / "index.html", benchmarks)
     write(PUBLIC / "404.html", build_not_found())
     write(PUBLIC / "sitemap.xml", build_sitemap())
     stamp_assets()
