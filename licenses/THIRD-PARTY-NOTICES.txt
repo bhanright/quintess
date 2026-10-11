@@ -10,8 +10,15 @@ OCR models (text-detection.onnx, text-recognition.onnx): by Robert Knight,
   from https://huggingface.co/robertknight/ocrs, licensed CC BY-SA 4.0
   (https://creativecommons.org/licenses/by-sa/4.0/); trained on the HierText
   dataset (CC BY-SA 4.0). They are included unmodified.
+Spelling dictionaries: English (SCOWL, by Kevin Atkinson and others, BSD-style),
+  Spanish (GPL/LGPL/MPL), French (MPL-2.0), German (GPL-2.0 or 3.0), Portuguese
+  (Brazil, LGPL-3.0/MPL-2.0) and Italian (GPL-3.0), from wooorm/dictionaries;
+  their license texts are in licenses/dictionaries. They are separate data files,
+  used unmodified.
+Oxi (oxidocs, oxidocs-core, oxidocs-common), the built-in Word layout engine: MPL-2.0
+  (https://mozilla.org/MPL/2.0/); its source is at https://github.com/Ryujiyasu/oxi.
 
-Rust crates (495):
+Rust crates (503):
 
   accesskit 0.24.1  -  MIT OR Apache-2.0
   accesskit_consumer 0.35.0  -  MIT OR Apache-2.0
@@ -161,6 +168,7 @@ Rust crates (495):
   foldhash 0.2.0  -  Zlib
   font-types 0.11.3  -  MIT OR Apache-2.0
   font-types 0.12.6  -  MIT OR Apache-2.0
+  font-types 0.8.4  -  MIT OR Apache-2.0
   form_urlencoded 1.2.2  -  MIT OR Apache-2.0
   futures-concurrency 7.7.1  -  MIT OR Apache-2.0
   futures-core 0.3.34  -  MIT OR Apache-2.0
@@ -264,6 +272,9 @@ Rust crates (495):
   once_cell_polyfill 1.70.2  -  MIT OR Apache-2.0
   oneshot 0.2.1  -  MIT OR Apache-2.0
   ordered-float 5.5.0  -  MIT
+  oxidocs 0.8.0  -  MPL-2.0
+  oxidocs-common 0.8.0  -  MPL-2.0
+  oxidocs-core 0.8.0  -  MPL-2.0
   oxilangtag 0.1.6  -  MIT
   p12-keystore 0.4.0  -  MIT/Apache-2.0
   parking 2.2.1  -  Apache-2.0 OR MIT
@@ -306,6 +317,7 @@ Rust crates (495):
   pxfm 0.1.30  -  BSD-3-Clause OR Apache-2.0
   qoi 0.4.1  -  MIT/Apache-2.0
   quick-error 2.0.1  -  MIT/Apache-2.0
+  quick-xml 0.37.5  -  MIT
   quick-xml 0.41.0  -  MIT
   quote 1.0.47  -  MIT OR Apache-2.0
   rand 0.10.3  -  MIT OR Apache-2.0
@@ -320,6 +332,7 @@ Rust crates (495):
   rayon-core 1.13.0  -  MIT OR Apache-2.0
   rc2 0.9.0  -  MIT OR Apache-2.0
   rcgen 0.14.10  -  MIT OR Apache-2.0
+  read-fonts 0.25.3  -  MIT OR Apache-2.0
   read-fonts 0.39.2  -  MIT OR Apache-2.0
   read-fonts 0.41.0  -  MIT OR Apache-2.0
   reborrow 0.5.5  -  MIT
@@ -369,6 +382,7 @@ Rust crates (495):
   simdutf8 0.1.5  -  MIT OR Apache-2.0
   similar 3.2.0  -  Apache-2.0
   siphasher 1.0.4  -  MIT OR Apache-2.0
+  skrifa 0.26.6  -  MIT OR Apache-2.0
   skrifa 0.42.1  -  MIT OR Apache-2.0
   skrifa 0.44.0  -  MIT OR Apache-2.0
   small_btree 0.1.0  -  Unlicense OR MIT
@@ -501,6 +515,7 @@ Rust crates (495):
   zerotrie 0.2.5  -  Unicode-3.0
   zerovec 0.11.8  -  Unicode-3.0
   zerovec-derive 0.11.6  -  Unicode-3.0
+  zip 2.4.2  -  MIT
   zip 8.6.0  -  MIT
   zlib-rs 0.6.8  -  Zlib
   zmij 1.0.23  -  MIT
@@ -6993,6 +7008,12 @@ DEALINGS IN THE SOFTWARE.
 
 
 ------------------------------------------------------------------------------
+font-types 0.8.4 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as font-types (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as font-types (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
 form_urlencoded 1.2.2 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
@@ -11137,6 +11158,21 @@ ordered-float 5.5.0 (MIT)
 LICENSE-MIT: the same text as new_debug_unreachable (LICENSE-MIT) above.
 
 ------------------------------------------------------------------------------
+oxidocs 0.8.0 (MPL-2.0)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MPL-2.0.
+
+------------------------------------------------------------------------------
+oxidocs-common 0.8.0 (MPL-2.0)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MPL-2.0.
+
+------------------------------------------------------------------------------
+oxidocs-core 0.8.0 (MPL-2.0)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MPL-2.0.
+
+------------------------------------------------------------------------------
 oxilangtag 0.1.6 (MIT)
 ------------------------------------------------------------------------------
 LICENSE:
@@ -11967,6 +12003,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+------------------------------------------------------------------------------
+quick-xml 0.37.5 (MIT)
+------------------------------------------------------------------------------
+LICENSE-MIT.md: the same text as calamine (LICENSE-MIT.md) above.
 
 ------------------------------------------------------------------------------
 quick-xml 0.41.0 (MIT)
@@ -13311,6 +13352,12 @@ Apache License, version 2.0
 
    END OF TERMS AND CONDITIONS
 
+
+------------------------------------------------------------------------------
+read-fonts 0.25.3 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as font-types (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as font-types (LICENSE-MIT) above.
 
 ------------------------------------------------------------------------------
 read-fonts 0.39.2 (MIT OR Apache-2.0)
@@ -15383,6 +15430,18 @@ option.
 
 LICENSE-APACHE: the same text as cmov (LICENSE-APACHE) above.
 LICENSE-MIT: the same text as dynify (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
+skrifa 0.26.6 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE:
+
+../LICENSE-APACHE
+
+LICENSE-MIT:
+
+../LICENSE-MIT
+
 
 ------------------------------------------------------------------------------
 skrifa 0.42.1 (MIT OR Apache-2.0)
@@ -19889,6 +19948,37 @@ LICENSE: the same text as icu_collections (LICENSE) above.
 zerovec-derive 0.11.6 (Unicode-3.0)
 ------------------------------------------------------------------------------
 LICENSE: the same text as icu_collections (LICENSE) above.
+
+------------------------------------------------------------------------------
+zip 2.4.2 (MIT)
+------------------------------------------------------------------------------
+LICENSE:
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Mathijs van de Nes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Some files in the "tests/data" subdirectory of this repository are under other
+licences; see files named LICENSE.*.txt for details.
+
 
 ------------------------------------------------------------------------------
 zip 8.6.0 (MIT)

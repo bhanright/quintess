@@ -12,6 +12,7 @@ pub mod bookmarks;
 pub mod cert_store;
 pub mod cms;
 pub mod compare;
+pub mod conversion;
 pub mod convert;
 pub mod create;
 pub mod der;
