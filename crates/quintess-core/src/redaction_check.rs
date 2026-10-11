@@ -53,14 +53,33 @@ impl RedactionCheck {
         self.places.iter().map(|p| p.verdict).filter(|v| *v != Verdict::NotChecked).max().unwrap_or(Verdict::Clear)
     }
 
+    /// Whether some part of the file couldn't be read, so wasn't checked.
+    pub fn has_unchecked_places(&self) -> bool {
+        self.places.iter().any(|p| p.verdict == Verdict::NotChecked)
+    }
+
+    /// One sentence summing up the check. It never says "nothing was found
+    /// anywhere" while some part of the file went unchecked.
+    pub fn headline(&self) -> &'static str {
+        match (self.verdict(), self.has_unchecked_places()) {
+            (Verdict::Found | Verdict::NotChecked, _) => "Text that should be gone is still in the file.",
+            (Verdict::Review, false) => "No redacted text survives in the file, but some items need a look.",
+            (Verdict::Review, true) => "No redacted text survives in the parts checked, but some items need a look and some parts couldn't be checked.",
+            (Verdict::Clear, false) => "Nothing redacted was found anywhere in the file.",
+            (Verdict::Clear, true) => "Nothing redacted was found in the parts checked, but some parts couldn't be checked.",
+        }
+    }
+
     /// A plain-text report to save or share.
     pub fn to_text(&self) -> String {
         let mut text = String::from("Redaction check\n\n");
-        text.push_str(match self.verdict() {
-            Verdict::Clear => "Result: nothing redacted was found anywhere in the file.\n",
-            Verdict::Review => "Result: no redacted text survives in the file, but some items need a look.\n",
-            Verdict::Found | Verdict::NotChecked => "Result: TEXT THAT SHOULD BE GONE IS STILL IN THE FILE. See the places marked FOUND.\n",
-        });
+        match self.verdict() {
+            Verdict::Found | Verdict::NotChecked => text.push_str("Result: TEXT THAT SHOULD BE GONE IS STILL IN THE FILE. See the places marked FOUND.\n"),
+            _ => text.push_str(&format!("Result: {}\n", self.headline())),
+        }
+        if self.has_unchecked_places() {
+            text.push_str("Look at the places marked \"not checked\" yourself.\n");
+        }
         let searched: Vec<String> = self.texts.iter().map(|t| format!("\"{t}\"")).collect();
         text.push_str(&format!("Searched for {} passage{}: {}.\n\n", self.texts.len(), if self.texts.len() == 1 { "" } else { "s" }, searched.join(", ")));
         for place in &self.places {
@@ -94,6 +113,23 @@ pub fn redacted_texts(document: &PdfDocument, areas: &[RedactionArea]) -> Result
                 texts.push(passage);
             }
         }
+    }
+    Ok(texts)
+}
+
+/// The text under each area, in the same order, to list the matches before
+/// redacting. An area over no text (such as a box marked over a picture)
+/// gets an empty string.
+pub fn area_texts(document: &PdfDocument, areas: &[RedactionArea]) -> Result<Vec<String>> {
+    let mut page_texts: std::collections::BTreeMap<u32, engine::PageText> = Default::default();
+    let mut texts = Vec::with_capacity(areas.len());
+    for area in areas {
+        if !page_texts.contains_key(&area.page) {
+            page_texts.insert(area.page, engine::page_text(document, area.page as usize - 1)?);
+        }
+        let page_text = &page_texts[&area.page];
+        let covered: String = page_text.chars.iter().filter(|c| !c.generated && c.rect != [0.0; 4] && crate::redact::glyph_is_covered(c.rect, &[area.rect])).map(|c| c.character).collect();
+        texts.push(covered.split_whitespace().collect::<Vec<_>>().join(" "));
     }
     Ok(texts)
 }

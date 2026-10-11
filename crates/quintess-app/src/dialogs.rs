@@ -30,7 +30,11 @@ pub enum AppRequest {
     CompleteText(PendingText),
     OpenUrlConfirmed(String),
     UnlockAndOpen { path: PathBuf, bytes: Vec<u8>, password: String },
-    CloseTabDiscarding(usize),
+    /// Save these documents (by tab id), then close them, or quit when
+    /// `quitting`. Stops at the first one not saved.
+    SaveAndClose { tab_ids: Vec<u64>, quitting: bool },
+    /// Close these documents (by tab id) without saving, or quit when `quitting`.
+    CloseDiscarding { tab_ids: Vec<u64>, quitting: bool },
     StartOptimize(quintess_core::optimize::OptimizeSettings),
     StartBatch { action: PathBuf, inputs: Vec<PathBuf> },
     SettingsChanged(quintess_core::settings::Settings),
@@ -140,7 +144,7 @@ pub enum Dialog {
     ImageStamp { path: Option<PathBuf>, settings: ImageStamp, pages: String },
     Protect { user_password: String, owner_password: String, aes128: bool, allowed: AllowedActions, generated_owner: Option<String> },
     Properties { info: DocumentInfo, loaded: bool },
-    Redact { query: String, use_regex: bool, match_case: bool, presets: Vec<(String, bool)>, label: String, strip_metadata: bool, include_marks: bool, found: Option<Vec<RedactionArea>> },
+    Redact { query: String, use_regex: bool, match_case: bool, presets: Vec<(String, bool)>, label: String, strip_metadata: bool, include_marks: bool, found: Option<FoundRedactions> },
     RotatePages { pages: String, degrees: i64 },
     DeletePages { pages: String },
     ExtractPages { pages: String },
@@ -155,7 +159,9 @@ pub enum Dialog {
     Text(PendingText),
     ConfirmLink(String),
     Password { path: PathBuf, bytes: Vec<u8>, password: String, error: String },
-    UnsavedChanges { tab_index: usize, title: String },
+    /// Closing a document, or quitting, with changes not saved. Tabs are
+    /// named by id, since closing others moves their positions.
+    UnsavedChanges { tab_ids: Vec<u64>, titles: Vec<String>, quitting: bool },
     About,
     Preferences(quintess_core::settings::Settings),
     Optimize { preset: usize, dpi: f32, quality: u8, grayscale: bool, remove_metadata: bool },
@@ -202,6 +208,26 @@ pub enum Dialog {
     QrResults(Vec<quintess_core::qr::FoundCode>),
     Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
     CheckForText { texts: String },
+}
+
+/// Matches found in the Find and redact dialog, with the search that found
+/// them: changing the search clears them, so Redact never removes the
+/// matches of a search no longer shown.
+pub struct FoundRedactions {
+    pub areas: Vec<RedactionArea>,
+    /// The text under each area, in the same order (empty over no text).
+    pub texts: Vec<String>,
+    pub search: String,
+}
+
+/// Page numbers in words: "page 2", "pages 2 and 5", "pages 2, 5 and 9".
+pub fn page_list(pages: &[u32]) -> String {
+    let numbers: Vec<String> = pages.iter().map(u32::to_string).collect();
+    match numbers.as_slice() {
+        [] => String::new(),
+        [one] => format!("page {one}"),
+        [rest @ .., last] => format!("pages {} and {last}", rest.join(", ")),
+    }
 }
 
 /// Choices in the Print dialog.
@@ -574,12 +600,12 @@ fn redaction_check_body(ui: &mut egui::Ui, check: &quintess_core::redaction_chec
     let amber = egui::Color32::from_rgb(200, 130, 20);
     let red = egui::Color32::from_rgb(200, 50, 50);
     ui.set_min_width(560.0);
-    let (headline, color) = match check.verdict() {
-        Verdict::Clear => ("Nothing redacted was found anywhere in the file.", green),
-        Verdict::Review => ("No redacted text survives in the file, but some items need a look.", amber),
-        _ => ("Text that should be gone is still in the file.", red),
+    let color = match check.verdict() {
+        Verdict::Clear if !check.has_unchecked_places() => green,
+        Verdict::Clear | Verdict::Review => amber,
+        _ => red,
     };
-    ui.colored_label(color, RichText::new(headline).strong());
+    ui.colored_label(color, RichText::new(check.headline()).strong());
     if check.texts.is_empty() {
         ui.weak("The boxes covered no text, so only the areas themselves were checked.");
     } else {
@@ -1316,11 +1342,27 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             }
             return Ok(());
         }
-        Dialog::UnsavedChanges { tab_index, title } => {
-            ui.label(format!("{title} has changes that are not saved."));
+        Dialog::UnsavedChanges { tab_ids, titles, quitting } => {
+            if let [title] = titles.as_slice() {
+                ui.label(format!("{title} has changes that are not saved."));
+            } else {
+                ui.label("These documents have changes that are not saved:");
+                for title in titles.iter() {
+                    ui.label(format!("  • {title}"));
+                }
+            }
+            if *quitting {
+                ui.weak("Quintess closes once you choose.");
+            }
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
+                let save_label = if titles.len() > 1 { "Save all" } else { "Save" };
+                if ui.button(save_label).clicked() {
+                    outcome.requests.push(AppRequest::SaveAndClose { tab_ids: tab_ids.clone(), quitting: *quitting });
+                    outcome.keep_open = false;
+                }
                 if ui.button("Close without saving").clicked() {
-                    outcome.requests.push(AppRequest::CloseTabDiscarding(*tab_index));
+                    outcome.requests.push(AppRequest::CloseDiscarding { tab_ids: tab_ids.clone(), quitting: *quitting });
                     outcome.keep_open = false;
                 }
                 if ui.button("Cancel").clicked() {
@@ -1698,6 +1740,12 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             ui.checkbox(strip_metadata, "Remove document properties and metadata too");
             ui.separator();
+            // Everything that decides the matches; a change clears them.
+            let chosen_presets: Vec<&str> = presets.iter().filter(|(_, on)| *on).map(|(name, _)| name.as_str()).collect();
+            let search = format!("{query}\u{1}{use_regex}\u{1}{match_case}\u{1}{include_marks}\u{1}{}", chosen_presets.join("\u{1}"));
+            if found.as_ref().is_some_and(|found| found.search != search) {
+                *found = None;
+            }
             if ui.button("Find matches").clicked() {
                 let mut patterns = Vec::new();
                 if !query.trim().is_empty() {
@@ -1716,20 +1764,54 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 if *include_marks {
                     areas.extend(redact::marked_areas(&tab.load_pdf()?));
                 }
-                *found = Some(areas);
+                let texts = match tab.pdfium_document() {
+                    Some(document) => quintess_core::redaction_check::area_texts(document, &areas)?,
+                    None => vec![String::new(); areas.len()],
+                };
+                *found = Some(FoundRedactions { areas, texts, search });
             }
-            if let Some(areas) = found {
-                let pages: std::collections::BTreeSet<u32> = areas.iter().map(|a| a.page).collect();
-                ui.label(format!("{} areas on {} pages will be removed permanently.", areas.len(), pages.len()));
-                if !areas.is_empty() {
-                    ui.colored_label(egui::Color32::from_rgb(200, 90, 30), "This cannot be undone once the file is saved. Keep a copy of the original.");
+            let warning = egui::Color32::from_rgb(200, 90, 30);
+            match found.as_ref() {
+                Some(matches) => {
+                    let pages: std::collections::BTreeSet<u32> = matches.areas.iter().map(|a| a.page).collect();
+                    let area_word = if matches.areas.len() == 1 { "area" } else { "areas" };
+                    let page_word = if pages.len() == 1 { "page" } else { "pages" };
+                    ui.label(format!("{} {area_word} on {} {page_word} will be removed permanently:", matches.areas.len(), pages.len()));
+                    egui::ScrollArea::vertical().max_height(150.0).id_salt("redaction matches").show(ui, |ui| {
+                        for (area, text) in matches.areas.iter().zip(&matches.texts) {
+                            let shown = if text.is_empty() { "(a marked area with no text)" } else { text.as_str() };
+                            ui.horizontal(|ui| {
+                                ui.weak(format!("Page {}", area.page));
+                                ui.label(shown);
+                            });
+                        }
+                    });
+                    if !matches.areas.is_empty() {
+                        ui.colored_label(warning, "This cannot be undone once the file is saved. Keep a copy of the original.");
+                    }
+                }
+                None => {
+                    ui.weak("Press Find matches to see what will be removed.");
                 }
             }
-            if buttons(ui, "Redact", outcome) {
-                let areas = found.clone().unwrap_or_default();
-                if areas.is_empty() {
-                    anyhow::bail!("press Find matches first, or nothing matched");
+            if tab.signed {
+                ui.colored_label(warning, "This document is signed. Redacting rewrites it so nothing removed stays inside, which invalidates its signatures.");
+            }
+            let can_redact = found.as_ref().is_some_and(|matches| !matches.areas.is_empty());
+            ui.separator();
+            let mut redact_pressed = false;
+            ui.horizontal(|ui| {
+                let response = ui.add_enabled_ui(can_redact, |ui| crate::theme::primary_button(ui, "Redact")).inner;
+                if response.on_disabled_hover_text("Press Find matches first").clicked() {
+                    redact_pressed = true;
                 }
+                if ui.button("Cancel").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
+            if redact_pressed {
+                let Some(matches) = found.as_ref() else { return Ok(()) };
+                let areas = matches.areas.clone();
                 let settings = RedactionSettings { overlay_text: label.clone(), remove_metadata: *strip_metadata, ..Default::default() };
                 // What lies under the boxes now, to look for everywhere afterwards.
                 let texts = match tab.pdfium_document() {
@@ -1744,7 +1826,9 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 if let Some(report) = report {
                     let mut message = format!("Redacted: {} characters, {} images changed, {} removed, {} annotations removed.", report.glyphs_removed, report.images_altered, report.images_removed, report.annotations_removed);
                     if !report.pages_rasterized.is_empty() {
-                        message.push_str(&format!(" Pages {:?} were flattened to images to guarantee removal.", report.pages_rasterized));
+                        let pages = page_list(&report.pages_rasterized);
+                        let verb = if report.pages_rasterized.len() == 1 { "was" } else { "were" };
+                        message.push_str(&format!(" To be sure nothing shows through, {pages} {verb} turned into pictures."));
                     }
                     outcome.requests.push(AppRequest::Status(message));
                 }

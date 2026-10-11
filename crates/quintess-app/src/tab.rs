@@ -93,6 +93,9 @@ pub struct DocumentTab {
     pub signed: bool,
     /// The last edit was saved as an update that left the signatures valid.
     pub last_edit_kept_signatures: bool,
+    /// What the last edit of a signed document did to its signatures, until
+    /// the app has told the person (`take_signature_notice`).
+    pub signature_notice: Option<SignatureNotice>,
     /// The password protection the file had when opened (key, passwords and
     /// permissions), put back when it is saved unless taken off.
     pub original_encryption: Option<quintess_core::lopdf::EncryptionState>,
@@ -142,6 +145,32 @@ pub struct DocumentTab {
     pub may_change_security: bool,
 }
 
+/// What an edit did to a signed document's signatures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SignatureNotice {
+    /// Added as an update after the signed bytes: the signatures stay valid.
+    KeptValid,
+    /// The whole file was rewritten, which invalidates the signatures, on
+    /// purpose for an edit that removes content and otherwise because the
+    /// edit couldn't be added as an update.
+    Invalidated { removed_content: bool },
+}
+
+impl SignatureNotice {
+    /// A sentence to add to the status line after the edit's own message.
+    pub fn sentence(self) -> &'static str {
+        match self {
+            SignatureNotice::KeptValid => "Saved as an update after the signatures, which stay valid.",
+            SignatureNotice::Invalidated { removed_content: true } => "The file was rewritten so nothing removed stays in it, which invalidates its digital signatures.",
+            SignatureNotice::Invalidated { removed_content: false } => "It couldn't be added as an update after the signatures, so the file was rewritten, which invalidates its digital signatures.",
+        }
+    }
+
+    pub fn invalidated(self) -> bool {
+        matches!(self, SignatureNotice::Invalidated { .. })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FitMode {
     /// Use `zoom` as given.
@@ -171,6 +200,7 @@ impl DocumentTab {
             attachments: Vec::new(),
             signed: false,
             last_edit_kept_signatures: false,
+            signature_notice: None,
             original_encryption: None,
             document: None,
             text_cache: RefCell::new(HashMap::new()),
@@ -280,13 +310,23 @@ impl DocumentTab {
     /// nothing removed survives inside it.
     pub fn replace_bytes_as(&mut self, label: &str, new_bytes: Vec<u8>, removes_content: bool) -> Result<()> {
         let mut new_bytes = new_bytes;
+        let was_signed = self.signed;
         self.last_edit_kept_signatures = false;
         if self.signed && !removes_content {
-            if let Ok(updated) = quintess_core::incremental::update_from_bytes(&self.bytes, &new_bytes, self.password.as_deref()) {
+            if is_incremental_update_of(&self.bytes, &new_bytes) {
+                // Already an update appended after the current bytes (a new
+                // signature is): rewriting it as another update would move
+                // its objects and break its byte range.
+                self.last_edit_kept_signatures = true;
+            } else if let Ok(updated) = quintess_core::incremental::update_from_bytes(&self.bytes, &new_bytes, self.password.as_deref()) {
                 new_bytes = updated;
                 self.last_edit_kept_signatures = true;
             }
         }
+        self.signature_notice = was_signed.then(|| match self.last_edit_kept_signatures {
+            true => SignatureNotice::KeptValid,
+            false => SignatureNotice::Invalidated { removed_content: removes_content },
+        });
         let previous = std::mem::replace(&mut self.bytes, Arc::new(new_bytes));
         self.undo_stack.push((label.to_string(), previous.clone()));
         if self.undo_stack.len() > UNDO_LIMIT {
@@ -297,12 +337,19 @@ impl DocumentTab {
         self.dirty = true;
         if let Err(error) = self.refresh() {
             self.bytes = previous;
+            self.signature_notice = None;
             self.undo_stack.pop();
             self.version += 1;
             self.refresh()?;
             return Err(error);
         }
         Ok(())
+    }
+
+    /// What the last edit did to the signatures, once: the app adds it to
+    /// the status line, whichever path (menu, dialog, background job) made it.
+    pub fn take_signature_notice(&mut self) -> Option<SignatureNotice> {
+        self.signature_notice.take()
     }
 
     pub fn undo_label(&self) -> Option<&str> {
@@ -557,5 +604,52 @@ impl DocumentTab {
         self.path = Some(path);
         self.dirty = false;
         Ok(())
+    }
+}
+
+/// Whether `new` keeps `old` byte for byte and only adds to its end, as an
+/// incremental update (such as a new signature) does.
+pub fn is_incremental_update_of(old: &[u8], new: &[u8]) -> bool {
+    new.len() > old.len() && new.starts_with(old)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quintess_core::create::{TextPageSettings, text_to_pdf};
+    use quintess_core::signatures::{SignOptions, SigningIdentity, sign, verify};
+
+    fn signed_once() -> Vec<u8> {
+        let original = text_to_pdf("Agreement between the parties.", &TextPageSettings::default()).unwrap().to_bytes(&SaveSettings::default()).unwrap();
+        let alice = SigningIdentity::self_signed("Alice Example", "", "").unwrap();
+        sign(&original, &alice, &SignOptions { placement: Some((1, [72.0, 600.0, 300.0, 660.0])), ..Default::default() }).unwrap()
+    }
+
+    /// Signing a signed document goes through the same path as the app's
+    /// Sign command: the new bytes come back to the tab as an edit.
+    #[test]
+    fn a_second_signature_keeps_both_valid() {
+        let mut tab = DocumentTab::open(1, None, signed_once(), None).unwrap();
+        assert!(tab.signed);
+        let bob = SigningIdentity::self_signed("Bob Example", "", "").unwrap();
+        let twice = sign(&tab.bytes, &bob, &SignOptions { placement: Some((1, [320.0, 600.0, 540.0, 660.0])), ..Default::default() }).unwrap();
+        tab.replace_bytes_as("Signed by Bob Example", twice.clone(), false).unwrap();
+        assert_eq!(tab.bytes.as_ref(), &twice, "the signed bytes are kept exactly");
+        let checks = verify(&tab.bytes).unwrap();
+        assert_eq!(checks.len(), 2, "{checks:?}");
+        assert!(checks.iter().all(|check| check.intact), "{checks:?}");
+        assert_eq!(tab.take_signature_notice(), Some(SignatureNotice::KeptValid));
+        assert_eq!(tab.take_signature_notice(), None, "told once");
+    }
+
+    #[test]
+    fn edits_of_signed_documents_leave_a_notice() {
+        let mut tab = DocumentTab::open(1, None, signed_once(), None).unwrap();
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.take_signature_notice(), Some(SignatureNotice::KeptValid));
+        assert!(verify(&tab.bytes).unwrap()[0].intact);
+        tab.apply_removing("Remove metadata", quintess_core::metadata::strip_metadata).unwrap();
+        assert_eq!(tab.take_signature_notice(), Some(SignatureNotice::Invalidated { removed_content: true }));
+        assert!(!verify(&tab.bytes).unwrap()[0].intact);
     }
 }

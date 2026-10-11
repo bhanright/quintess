@@ -79,6 +79,9 @@ pub struct QuintessApp {
     update_startup_done: bool,
     /// A folder being watched (see `watching.rs`).
     watch: Option<watching::RunningWatch>,
+    /// The person chose to quit despite unsaved changes (or saved them), so
+    /// the window's next close request is let through.
+    close_confirmed: bool,
 }
 
 /// A developer aid: with `QUINTESS_SCREENSHOT=<file.png>` the app sets itself
@@ -89,7 +92,8 @@ pub struct QuintessApp {
 /// `command=Reverse order` (any command by its label), `crash` (to test the crash handler),
 /// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
-/// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`.
+/// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`,
+/// `unsaved` (marks the documents changed and shows the quit question).
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -141,6 +145,7 @@ impl QuintessApp {
             update_window: None,
             update_startup_done: false,
             watch: None,
+            close_confirmed: false,
         };
         app.tool_settings.author = app.settings.author.clone();
         app.configure_spelling();
@@ -287,6 +292,15 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 "split" => self.split_view = true,
+                "unsaved" => {
+                    // Marks every open document changed and asks as quitting would.
+                    for tab in &mut self.tabs {
+                        tab.dirty = true;
+                    }
+                    let tab_ids = self.tabs.iter().map(|tab| tab.id).collect();
+                    let titles = self.tabs.iter().map(|tab| tab.title.clone()).collect();
+                    self.dialogs.push(Dialog::UnsavedChanges { tab_ids, titles, quitting: true });
+                }
                 "reading-order" => {
                     if let Some(tab) = self.tab() {
                         tab.show_reading_order = true;
@@ -382,6 +396,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             if let Some(buffer) = image::RgbaImage::from_raw(width as u32, height as u32, pixels) {
                 let _ = buffer.save(&check.path);
             }
+            self.close_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
@@ -492,16 +507,82 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn save(&mut self, choose_location: bool) {
-        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        self.save_tab(self.active, choose_location);
+    }
+
+    /// Saves one document, asking where when it has no file yet (or
+    /// `choose_location`). Returns whether it was saved.
+    fn save_tab(&mut self, index: usize, choose_location: bool) -> bool {
+        let Some(tab) = self.tabs.get_mut(index) else { return false };
         let path = match (&tab.path, choose_location) {
             (Some(path), false) => Some(path.clone()),
             _ => rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(&tab.title).save_file(),
         };
-        if let Some(path) = path {
-            let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
-            let result = tab.save_to(path.clone());
-            if self.report(result).is_some() {
-                self.info(format!("Saved {}", path.display()));
+        let Some(path) = path else { return false };
+        let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
+        let result = tab.save_to(path.clone());
+        if self.report(result).is_some() {
+            self.info(format!("Saved {}", path.display()));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn tab_index(&self, id: u64) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == id)
+    }
+
+    /// Stops the window closing while documents have unsaved changes, and
+    /// asks what to do with them instead. The answer comes back as
+    /// `SaveAndClose` or `CloseDiscarding`, which close the window again.
+    fn intercept_close_request(&mut self, ctx: &egui::Context) {
+        if self.close_confirmed || !ctx.input(|i| i.viewport().close_requested()) {
+            return;
+        }
+        let unsaved: Vec<&DocumentTab> = self.tabs.iter().filter(|tab| tab.dirty).collect();
+        if unsaved.is_empty() {
+            return;
+        }
+        let tab_ids = unsaved.iter().map(|tab| tab.id).collect();
+        let titles = unsaved.iter().map(|tab| tab.title.clone()).collect();
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        let already_asking = self.dialogs.iter().any(|dialog| matches!(dialog, Dialog::UnsavedChanges { quitting: true, .. }));
+        if !already_asking {
+            self.dialogs.push(Dialog::UnsavedChanges { tab_ids, titles, quitting: true });
+        }
+    }
+
+    /// Closes the window for good, once unsaved changes are dealt with.
+    fn quit_now(&mut self) {
+        self.close_confirmed = true;
+        self.worker_context.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// Saves each document, then closes them (or quits). Stops at the first
+    /// one that isn't saved, such as when its Save as is cancelled, and
+    /// closes nothing.
+    fn save_and_close(&mut self, tab_ids: Vec<u64>, quitting: bool) {
+        for id in &tab_ids {
+            let Some(index) = self.tab_index(*id) else { continue };
+            if !self.save_tab(index, false) {
+                if !self.status_is_error {
+                    let title = self.tabs[index].title.clone();
+                    self.info(format!("{title} wasn't saved, so nothing was closed."));
+                }
+                return;
+            }
+        }
+        self.close_discarding(tab_ids, quitting);
+    }
+
+    fn close_discarding(&mut self, tab_ids: Vec<u64>, quitting: bool) {
+        if quitting {
+            return self.quit_now();
+        }
+        for id in tab_ids {
+            if let Some(index) = self.tab_index(id) {
+                self.close_tab(index, true);
             }
         }
     }
@@ -511,7 +592,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             return;
         }
         if self.tabs[index].dirty && !force {
-            self.dialogs.push(Dialog::UnsavedChanges { tab_index: index, title: self.tabs[index].title.clone() });
+            let tab = &self.tabs[index];
+            self.dialogs.push(Dialog::UnsavedChanges { tab_ids: vec![tab.id], titles: vec![tab.title.clone()], quitting: false });
             return;
         }
         let tab = self.tabs.remove(index);
@@ -574,13 +656,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
 
     fn make_edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>, removes_content: bool) -> bool {
         let Some(tab) = self.tabs.get_mut(self.active) else { return false };
-        let was_signed = tab.signed;
         let result = if removes_content { tab.apply_removing(label, change) } else { tab.apply(label, change) };
-        let kept = tab.last_edit_kept_signatures;
         if self.report(result).is_none() {
             return false;
         }
-        self.report_edit(label, was_signed, kept);
+        self.report_edit(label);
         true
     }
 
@@ -662,6 +742,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             let counts = &self.scroll_test;
             let total = (counts.sharp + counts.preview + counts.blank).max(1) as f32;
             eprintln!("scroll test at {rate} pages/s over {} pages: sharp {:.0}%, preview only {:.0}%, blank {:.0}% of {} frames", tab.pages.len(), counts.sharp as f32 / total * 100.0, counts.preview as f32 / total * 100.0, counts.blank as f32 / total * 100.0, total as usize);
+            self.close_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
@@ -948,20 +1029,34 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// Applies a bytes-to-bytes text edit to the active tab as one undoable step.
     fn edit_page_text(&mut self, label: &str, change: impl FnOnce(&[u8], Option<&str>) -> anyhow::Result<Vec<u8>>) {
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
-        let was_signed = tab.signed;
         let result = change(&tab.bytes, tab.password.as_deref()).and_then(|bytes| tab.replace_bytes(label, bytes));
-        let kept = tab.last_edit_kept_signatures;
         if self.report(result).is_some() {
-            self.report_edit(label, was_signed, kept);
+            self.report_edit(label);
         }
     }
 
-    /// The status line after an edit, saying what became of any signatures.
-    fn report_edit(&mut self, label: &str, was_signed: bool, kept_signatures: bool) {
-        match (was_signed, kept_signatures) {
-            (true, true) => self.info(format!("{label} done, saved as an update after the signatures, which stay valid. Ctrl+Z undoes it.")),
-            (true, false) => self.error(format!("{label} done. The file was rewritten so nothing removed stays in it, which invalidates its digital signatures. Ctrl+Z undoes it.")),
-            _ => self.info(format!("{label} done. Ctrl+Z undoes it.")),
+    /// The status line after an edit. What became of any signatures is
+    /// added by `announce_signature_changes`.
+    fn report_edit(&mut self, label: &str) {
+        self.info(format!("{label} done. Ctrl+Z undoes it."));
+    }
+
+    /// Adds to the status line what the frame's edits did to signed
+    /// documents' signatures. Every edit path (menus, dialogs, background
+    /// jobs, the spelling panel) leaves its notice on the tab, so none can
+    /// break signatures without saying so.
+    fn announce_signature_changes(&mut self) {
+        let notices: Vec<(String, crate::tab::SignatureNotice)> = self.tabs.iter_mut().filter_map(|tab| tab.take_signature_notice().map(|notice| (tab.title.clone(), notice))).collect();
+        for (title, notice) in notices {
+            let sentence = if self.tabs.len() > 1 { format!("{title}: {}", notice.sentence()) } else { notice.sentence().to_string() };
+            let message = if self.status.is_empty() { sentence } else { format!("{} {sentence}", self.status) };
+            if notice.invalidated() {
+                self.error(message);
+            } else {
+                let keep_error_color = self.status_is_error;
+                self.info(message);
+                self.status_is_error = keep_error_color;
+            }
         }
     }
 
@@ -1819,7 +1914,6 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 ViewerAction::MoveText { page_index, bounds, offset } => self.edit_page_text("Move text", |bytes, password| quintess_core::edit_text::move_text(bytes, password, page_index, bounds, offset)),
                 ViewerAction::ReplaceParagraph { paragraph, rich, style, precomputed } => {
                     let Some(tab) = self.tabs.get_mut(self.active) else { continue };
-                    let was_signed = tab.signed;
                     // The preview already did the work when it matches this edit.
                     let edited = match precomputed {
                         Some(done) => Ok(done),
@@ -1847,13 +1941,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         for stand_in in &report.stand_ins {
                             message.push_str(&format!(" {} stands in for {}.", stand_in.stand_in, stand_in.original));
                         }
-                        let broke_signatures = was_signed && !self.tabs.get(self.active).is_some_and(|t| t.last_edit_kept_signatures);
-                        if broke_signatures {
-                            message.push_str(" This invalidated the document's signatures.");
-                        } else if was_signed {
-                            message.push_str(" Saved as an update after the signatures, which stay valid.");
-                        }
-                        if report.overlaps || broke_signatures {
+                        if report.overlaps {
                             self.error(message);
                         } else {
                             self.info(message);
@@ -2035,7 +2123,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: "That password is not correct.".into() });
                     }
                 }
-                AppRequest::CloseTabDiscarding(index) => self.close_tab(index, true),
+                AppRequest::SaveAndClose { tab_ids, quitting } => self.save_and_close(tab_ids, quitting),
+                AppRequest::CloseDiscarding { tab_ids, quitting } => self.close_discarding(tab_ids, quitting),
                 AppRequest::StartOptimize(settings) => {
                     let ctx = self.worker_context.clone();
                     self.start_optimize(&ctx, settings);
@@ -2372,6 +2461,7 @@ impl eframe::App for QuintessApp {
         self.receive_watch_events();
         crate::crash::note_unsaved(self.tabs.iter().filter(|t| t.dirty).map(|t| (t.title.clone(), t.bytes.clone())).collect());
         self.run_self_check(&ctx);
+        self.intercept_close_request(&ctx);
         if self.self_check.is_none() {
             self.remember_reading_positions(&ctx);
         }
@@ -2527,6 +2617,7 @@ impl eframe::App for QuintessApp {
             }
             self.apply_app_requests(outcome.requests);
         }
+        self.announce_signature_changes();
     }
 }
 

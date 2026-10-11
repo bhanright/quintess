@@ -857,7 +857,7 @@ fn main() {
 /// Prints the redaction check (in full unless all clear) and saves it when asked.
 fn print_redaction_check(check: &quintess_core::redaction_check::RedactionCheck, report: Option<&Path>) -> Result<()> {
     let text = check.to_text();
-    if check.verdict() == quintess_core::redaction_check::Verdict::Clear {
+    if check.verdict() == quintess_core::redaction_check::Verdict::Clear && !check.has_unchecked_places() {
         println!("redaction check: nothing redacted was found anywhere in the file");
     } else {
         println!("{text}");
