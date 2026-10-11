@@ -13,7 +13,7 @@
 ; Cargo target folder when it isn't ..\target.
 
 #define AppName "Quintess"
-#define AppVersion "0.1.0"
+#define AppVersion "0.2.0"
 #define BuildFolder (GetEnv("QUINTESS_BUILD") != "" ? GetEnv("QUINTESS_BUILD") : "..\target") + "\release"
 #define PdfiumFolder "..\vendor\pdfium"
 #define ModelsFolder "..\vendor\ocrs-models"
