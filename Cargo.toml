@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vellum-core", "crates/vellum-cli", "crates/vellum-app"]
+members = ["crates/quintess-core", "crates/quintess-cli", "crates/quintess-app"]
 
 [workspace.package]
 version = "0.1.0"

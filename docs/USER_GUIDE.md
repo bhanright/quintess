@@ -1,6 +1,6 @@
-# Welcome to Vellum
+# Welcome to Quintess
 
-Vellum reads, edits, signs, redacts and automates PDF files. Everything runs on your computer: no account, no uploads, and it works offline.
+Quintess reads, edits, signs, redacts and automates PDF files. Everything runs on your computer: no account, no uploads, and it works offline.
 
 This guide covers every feature. Use the list on the left to jump to a topic, or type in the search box above it. Press **F1** at any time to come back here.
 
@@ -31,7 +31,7 @@ This guide covers every feature. Use the list on the left to jump to a topic, or
 
 ## Looks: Studio and Classic
 
-Vellum has two looks. **Studio** (the default) has a slim header with a command field, a floating dock of tools at the bottom, and dark and light modes. **Classic** has a traditional menu bar and toolbar. Switch in **Edit ▸ Preferences** or **View ▸ Studio look**.
+Quintess has two looks. **Studio** (the default) has a slim header with a command field, a floating dock of tools at the bottom, and dark and light modes. **Classic** has a traditional menu bar and toolbar. Switch in **Edit ▸ Preferences** or **View ▸ Studio look**.
 
 ## Searching
 
@@ -66,11 +66,11 @@ The menu in the editing bar chooses what happens when new text needs more lines:
 
 ## The edit preview
 
-While you type, Vellum works out the result and shows it on the page: where the paragraph will end, which text below will move and where it lands, anything it would overlap, and the footer zone. The bar names any font that stands in for an original one. Press **Result** to see the finished page before applying.
+While you type, Quintess works out the result and shows it on the page: where the paragraph will end, which text below will move and where it lands, anything it would overlap, and the footer zone. The bar names any font that stands in for an original one. Press **Result** to see the finished page before applying.
 
 ## Fonts
 
-Vellum draws new text in the document's own font whenever that font already contains the letters you typed, so edits match the text around them. When a needed letter isn't in the document's font, a similar font stands in, and the edit preview says which.
+Quintess draws new text in the document's own font whenever that font already contains the letters you typed, so edits match the text around them. When a needed letter isn't in the document's font, a similar font stands in, and the edit preview says which.
 
 ## Moving and adding text
 
@@ -158,14 +158,14 @@ Redaction removes content from the file for good, not just covers it.
 1. Mark what to remove: drag across text with **Mark text for redaction**, draw boxes with **Mark area for redaction**, or use **Tools ▸ Redact ▸ Find and redact** to find words, patterns and personal information (email addresses, phone numbers, Social Security and card numbers, dates and more).
 2. Apply the redaction. Text, pictures and shapes under the boxes are removed; a label such as "REDACTED" can be drawn in each box.
 
-After redacting, Vellum checks the whole file for the removed text: under the boxes, elsewhere on the pages, in document properties, comments, form fields, bookmarks, attachments, hidden entries and earlier versions saved inside the file. It reports what it found and what it couldn't check.
+After redacting, Quintess checks the whole file for the removed text: under the boxes, elsewhere on the pages, in document properties, comments, form fields, bookmarks, attachments, hidden entries and earlier versions saved inside the file. It reports what it found and what it couldn't check.
 
 **Tools ▸ Redact ▸ Check for leftover text** runs the same check on any file for words you enter, for example one redacted in another program.
 
 Notes:
 
 - Pages with content that can't be cut out precisely (such as a scanned picture in an unusual format) are turned into a picture with the boxes painted in.
-- Redacting a signed document rewrites the file so nothing removed stays in it. This invalidates its signatures, and Vellum says so.
+- Redacting a signed document rewrites the file so nothing removed stays in it. This invalidates its signatures, and Quintess says so.
 
 # Security
 
@@ -226,7 +226,7 @@ An action is a list of steps (OCR, redaction, watermark, page changes, reducing 
 
 ## Watching a folder
 
-**Tools ▸ Watch a folder** runs an action on every PDF dropped into a folder while Vellum is open. Results go to a "Done" folder; originals move to "Processed", or to "Failed" with a note saying why.
+**Tools ▸ Watch a folder** runs an action on every PDF dropped into a folder while Quintess is open. Results go to a "Done" folder; originals move to "Processed", or to "Failed" with a note saying why.
 
 # The object inspector
 
@@ -234,16 +234,16 @@ Choose the **Inspect** tool (the ⓘ button in the dock) and click anything on a
 
 # The command line
 
-The `vellum` command does nearly everything the app does, for scripts and batch work. Run `vellum --help` for the list, and `vellum <command> --help` for each one. A few examples:
+The `quintess` command does nearly everything the app does, for scripts and batch work. Run `quintess --help` for the list, and `quintess <command> --help` for each one. A few examples:
 
-- `vellum merge a.pdf b.pdf -o both.pdf`
-- `vellum redact contract.pdf --text "Jane Roe" -o redacted.pdf`
-- `vellum form merge form.pdf --data people.xlsx --name "{Last}"`
-- `vellum search-folder C:\Contracts "termination"`
-- `vellum qr flyer.pdf`
-- `vellum watch C:\Inbox --action stamp.json`
+- `quintess merge a.pdf b.pdf -o both.pdf`
+- `quintess redact contract.pdf --text "Jane Roe" -o redacted.pdf`
+- `quintess form merge form.pdf --data people.xlsx --name "{Last}"`
+- `quintess search-folder C:\Contracts "termination"`
+- `quintess qr flyer.pdf`
+- `quintess watch C:\Inbox --action stamp.json`
 
-Commands overwrite the input unless you give `-o`; they write safely, so a crash never leaves a broken file. Set the `VELLUM_PASSWORD` environment variable to open protected files without typing the password on the command line.
+Commands overwrite the input unless you give `-o`; they write safely, so a crash never leaves a broken file. Set the `QUINTESS_PASSWORD` environment variable to open protected files without typing the password on the command line.
 
 # Keyboard shortcuts
 
@@ -263,14 +263,14 @@ Commands overwrite the input unless you give `-o`; they write safely, so a crash
 
 # Privacy and updates
 
-Vellum never sends your documents anywhere. It contacts the internet only if you ask it to:
+Quintess never sends your documents anywhere. It contacts the internet only if you ask it to:
 
 - **Check for updates** (Help menu) asks GitHub whether a newer version exists. If you turn on automatic checks, it does this at most once a day. Nothing about you or your documents is sent.
 - Opening a link or QR code opens your browser, after showing you where it goes.
-- A copy of Vellum built from source may ask to download the OCR models once; the installer includes them.
+- A copy of Quintess built from source may ask to download the OCR models once; the installer includes them.
 
 # If something goes wrong
 
-- If Vellum hits a problem it can't recover from, it saves your unsaved documents to `%LOCALAPPDATA%\Vellum\Recovered` and the details to `%LOCALAPPDATA%\Vellum\crash.log`, and tells you before closing.
+- If Quintess hits a problem it can't recover from, it saves your unsaved documents to `%LOCALAPPDATA%\Quintess\Recovered` and the details to `%LOCALAPPDATA%\Quintess\crash.log`, and tells you before closing.
 - **Ctrl+Z** undoes edits one at a time, back to when you opened the file.
-- Preferences are in `%APPDATA%\Vellum\settings.json`.
+- Preferences are in `%APPDATA%\Quintess\settings.json`.

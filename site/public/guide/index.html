@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quintess user guide: editing, redaction, signatures, forms and more</title>
+<meta name="description" content="How to use every feature of Quintess, the free PDF editor for Windows: editing text, redaction, signatures, forms, OCR, QR codes, automation and the command line.">
+<link rel="canonical" href="https://quintess.cc/guide/">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Quintess">
+<meta property="og:title" content="Quintess user guide: editing, redaction, signatures, forms and more">
+<meta property="og:description" content="How to use every feature of Quintess, the free PDF editor for Windows: editing text, redaction, signatures, forms, OCR, QR codes, automation and the command line.">
+<meta property="og:image" content="https://quintess.cc/assets/img/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css?v=f70ff14944">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Quintess user guide","about":{"@id":"https://quintess.cc/#app"},"author":{"@type":"Person","name":"William Hanright"},"url":"https://quintess.cc/guide/"}
+</script>
+</head>
+<body class="subpage">
+<a class="skip" href="#main">Skip to content</a>
+<div class="grid-lines" aria-hidden="true"></div>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="/" aria-label="Quintess home"><img src="/assets/img/mark.png" alt="" width="20" height="24"><span>quintess</span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="/#features">Features</a>
+      <a href="/#private">Privacy</a>
+      <a href="/guide/" aria-current="page">Guide</a>
+      <a href="https://github.com/bhanright/quintess" data-track="github">GitHub</a>
+    </nav>
+    <span class="readout" aria-hidden="true"></span>
+    <a class="button button-small" href="/#download">Download</a>
+  </div>
+  <div class="progress" aria-hidden="true"><span></span></div>
+</header>
+<main id="main">
+<div class="doc">
+  <aside class="doc-toc" aria-label="Topics">
+    <p class="mono doc-toc-title">user guide · 22 topics</p>
+    <input class="doc-search" type="search" placeholder="Filter topics" aria-label="Filter topics" data-doc-search>
+    <ol><li><a href="#welcome-to-quintess">Welcome to Quintess</a></li>
+<li><a href="#getting-around">Getting around</a></li>
+<li><a href="#editing-text">Editing text</a></li>
+<li><a href="#comments-and-markup">Comments and markup</a></li>
+<li><a href="#pages">Pages</a></li>
+<li><a href="#forms">Forms</a></li>
+<li><a href="#stamps-headers-and-numbering">Stamps, headers and numbering</a></li>
+<li><a href="#redaction">Redaction</a></li>
+<li><a href="#security">Security</a></li>
+<li><a href="#digital-signatures">Digital signatures</a></li>
+<li><a href="#scanned-documents-ocr">Scanned documents (OCR)</a></li>
+<li><a href="#qr-codes">QR codes</a></li>
+<li><a href="#compare-convert-and-export">Compare, convert and export</a></li>
+<li><a href="#file-size-accessibility-and-archiving">File size, accessibility and archiving</a></li>
+<li><a href="#attachments">Attachments</a></li>
+<li><a href="#printing">Printing</a></li>
+<li><a href="#automation">Automation</a></li>
+<li><a href="#the-object-inspector">The object inspector</a></li>
+<li><a href="#the-command-line">The command line</a></li>
+<li><a href="#keyboard-shortcuts">Keyboard shortcuts</a></li>
+<li><a href="#privacy-and-updates">Privacy and updates</a></li>
+<li><a href="#if-something-goes-wrong">If something goes wrong</a></li></ol>
+  </aside>
+  <article class="doc-body">
+    <p class="kicker"><span class="dot"></span>the same guide as F1 in the program</p>
+    <h1 class="display-2">Quintess user guide</h1>
+<section class="doc-topic" id="welcome-to-quintess"><h2><a href="#welcome-to-quintess">Welcome to Quintess</a></h2>
+<p>Quintess reads, edits, signs, redacts and automates PDF files. Everything runs on your computer: no account, no uploads, and it works offline.</p>
+<p>This guide covers every feature. Use the list of topics to jump around, or filter it with the search box. In the program, press <b>F1</b> to open this guide.</p>
+<p><b>The fastest way to do anything:</b> press <b>Ctrl+K</b> and type what you want, such as &quot;rotate&quot;, &quot;watermark&quot; or &quot;redact&quot;. The command palette finds every command, tool, recent file and page number.</p>
+</section>
+<section class="doc-topic" id="getting-around"><h2><a href="#getting-around">Getting around</a></h2>
+<h3 id="getting-around-opening-files">Opening files</h3>
+<ul>
+<li><b>File ▸ Open</b> (Ctrl+O), or drop PDF files anywhere on the window. Dropped pictures become new PDFs.</li>
+<li>Each document opens in its own tab. A violet dot on a tab means unsaved changes.</li>
+<li>Files reopen at the page and zoom where you left them.</li>
+<li>Password-protected files ask for their password when opened.</li>
+</ul>
+<h3 id="getting-around-moving-through-a-document">Moving through a document</h3>
+<ul>
+<li>Scroll, or use <b>Page Up</b> / <b>Page Down</b>, <b>Home</b> and <b>End</b>.</li>
+<li><b>Ctrl+G</b> goes to a page by number or by its label (such as &quot;iv&quot;).</li>
+<li>The dock at the bottom of the window shows the page number; click it to go to a page.</li>
+<li>The sidebar (the left panel) shows page thumbnails, bookmarks, comments, form fields, search results and attached files. Toggle it with the sidebar button in the header.</li>
+</ul>
+<h3 id="getting-around-zoom-and-views">Zoom and views</h3>
+<ul>
+<li><b>Ctrl+plus</b> and <b>Ctrl+minus</b> zoom; <b>Ctrl+0</b> fits the page width. Ctrl+scroll zooms with the mouse.</li>
+<li><b>Split view</b> (the split button in the header, or View ▸ Split view) shows the document twice, side by side. Each side has its own page and zoom; click a side to make the zoom and page keys act on it.</li>
+<li><b>Night reading</b> inverts page colors for reading in the dark. <b>Dark interface</b> switches the app between dark and light.</li>
+<li><b>Full screen</b>: F11.</li>
+</ul>
+<h3 id="getting-around-looks-studio-and-classic">Looks: Studio and Classic</h3>
+<p>Quintess has two looks. <b>Studio</b> (the default) has a slim header with a command field, a floating dock of tools at the bottom, and dark and light modes. <b>Classic</b> has a traditional menu bar and toolbar. Switch in <b>Edit ▸ Preferences</b> or <b>View ▸ Studio look</b>.</p>
+<h3 id="getting-around-searching">Searching</h3>
+<ul>
+<li><b>Ctrl+F</b> searches the open document. Matches are highlighted; <b>F3</b> and <b>Shift+F3</b> step through them.</li>
+<li><b>Search a folder</b> (Ctrl+Shift+F) searches every PDF in a folder and its subfolders. Click a result to open that file at the page.</li>
+</ul>
+<h3 id="getting-around-the-command-palette">The command palette</h3>
+<p>Press <b>Ctrl+K</b> (or Ctrl+Shift+P), type a few letters, and press Enter. Arrow keys move through the matches. Type a number to jump to that page.</p>
+</section>
+<section class="doc-topic" id="editing-text"><h2><a href="#editing-text">Editing text</a></h2>
+<h3 id="editing-text-editing-a-line-or-paragraph">Editing a line or paragraph</h3>
+<ol>
+<li>Choose the <b>Edit text</b> tool (the &quot;A|&quot; button in the dock, or Edit ▸ Edit page text).</li>
+<li>Click any text. The whole paragraph opens for editing; for tables and lists, press <b>Line only</b> to edit just the clicked line.</li>
+<li>Type your changes. In a paragraph, <b>Enter</b> starts a new line and <b>Ctrl+Enter</b> applies; <b>Esc</b> cancels.</li>
+</ol>
+<p>The paragraph re-wraps at its original width, line spacing and alignment, and justified text stays justified.</p>
+<h3 id="editing-text-styles-bold-italic-underline-color">Styles: bold, italic, underline, color</h3>
+<p>Select words in the editor, then use <b>B</b>, <b>I</b>, <b>U</b> (underline), <b>S</b> (strikethrough), the color button or the font menu. With nothing selected they apply to the whole paragraph. Each word keeps its style as you edit; letters typed onto a styled word continue its style.</p>
+<h3 id="editing-text-when-a-paragraph-grows">When a paragraph grows</h3>
+<p>The menu in the editing bar chooses what happens when new text needs more lines:</p>
+<ul>
+<li><b>Push text down</b> (the default) moves what follows in the same column down, keeping it exactly as it was. If there&#x27;s no room before the page&#x27;s footer, the paragraph shrinks slightly instead.</li>
+<li><b>Shrink to fit</b> makes the text a little smaller to fit its old space.</li>
+<li><b>Allow overlap</b> lets it run over what follows.</li>
+</ul>
+<h3 id="editing-text-the-edit-preview">The edit preview</h3>
+<p>While you type, Quintess works out the result and shows it on the page: where the paragraph will end, which text below will move and where it lands, anything it would overlap, and the footer zone. The bar names any font that stands in for an original one. Press <b>Result</b> to see the finished page before applying.</p>
+<h3 id="editing-text-fonts">Fonts</h3>
+<p>Quintess draws new text in the document&#x27;s own font whenever that font already contains the letters you typed, so edits match the text around them. When a needed letter isn&#x27;t in the document&#x27;s font, a similar font stands in, and the edit preview says which.</p>
+<h3 id="editing-text-moving-and-adding-text">Moving and adding text</h3>
+<ul>
+<li>With the Edit text tool, <b>drag</b> a paragraph to move it. It keeps its exact look.</li>
+<li>Click <b>empty space</b> to add new text there.</li>
+<li>The trash button in the editing bar deletes the line or paragraph.</li>
+</ul>
+<h3 id="editing-text-find-and-replace">Find and replace</h3>
+<p><b>Ctrl+H</b> replaces words or phrases throughout the document, line by line. A match split across two lines isn&#x27;t replaced.</p>
+</section>
+<section class="doc-topic" id="comments-and-markup"><h2><a href="#comments-and-markup">Comments and markup</a></h2>
+<p>The dock holds the common markup tools; <b>⋯</b> in the dock (or Tools ▸ Comment) has the rest.</p>
+<ul>
+<li><b>Highlight</b>, <b>Underline</b>, <b>Strikethrough</b> and <b>Squiggly</b>: drag across text.</li>
+<li><b>Note</b>: click to place a sticky note.</li>
+<li><b>Text box</b>, <b>Rectangle</b>, <b>Ellipse</b>, <b>Line</b>, <b>Arrow</b>: drag to draw.</li>
+<li><b>Draw</b>: freehand ink.</li>
+<li><b>Stamp</b>: places a stamp; set its label under Tools ▸ Stamp and number.</li>
+<li><b>Link</b>: drag a box, then enter a web address or page.</li>
+</ul>
+<p>The color and line width appear in the dock while a markup tool is selected. Comments are listed in the sidebar, where you can reply to, edit or delete them. <b>Tools ▸ Comment</b> can also flatten comments into the page, remove them all, or copy a summary.</p>
+</section>
+<section class="doc-topic" id="pages"><h2><a href="#pages">Pages</a></h2>
+<h3 id="pages-organizing-pages">Organizing pages</h3>
+<p>Press the <b>Organize</b> button in the dock (or Tools ▸ Pages ▸ Organize pages) to see every page as a thumbnail. Drag pages to reorder them, and select pages to rotate, duplicate, delete or extract them.</p>
+<h3 id="pages-page-tools">Page tools</h3>
+<p>Under <b>Tools ▸ Pages</b>:</p>
+<ul>
+<li><b>Rotate</b>, <b>Delete</b>, <b>Extract</b> (to a new document).</li>
+<li><b>Insert blank pages</b> and <b>Insert from file</b>.</li>
+<li><b>Split</b>: every N pages, by page ranges, or by top-level bookmarks (the command line can also split by size).</li>
+<li><b>Crop</b>, <b>Resize to paper size</b>, <b>Several pages per sheet</b> (2-up, 4-up and so on).</li>
+<li><b>Page labels</b> (such as roman numerals for front matter), <b>Reverse order</b>, <b>Remove blank pages</b>.</li>
+</ul>
+<p>Page ranges accept forms like <code>1-3, 7, odd, even, 10-end</code>.</p>
+<h3 id="pages-combining-files">Combining files</h3>
+<p><b>File ▸ Create ▸ Combine files</b> merges several PDFs into one, with a bookmark for each.</p>
+<h3 id="pages-creating-documents">Creating documents</h3>
+<p><b>File ▸ Create</b> makes a blank document, or a PDF from pictures or from a text or Markdown file.</p>
+</section>
+<section class="doc-topic" id="forms"><h2><a href="#forms">Forms</a></h2>
+<h3 id="forms-filling-forms">Filling forms</h3>
+<p>Click a field to type in it; checkboxes and radio buttons toggle with a click. Fields are listed in the sidebar.</p>
+<h3 id="forms-making-forms">Making forms</h3>
+<ul>
+<li><b>Tools ▸ Forms ▸ Detect fields automatically</b> turns blank lines (____) and boxes into fields.</li>
+<li>Add fields by hand with the text field, checkbox and signature field tools.</li>
+</ul>
+<h3 id="forms-form-data">Form data</h3>
+<ul>
+<li><b>Import data</b> fills the form from a JSON or XFDF file; <b>File ▸ Export ▸ Form data</b> saves the values as JSON, XFDF or CSV.</li>
+<li><b>Clear all fields</b> empties the form; <b>Flatten fields into the page</b> makes the values permanent.</li>
+</ul>
+<h3 id="forms-filling-from-a-spreadsheet">Filling from a spreadsheet</h3>
+<p><b>Tools ▸ Forms ▸ Fill from spreadsheet</b> makes one filled copy of the form for every row of a CSV, Excel, OpenDocument or JSON file. Columns fill the fields with the same name (capitalization and punctuation don&#x27;t matter, and a field&#x27;s tooltip counts too). You can reassign any column. File names come from a pattern such as <code>{Last name}, {First name}</code> or <code>{row}</code>. Choose a folder of separate files, or one combined PDF with a bookmark per copy.</p>
+</section>
+<section class="doc-topic" id="stamps-headers-and-numbering"><h2><a href="#stamps-headers-and-numbering">Stamps, headers and numbering</a></h2>
+<p>Under <b>Tools ▸ Stamp and number</b>:</p>
+<ul>
+<li><b>Watermark</b>: text across pages, with font, size, color, opacity, rotation and position. Tokens such as <code>{page}</code>, <code>{pages}</code>, <code>{date}</code> and <code>{file}</code> are filled in.</li>
+<li><b>Header and footer</b>: text in six positions, with the same tokens.</li>
+<li><b>Bates numbering</b>: legal numbering with a prefix, suffix and number of digits.</li>
+<li><b>Image stamp</b>: a logo or seal on pages.</li>
+<li><b>Background color</b>.</li>
+</ul>
+</section>
+<section class="doc-topic" id="redaction"><h2><a href="#redaction">Redaction</a></h2>
+<p>Redaction removes content from the file for good, not just covers it.</p>
+<ol>
+<li>Mark what to remove: drag across text with <b>Mark text for redaction</b>, draw boxes with <b>Mark area for redaction</b>, or use <b>Tools ▸ Redact ▸ Find and redact</b> to find words, patterns and personal information (email addresses, phone numbers, Social Security and card numbers, dates and more).</li>
+<li>Apply the redaction. Text, pictures and shapes under the boxes are removed; a label such as &quot;REDACTED&quot; can be drawn in each box.</li>
+</ol>
+<p>After redacting, Quintess checks the whole file for the removed text: under the boxes, elsewhere on the pages, in document properties, comments, form fields, bookmarks, attachments, hidden entries and earlier versions saved inside the file. It reports what it found and what it couldn&#x27;t check.</p>
+<p><b>Tools ▸ Redact ▸ Check for leftover text</b> runs the same check on any file for words you enter, for example one redacted in another program.</p>
+<p>Notes:</p>
+<ul>
+<li>Pages with content that can&#x27;t be cut out precisely (such as a scanned picture in an unusual format) are turned into a picture with the boxes painted in.</li>
+<li>Redacting a signed document rewrites the file so nothing removed stays in it. This invalidates its signatures, and Quintess says so.</li>
+</ul>
+</section>
+<section class="doc-topic" id="security"><h2><a href="#security">Security</a></h2>
+<ul>
+<li><b>Tools ▸ Protect ▸ Protect with password</b> encrypts the file (AES-256 or AES-128). A password to open it is optional; you can also restrict printing, copying, editing, comments and form filling.</li>
+<li>Files keep their protection when you edit and save them. <b>Remove protection</b> takes it off.</li>
+<li><b>Remove metadata</b> clears the document properties and hidden metadata.</li>
+</ul>
+</section>
+<section class="doc-topic" id="digital-signatures"><h2><a href="#digital-signatures">Digital signatures</a></h2>
+<ol>
+<li><b>Tools ▸ Sign ▸ Create signing identity</b> makes a personal certificate (once).</li>
+<li><b>Sign here</b>: drag a box where the signature should appear.</li>
+<li><b>Check signatures</b> verifies every signature: whether the signed content is unchanged, who signed and when.</li>
+</ol>
+<p>Edits after signing are added after the signature, which stays valid; readers show that the document changed after signing. Redacting or removing content rewrites the file and invalidates the signature.</p>
+<p>Self-made identities show as unverified in other programs, since no authority vouches for them.</p>
+</section>
+<section class="doc-topic" id="scanned-documents-ocr"><h2><a href="#scanned-documents-ocr">Scanned documents (OCR)</a></h2>
+<p><b>Tools ▸ Recognize text (OCR)</b> reads the text in scanned pages and lays it invisibly over the page, so you can search, select and copy it while the page looks exactly as before. Recognition runs on your computer. Pages that already have text are skipped.</p>
+</section>
+<section class="doc-topic" id="qr-codes"><h2><a href="#qr-codes">QR codes</a></h2>
+<p><b>Tools ▸ Find QR codes</b> reads the QR codes printed on the pages and outlines each one. Click a code to see what it holds:</p>
+<ul>
+<li><b>Web address</b>: the site&#x27;s name is shown large, with warnings for tricks (a name before &quot;@&quot;, a bare number address, look-alike letters, unencrypted links). Open it only if it&#x27;s what you expect.</li>
+<li><b>Wi-Fi network</b>: the network name and password, ready to copy.</li>
+<li><b>Email</b>, <b>phone number</b>, <b>text message</b>, <b>map location</b>, <b>contact card</b> (save it as a .vcf file) or plain text.</li>
+</ul>
+</section>
+<section class="doc-topic" id="compare-convert-and-export"><h2><a href="#compare-convert-and-export">Compare, convert and export</a></h2>
+<ul>
+<li><b>Tools ▸ Compare with another version</b> lists the text changes and shows a visual overlay report.</li>
+<li><b>File ▸ Export as</b> saves a Word document, Markdown or a web page; <b>File ▸ Export</b> saves text, pictures of the pages, the pictures embedded in the document, form data or a comment summary.</li>
+</ul>
+</section>
+<section class="doc-topic" id="file-size-accessibility-and-archiving"><h2><a href="#file-size-accessibility-and-archiving">File size, accessibility and archiving</a></h2>
+<ul>
+<li><b>File ▸ Reduce file size</b>: *Keep quality* compresses without changing anything visible; *Balanced* and *Smallest* also resample pictures (Smallest removes metadata, attachments and scripts too). *Custom* sets resolution and quality.</li>
+<li><b>Tools ▸ Accessibility</b> checks the document (title, language, tags, alternate text and more) and fixes what it can automatically.</li>
+<li><b>Tools ▸ PDF/A</b> checks archival compliance and converts to PDF/A-2b when nothing stands in the way (such as fonts that aren&#x27;t embedded).</li>
+</ul>
+</section>
+<section class="doc-topic" id="attachments"><h2><a href="#attachments">Attachments</a></h2>
+<p>Files attached to a PDF are listed in the sidebar&#x27;s <b>Files</b> section, where you can save or remove them. <b>Tools ▸ Attach a file</b> adds one.</p>
+</section>
+<section class="doc-topic" id="printing"><h2><a href="#printing">Printing</a></h2>
+<p><b>File ▸ Print</b> (Ctrl+P) chooses the printer, pages, copies, scaling (fit or actual size), automatic rotation, grayscale, two-sided printing and whether to print comments. <b>Properties…</b> opens the printer&#x27;s own settings (paper, tray, quality).</p>
+</section>
+<section class="doc-topic" id="automation"><h2><a href="#automation">Automation</a></h2>
+<h3 id="automation-actions">Actions</h3>
+<p>An action is a list of steps (OCR, redaction, watermark, page changes, reducing file size and more) run on many files at once. <b>Tools ▸ Run an action on files</b> runs one.</p>
+<h3 id="automation-recording-an-action">Recording an action</h3>
+<p><b>Tools ▸ Record an action</b> starts recording. Apply the steps you want to the open document; a red bar lists them. <b>Stop and save</b> writes the action and offers to run it on other files. Text edits, comments, signing and form filling aren&#x27;t recorded, since they belong to one document. Bates numbers continue from file to file when an action runs on several.</p>
+<h3 id="automation-watching-a-folder">Watching a folder</h3>
+<p><b>Tools ▸ Watch a folder</b> runs an action on every PDF dropped into a folder while Quintess is open. Results go to a &quot;Done&quot; folder; originals move to &quot;Processed&quot;, or to &quot;Failed&quot; with a note saying why.</p>
+</section>
+<section class="doc-topic" id="the-object-inspector"><h2><a href="#the-object-inspector">The object inspector</a></h2>
+<p>Choose the <b>Inspect</b> tool (the ⓘ button in the dock) and click anything on a page to see what it is: a text&#x27;s font, size, embedding and whether editing can reuse it; a picture&#x27;s pixel size, resolution and compression; a shape&#x27;s colors and line width. The chosen object is outlined on the page.</p>
+</section>
+<section class="doc-topic" id="the-command-line"><h2><a href="#the-command-line">The command line</a></h2>
+<p>The <code>quintess</code> command does nearly everything the app does, for scripts and batch work. Run <code>quintess --help</code> for the list, and <code>quintess &lt;command&gt; --help</code> for each one. A few examples:</p>
+<ul>
+<li><code>quintess merge a.pdf b.pdf -o both.pdf</code></li>
+<li><code>quintess redact contract.pdf --text &quot;Jane Roe&quot; -o redacted.pdf</code></li>
+<li><code>quintess form merge form.pdf --data people.xlsx --name &quot;{Last}&quot;</code></li>
+<li><code>quintess search-folder C:\Contracts &quot;termination&quot;</code></li>
+<li><code>quintess qr flyer.pdf</code></li>
+<li><code>quintess watch C:\Inbox --action stamp.json</code></li>
+</ul>
+<p>Commands overwrite the input unless you give <code>-o</code>; they write safely, so a crash never leaves a broken file. Set the <code>QUINTESS_PASSWORD</code> environment variable to open protected files without typing the password on the command line.</p>
+</section>
+<section class="doc-topic" id="keyboard-shortcuts"><h2><a href="#keyboard-shortcuts">Keyboard shortcuts</a></h2>
+<ul>
+<li><b>Ctrl+K</b> or <b>Ctrl+Shift+P</b>: command palette</li>
+<li><b>Ctrl+O</b>: open; <b>Ctrl+S</b>: save; <b>Ctrl+Shift+S</b>: save as; <b>Ctrl+W</b>: close</li>
+<li><b>Ctrl+P</b>: print</li>
+<li><b>Ctrl+Z</b>: undo; <b>Ctrl+Y</b> or <b>Ctrl+Shift+Z</b>: redo</li>
+<li><b>Ctrl+F</b>: find; <b>F3</b> / <b>Shift+F3</b>: next / previous match</li>
+<li><b>Ctrl+Shift+F</b>: search a folder</li>
+<li><b>Ctrl+H</b>: find and replace text</li>
+<li><b>Ctrl+G</b>: go to page</li>
+<li><b>Ctrl+plus</b> / <b>Ctrl+minus</b>: zoom; <b>Ctrl+0</b>: fit width</li>
+<li><b>Page Up</b>, <b>Page Down</b>, <b>Home</b>, <b>End</b>: move through pages</li>
+<li><b>F11</b>: full screen</li>
+<li><b>F1</b>: this guide</li>
+<li><b>Esc</b>: back to the Select tool</li>
+</ul>
+</section>
+<section class="doc-topic" id="privacy-and-updates"><h2><a href="#privacy-and-updates">Privacy and updates</a></h2>
+<p>Quintess never sends your documents anywhere. It contacts the internet only if you ask it to:</p>
+<ul>
+<li><b>Check for updates</b> (Help menu) asks GitHub whether a newer version exists. If you turn on automatic checks, it does this at most once a day. Nothing about you or your documents is sent.</li>
+<li>Opening a link or QR code opens your browser, after showing you where it goes.</li>
+<li>A copy of Quintess built from source may ask to download the OCR models once; the installer includes them.</li>
+</ul>
+</section>
+<section class="doc-topic" id="if-something-goes-wrong"><h2><a href="#if-something-goes-wrong">If something goes wrong</a></h2>
+<ul>
+<li>If Quintess hits a problem it can&#x27;t recover from, it saves your unsaved documents to <code>%LOCALAPPDATA%\Quintess\Recovered</code> and the details to <code>%LOCALAPPDATA%\Quintess\crash.log</code>, and tells you before closing.</li>
+<li><b>Ctrl+Z</b> undoes edits one at a time, back to when you opened the file.</li>
+<li>Preferences are in <code>%APPDATA%\Quintess\settings.json</code>.</li>
+</ul>
+</section>
+  </article>
+</div>
+</main>
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="/"><img src="/assets/img/mark.png" alt="" width="18" height="22"><span>quintess</span></a>
+    <nav aria-label="Footer">
+      <a href="/guide/">User guide</a>
+      <a href="/privacy/">Site privacy</a>
+      <a href="https://github.com/bhanright/quintess/blob/main/LICENSE-MIT">License</a>
+      <a href="https://github.com/bhanright/quintess">GitHub</a>
+    </nav>
+    <p class="mono faint keep-case">© 2026 William Hanright · MIT or Apache-2.0 · this site sets no cookies</p>
+  </div>
+</footer>
+<script src="/assets/site.js?v=e8b5943a14" defer></script>
+</body>
+</html>

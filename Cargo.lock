@@ -3813,6 +3813,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "quintess-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "eframe",
+ "egui",
+ "egui_extras",
+ "image",
+ "quintess-core",
+ "regex",
+ "rfd",
+ "serde",
+ "serde_json",
+ "winresource",
+]
+
+[[package]]
+name = "quintess-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "image",
+ "quintess-core",
+ "regex",
+ "serde_json",
+ "winresource",
+]
+
+[[package]]
+name = "quintess-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "calamine",
+ "chrono",
+ "csv",
+ "docx-rs",
+ "getrandom 0.4.3",
+ "image",
+ "lopdf",
+ "ocrs",
+ "pdfium-render",
+ "qrcode",
+ "rcgen",
+ "regex",
+ "ring",
+ "rqrr",
+ "rten",
+ "rust_xlsxwriter",
+ "rustybuzz",
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "subsetter",
+ "ttf-parser",
+ "unicode-bidi",
+ "ureq",
+ "windows",
+ "x509-parser",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5297,72 +5363,6 @@ dependencies = [
  "glifo",
  "hashbrown 0.17.1",
  "vello_common",
-]
-
-[[package]]
-name = "vellum-app"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "eframe",
- "egui",
- "egui_extras",
- "image",
- "regex",
- "rfd",
- "serde",
- "serde_json",
- "vellum-core",
- "winresource",
-]
-
-[[package]]
-name = "vellum-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "image",
- "regex",
- "serde_json",
- "vellum-core",
- "winresource",
-]
-
-[[package]]
-name = "vellum-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "calamine",
- "chrono",
- "csv",
- "docx-rs",
- "getrandom 0.4.3",
- "image",
- "lopdf",
- "ocrs",
- "pdfium-render",
- "qrcode",
- "rcgen",
- "regex",
- "ring",
- "rqrr",
- "rten",
- "rust_xlsxwriter",
- "rustybuzz",
- "serde",
- "serde_json",
- "sha2",
- "similar",
- "subsetter",
- "ttf-parser",
- "unicode-bidi",
- "ureq",
- "windows",
- "x509-parser",
 ]
 
 [[package]]

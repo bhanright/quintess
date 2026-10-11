@@ -1,0 +1,34 @@
+// The quintess.cc website: static pages in public/, served by the Worker in
+// src/worker.js, which also keeps the cookieless visit counts in D1.
+// Deploy with `python site/tools/deploy.py` (builds the guide, deploys, and
+// tells search engines about changed pages).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quintess-site",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash",
+    // Every request passes through the Worker, for the www redirect and the
+    // security headers.
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "quintess-analytics",
+      "database_id": "9c6beea8-c877-41cb-a167-223d818027a0"
+    }
+  ],
+  "routes": [
+    { "pattern": "quintess.cc", "custom_domain": true },
+    { "pattern": "www.quintess.cc", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  // Forget old visits once a day.
+  "triggers": { "crons": ["17 4 * * *"] },
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,43 @@
+[package]
+name = "quintess-core"
+description = "The document engine behind Quintess: reading, editing, securing, converting and writing PDF files."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lopdf = "0.45"
+pdfium-render = "0.9.4"
+image = "0.25"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+chrono = "0.4"
+getrandom = "0.4.3"
+ttf-parser = "0.25"
+subsetter = "0.2"
+docx-rs = "0.4.22"
+base64 = "0.23.1"
+similar = "3.2.0"
+ocrs = "0.13"
+rten = "0.26"
+ureq = "3.4.2"
+rcgen = "0.14"
+x509-parser = "0.18.1"
+sha2 = "0.11.0"
+ring = "0.17"
+csv = "1.4.0"
+calamine = { version = "0.36.1", features = ["chrono"] }
+rustybuzz = "0.20.1"
+unicode-bidi = "0.3.18"
+rqrr = "0.11.0"
+
+[dev-dependencies]
+image = "0.25"
+qrcode = "0.14.1"
+regex = "1"
+rust_xlsxwriter = "0.99.1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Storage_Xps"] }

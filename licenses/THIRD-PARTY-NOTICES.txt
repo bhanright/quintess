@@ -1,7 +1,7 @@
-Third-party software in Vellum
+Third-party software in Quintess
 ==============================
 
-Vellum is licensed under MIT OR Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE).
+Quintess is licensed under MIT OR Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE).
 It includes the software listed below, each under its own license.
 
 PDFium (rendering and text): BSD-3-Clause and the licenses of its parts, below.

@@ -1,5 +1,5 @@
 """Writes licenses/THIRD-PARTY-NOTICES.txt: every library compiled into the
-Vellum programs, with its license and the license text it ships, plus
+Quintess programs, with its license and the license text it ships, plus
 PDFium and the OCR models. Run it before each release:
 
     python tools/third_party_notices.py
@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "licenses" / "THIRD-PARTY-NOTICES.txt"
-PROGRAMS = ["vellum-app", "vellum-cli"]
+PROGRAMS = ["quintess-app", "quintess-cli"]
 LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
 
 
@@ -51,10 +51,10 @@ def main():
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout)
     packages = shipped_packages(metadata)
     lines = [
-        "Third-party software in Vellum",
+        "Third-party software in Quintess",
         "==============================",
         "",
-        "Vellum is licensed under MIT OR Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE).",
+        "Quintess is licensed under MIT OR Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE).",
         "It includes the software listed below, each under its own license.",
         "",
         "PDFium (rendering and text): BSD-3-Clause and the licenses of its parts, below.",

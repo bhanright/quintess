@@ -1,24 +1,25 @@
-# Vellum: status and plan
+# Quintess: status and plan
 
-Vellum is a PDF reader and editor written in Rust, meant to cover what Adobe
+Quintess is a PDF reader and editor written in Rust, meant to cover what Adobe
 Acrobat Pro does and add things it lacks. It has no integrated AI features:
 William asked for them to be removed on 2026-10-10, so do not add any.
 
 ## Architecture
 
-- `crates/vellum-core`: the engine. `lopdf` is the editable object model,
+- `crates/quintess-core`: the engine. `lopdf` is the editable object model,
   PDFium (`vendor/pdfium/bin/pdfium.dll`, chromium/8086, gitignored) does
   rendering and positioned text. `engine.rs` lists where the DLL is found.
-- `crates/vellum-cli`: the `vellum` command-line tool (`vellum --help`).
-- `crates/vellum-app`: the egui desktop app (`vellum-app [files]`).
+- `crates/quintess-cli`: the `quintess` command-line tool (`quintess --help`).
+- `crates/quintess-app`: the egui desktop app (`quintess-app [files]`).
 
 Toolchain: rustup stable (1.99, MSVC) installed by winget. Add
 `%USERPROFILE%\.cargo\bin` to PATH in a fresh shell. **C: is almost full on
-this machine**, so `.cargo/config.toml` puts build output in `E:\VellumBuild`.
+this machine**, so `target` is a directory junction to `E:\QuintessBuild`.
+The website is in `site/` (see `site/README.md`).
 Build with `cargo build -j 6`: this PC has intermittent memory faults under
 heavy load, so treat a one-off compiler crash as hardware and rerun it.
 
-Visual checks: `VELLUM_SCREENSHOT=out.png VELLUM_SETUP="..." vellum-app file.pdf`
+Visual checks: `QUINTESS_SCREENSHOT=out.png QUINTESS_SETUP="..." quintess-app file.pdf`
 saves a picture of the window and exits (setup options are documented on
 `SelfCheck` in `app.rs`).
 
@@ -40,7 +41,7 @@ saves a picture of the window and exits (setup options are documented on
 - Export: Markdown, HTML, Word, plain and layout text, images.
 - Attachments, comparison (text diff plus visual overlay report).
 - Offline OCR (`ocrs`) with an invisible, word-aligned text layer; models
-  download once into `%LOCALAPPDATA%\Vellum\models`.
+  download once into `%LOCALAPPDATA%\Quintess\models`.
 - Digital signatures: self-signed identities, visible signatures as
   incremental updates, verification (CMS cross-checked with OpenSSL).
 - Accessibility checker with automatic fixes; PDF/A-2b preflight and conversion.
@@ -84,7 +85,7 @@ saves a picture of the window and exits (setup options are documented on
   tooltip; the app lets each column be reassigned. File names come from a
   pattern (`{Column}`, `{row}`); copies can be flattened or combined into one
   PDF with a bookmark each. Values a field can't take and empty required
-  fields are reported per row. CLI: `vellum form merge`.
+  fields are reported per row. CLI: `quintess form merge`.
 - Redaction check (`redaction_check.rs`): after redacting, the saved file is
   searched for the text that was under the boxes: under the boxes, elsewhere
   on the pages, properties and XMP, annotations (including their
@@ -92,8 +93,8 @@ saves a picture of the window and exits (setup options are documented on
   read; other kinds are listed as not checked), every other string and data
   stream (tags' alternate text, scripts), and earlier versions kept by
   incremental saves (each opened on its own). Also runs on any file for given
-  words (Redact ▸ Check for leftover text; `vellum check-redaction`, exit code
-  2 when found). `vellum redact --report` saves it.
+  words (Redact ▸ Check for leftover text; `quintess check-redaction`, exit code
+  2 when found). `quintess redact --report` saves it.
 - Reading position: each file reopens at the page and zoom it was left at
   (`Settings::reading_positions`, the last 200 files).
 - Command palette (Ctrl+K or Ctrl+Shift+P, `app/commands.rs`): every
@@ -138,7 +139,7 @@ saves a picture of the window and exits (setup options are documented on
   ligature text stored reversed. Edited lines draw words in bidi order.
 - Release: `cargo build --release -j 6` (thin LTO, stripped; about 8
   minutes). The icon (`assets/`, drawn by a script) is embedded by each
-  crate's `build.rs` and set as the window icon. `installer/vellum.iss` is
+  crate's `build.rs` and set as the window icon. `installer/quintess.iss` is
   an Inno Setup script (per-user install, Open with registration, Default
   Programs capabilities, optional PATH entry); it has not been compiled.
 - Looks (`theme.rs`, `app/studio.rs`): "Studio" (default) is a dark or
@@ -156,7 +157,7 @@ saves a picture of the window and exits (setup options are documented on
   text. Tools ▸ Find QR codes outlines them on the page; clicking one shows
   its contents, warnings for suspicious links (user name before "@", bare
   number address, look-alike letters, plain http), and Open / Copy / Save
-  contact. CLI: `vellum qr file.pdf [--json]`.
+  contact. CLI: `quintess qr file.pdf [--json]`.
 - Audit fixes (2026-10-10, from a blind audit): removal edits rewrite
   signed files; saves keep the original encryption (`Pdf::to_bytes_keeping_encryption`,
   `DocumentTab::original_encryption`) and write through a temporary file
@@ -180,10 +181,10 @@ saves a picture of the window and exits (setup options are documented on
 - Updates (`updates.rs`, `app/updates.rs`): opt in, asked once on first
   run; at most daily if on; Help ▸ Check for updates any time; CLI
   `check-updates`. Reads GitHub's latest release for `updates::REPOSITORY`
-  (bhanright/vellum, to confirm at publishing), downloads the asset ending
+  (bhanright/quintess), downloads the asset ending
   `-setup.exe` and verifies it against `<installer>.sha256` when the release
   includes one (publish that file with each release).
-- Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
+- Developer probes: `cargo run -p quintess-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).
 - Desktop app: tabs, background rendering, zoom and fit, thumbnails,

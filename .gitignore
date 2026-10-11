@@ -2,3 +2,6 @@
 /vendor
 /scratch
 *.secrets*
+
+/logo_source/candidates/
+/.claude/
