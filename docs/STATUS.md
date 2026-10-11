@@ -171,11 +171,19 @@ saves a picture of the window and exits (setup options are documented on
   runtime; OCR models bundled by the installer and verified by SHA-256
   (asking before any download); LICENSE-MIT, LICENSE-APACHE and
   `tools/third_party_notices.py`; `docs/BUILDING.md`.
-- Known limitations: a line mixing right-to-left and left-to-right text
-  copies out in PDFium's order (whole line reversed when mostly
-  right-to-left); XFDF import reads flat fields only; signature checks do
-  not validate certificate chains or revocation (self-signed is flagged).
-- Spelling (`spelling.rs`, `spell.rs`, `app/spelling.rs`): Hunspell dictionaries through`n  `spellbook` (pure Rust; chosen over the Windows spell checker so a Linux`n  release works the same). en-US is compiled in; en-GB/CA/AU ship in`n  `assets/dictionaries` (SCOWL, permissive); more are found in a`n  `dictionaries` folder beside the exe or in the settings folder, and in`n  `/usr/share/hunspell` on Linux. Personal words: `personal-dictionary.txt`.`n  Live red underlines with a right-click menu in the page-text editor,`n  comment, text box, reply and form-field editors; Tools ▸ Check spelling`n  (F7) steps through page text, comments and fields and re-checks after each`n  change; CLI `spell`.`n- Pictures and shapes (`objects.rs`, `object_tool.rs`): page objects are runs of
+- Known limitations: signature checks do not validate every certificate
+  chain or the freshness of OCSP answers (self-signed is flagged).
+- Spelling (`spelling.rs`, `spell.rs`, `app/spelling.rs`): Hunspell dictionaries through
+  `spellbook` (pure Rust; chosen over the Windows spell checker so a Linux
+  release works the same). en-US is compiled in; en-GB/CA/AU ship in
+  `assets/dictionaries` (SCOWL, permissive); more are found in a
+  `dictionaries` folder beside the exe or in the settings folder, and in
+  `/usr/share/hunspell` on Linux. Personal words: `personal-dictionary.txt`.
+  Live red underlines with a right-click menu in the page-text editor,
+  comment, text box, reply and form-field editors; Tools ▸ Check spelling
+  (F7) steps through page text, comments and fields and re-checks after each
+  change; CLI `spell`.
+- Pictures and shapes (`objects.rs`, `object_tool.rs`): page objects are runs of
   content operators (image/form `Do`, inline images, painted paths; clipping
   paths and text are excluded). Changes wrap only that run (`q cm … Q` for a
   page-space transform T, as C·T·C⁻¹ in the object's space; a clipping path for
@@ -212,7 +220,8 @@ saves a picture of the window and exits (setup options are documented on
   Known limit: flinging through big scans at 40 pages/s outpaces preview
   decoding on the first pass (the full JPEG is decoded per page).
 - Certificates and validation (`signatures.rs`, `validation.rs`, `cms.rs`,
-  `timestamp.rs`, `revocation.rs`, `ltv.rs`, `cert_store.rs`, `net.rs`): .pfx/.p12
+  `timestamp.rs`, `revocation.rs`, `ltv.rs`, `cert_store.rs`, 
+et.rs`): .pfx/.p12
   signing (`SigningIdentity::from_pkcs12`, whole chain in the CMS), Windows store
   certificates through CNG, RFC 3161 signature timestamps and /DocTimeStamp.
   `verify` builds the chain to a `TrustStore` (Mozilla roots via
@@ -260,6 +269,43 @@ saves a picture of the window and exits (setup options are documented on
   and drop, every markup tool, form filling, signing, dialogs for all tools,
   undo/redo, night reading mode, dark interface, preferences, recent files,
   Print dialog (Ctrl+P), Edit text tool with a style bar, find and replace (Ctrl+H).
+
+- Certificate encryption (`public_key.rs`, `rsa` crate): Adobe.PubSec
+  `adbe.pkcs7.s5`, AES-256, RSA recipients with per-recipient permissions;
+  opening with a .pfx/.pem identity. lopdf only reads the Standard handler,
+  so opening swaps in a Standard dictionary around the recovered key and
+  saving puts the PubSec one back. The app keeps the decrypted bytes and
+  re-encrypts on save (`encrypt_for_certificates_as_before`); it does not
+  enforce the recipient's permissions (nor an owner password's), it reports
+  them. Acrobat interop untested. Not done: ECDH, OAEP, s3/s4, 3DES.
+- Standards: PDF/A 1b, 2b, 2u, 3b, 3u, 4, 4f (`preflight.rs`,
+  `preflight_scan.rs`); PDF/X-1a:2003 and X-4 with RGB to CMYK
+  (`pdfx.rs`, no CMYK profile bundled); PDF/UA-1 identification after the
+  accessibility check (needs no failures plus a person's review). The claim
+  is written only when nothing unfixable remains. App: Tools ▸ Standards.
+  The PDF/A-4 Info rule is from memory of ISO 19005-4; confirm with veraPDF.
+- Print production (`imposition.rs`, `inks.rs`, `separations.rs`,
+  `color_convert.rs`, `color_walk.rs`): booklets (signatures, creep,
+  gutter, binding side), posters (overlap, trim marks, labels), ink list,
+  plates and total ink coverage made by rewriting a one-page copy so each
+  color becomes one ink's amount (exact for CMYK), grayscale and RGB to
+  CMYK. No ICC or overprint; shadings, inline and Indexed/Lab/DeviceN
+  images are not converted. App: Tools ▸ Print production.
+- Scanning (`scan.rs`): WIA through a PowerShell script on Windows,
+  `scanimage` on Linux; File ▸ Create ▸ From a scanner, with OCR after.
+- Portfolios (`portfolio.rs`), media (`media.rs`: RichMedia, Screen +
+  Rendition, Movie, Sound, 3D; `add_video` with a poster), article threads
+  (`threads.rs`). Custom portfolio columns and playing media inside the app
+  are not done.
+- Right-to-left text order (`bidi_text.rs`): lines with Hebrew or Arabic
+  letters ignore PDFium's order; characters are sorted by box, levels
+  guessed, reordering undone and checked with `unicode-bidi` (else PDFium's
+  order stays). Ambiguous lines follow the aligned line above. Probe:
+  `--example bidi_probe`.
+- XFDF (`forms.rs`): nested fields, several values, rich text (`/RV`),
+  nested export; the app imports XFDF through `apply_xfdf`.
+- Text wrap (`text_wrap.rs`): Wrap text in the object tool's toolbar;
+  wrapped text is laid out again after a move, resize or delete.
 
 ## Ideas for next
 

@@ -128,6 +128,12 @@ The **Edit pictures and shapes** tool (the picture button in the dock, or **Edit
 
 Every change is a normal edit you can undo. Cropping hides the rest of the picture without removing it from the file; to remove content for good, use redaction.
 
+## Text wrap
+
+Select one picture and choose **Wrap text** in its toolbar: the paragraphs beside it are laid out again so their lines flow around the picture, keeping a small gap, and the text below moves down to make room. From then on the text follows the picture: move it, resize it or delete it, and the paragraphs are laid out again. Choose **Wrap text** again to stop, and the lines go back to full width.
+
+Lines use the wider side of the picture. Text you edit by other means afterward is left as it is, as ordinary text.
+
 # Measuring
 
 The **Measure** tool (in the dock's More tools, or **Tools ▸ Measure**) measures on the page at a drawing's scale.
@@ -185,6 +191,22 @@ Page ranges accept forms like `1-3, 7, odd, even, 10-end`.
 
 **File ▸ Create** makes a blank document, or a PDF from pictures or from a text or Markdown file.
 
+**From a scanner** lists the scanners on your computer (on Windows through its own scanner support; on Linux through SANE, from the `sane-utils` package). Choose the resolution (300 dpi suits OCR and printing), color, gray or black and white, and whether to take every sheet in the document feeder. **Make the text searchable** runs OCR on the new pages as soon as they arrive.
+
+## Portfolios
+
+A portfolio is one PDF that holds several files of any type, each kept exactly as it is. **File ▸ Create ▸ Portfolio** collects the files, the order or sort (name, size or date), whether readers show them as a list or tiles, and the file that opens first. Acrobat and other portfolio-aware readers show the file list; readers without portfolio support show a cover page that lists the files and says where to find them, and every file is in the attachments panel either way.
+
+**Tools ▸ Portfolio files** opens, adds, removes and reorders the files in a portfolio (or turns any PDF into one), and extracts them all to a folder. A PDF inside opens in its own tab; other files open in the program your computer uses for them.
+
+## Audio, video and 3D
+
+**Tools ▸ Audio, video and 3D** lists the media embedded in a document, with its page and size. **Play** opens it in your computer's player; **Save** keeps a copy. **Edit ▸ Add video** places an MP4 on the current page with a poster picture you choose, which readers that can't play video show instead.
+
+## Article threads
+
+Magazines and newspapers sometimes define the reading order of a story that jumps between columns and pages. **Tools ▸ Article threads** lists these stories: go to where one starts, copy its whole text in reading order, or delete the thread.
+
 # Forms
 
 ## Filling forms
@@ -204,7 +226,7 @@ Only the calculation, checking and formatting scripts attached to fields ever ru
 
 ## Form data
 
-- **Import data** fills the form from a JSON or XFDF file; **File ▸ Export ▸ Form data** saves the values as JSON, XFDF or CSV.
+- **Import data** fills the form from a JSON or XFDF file; **File ▸ Export ▸ Form data** saves the values as JSON, XFDF or CSV. XFDF keeps nested field names (such as `address.street`), list boxes with several choices, and styled text.
 - **Clear all fields** empties the form; **Flatten fields into the page** makes the values permanent.
 
 ## Filling from a spreadsheet
@@ -240,7 +262,9 @@ Notes:
 # Security
 
 - **Tools ▸ Protect ▸ Protect with password** encrypts the file (AES-256 or AES-128). A password to open it is optional; you can also restrict printing, copying, editing, comments and form filling.
-- Files keep their protection when you edit and save them. **Remove protection** takes it off.
+- **Tools ▸ Protect ▸ Encrypt for certificates** lets only chosen people open the file, by their digital certificates (the .cer, .crt or .pem files they send you), with no shared password. Each person can have their own permissions, and one can be allowed to change the security later. Add your own certificate too (**Add my own** uses your Quintess signing identity), or you won't be able to open the file yourself. RSA certificates only.
+- To open a file encrypted for you, choose your certificate with its private key: a .pfx or .p12 file (with its password, which is never saved), or a .pem holding both. Certificates in the Windows store can't open these files.
+- Files keep their protection when you edit and save them, whether it is a password or certificates. **Remove protection** takes it off (for a certificate file, only if your certificate allows it).
 - **Remove metadata** clears the document properties and hidden metadata.
 
 # Digital signatures
@@ -306,8 +330,20 @@ From the command line: `quintess tables report.pdf` lists the tables found (`--j
 # File size, accessibility and archiving
 
 - **File ▸ Reduce file size**: *Keep quality* compresses without changing anything visible; *Balanced* and *Smallest* also resample pictures (Smallest removes metadata, attachments and scripts too). *Custom* sets resolution and quality.
-- **Tools ▸ Accessibility** checks the document (title, language, tags, alternate text and more) and fixes what it can automatically.
-- **Tools ▸ PDF/A** checks archival compliance and converts to PDF/A-2b when nothing stands in the way (such as fonts that aren't embedded).
+- **Tools ▸ Accessibility** checks the document (title, language, tags, alternate text and more) and fixes what it can automatically. When nothing fails and you have reviewed the items only a person can judge (marked ?, such as alternate text and contrast), **Declare PDF/UA-1** marks the document as meeting the PDF/UA standard.
+
+## PDF/A and PDF/X
+
+**Tools ▸ Standards ▸ PDF/A** checks a document for long-term archiving and converts it. Choose the level:
+
+- **PDF/A-1b**: the strictest, with no transparency.
+- **PDF/A-2b**: the usual choice. **2u** also needs every font to map its text to Unicode.
+- **PDF/A-3b** and **3u**: like 2b and 2u, and files of any type may be attached.
+- **PDF/A-4** (based on PDF 2.0) and **4f** (with attached files).
+
+**Tools ▸ Standards ▸ PDF/X** prepares a file for a print shop: **PDF/X-1a** (CMYK and spot colors only, no transparency) or **PDF/X-4** (transparency and RGB allowed). Choose your printer's ICC profile; PDF/X-1a needs a CMYK one, and PDF/X-4 falls back to sRGB without one. For PDF/X-1a, Quintess can convert RGB colors and pictures to CMYK with a simple formula; use your layout program for color-critical work.
+
+Converting fixes what Quintess can (color profile, identification, trim box, scripts, compression) and lists plainly what it can't, such as fonts that aren't embedded or transparency under PDF/A-1b. A file is marked as PDF/A or PDF/X only when nothing unfixable remains. These checks are not a certified validator: use veraPDF, or your print shop's preflight, for a final word.
 
 # Attachments
 
@@ -316,6 +352,13 @@ Files attached to a PDF are listed in the sidebar's **Files** section, where you
 # Printing
 
 **File ▸ Print** (Ctrl+P) chooses the printer, pages, copies, scaling (fit or actual size), automatic rotation, grayscale, two-sided printing and whether to print comments. **Properties…** opens the printer's own settings (paper, tray, quality).
+
+## Print production
+
+- **Make a booklet** (Tools ▸ Print production) lays the pages out two to a sheet, so that printed double-sided and folded they read in order. Choose the paper (it is used sideways: letter paper makes half-letter pages, tabloid makes letter pages), the binding side, how many sheets nest in each stack for thick booklets, creep (how far inner sheets move toward the fold) and a gutter. Print the result double-sided, flipping on the short edge, at actual size.
+- **Make a poster** splits each page into tiles on smaller paper, to print and join into a large poster. Choose a scale or a size to fit (such as 24 × 36 inches), the overlap for gluing, trim marks and row-and-column labels.
+- **Output preview** lists the inks the document prints with (cyan, magenta, yellow, black and spot colors, with their pages), shows any one ink as a gray plate where dark means more ink, and warns where the four process inks add up to more than a limit such as 300%. It is an approximation without color profiles or overprint.
+- **Convert to grayscale** and **Convert RGB to CMYK** change the document's colors and pictures with simple formulas, without ICC profiles. Spot colors stay as they are, and Quintess says how many pictures it couldn't convert.
 
 # Automation
 
@@ -370,6 +413,9 @@ Quintess never sends your documents anywhere. It contacts the internet only if y
 
 - **Check for updates** (Help menu) asks GitHub whether a newer version exists. If you turn on automatic checks, it does this at most once a day. Nothing about you or your documents is sent.
 - Opening a link or QR code opens your browser, after showing you where it goes.
+- **Downloading a spelling dictionary** fetches it from the open-source dictionaries project on GitHub.
+- **Creating a PDF from a web page** loads that page.
+- **Trusted timestamps** send a fingerprint of the signature (not the document) to the timestamp server, and **checking revocation** or **adding long-term validation** asks the certificates' issuers whether they were revoked.
 - A copy of Quintess built from source may ask to download the OCR models once; the installer includes them.
 
 # If something goes wrong
