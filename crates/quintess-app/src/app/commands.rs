@@ -194,6 +194,8 @@ pub(super) const COMMANDS: &[Command] = &[
         .hint("Find words in every PDF in a folder")
         .always(),
     command("Tools", "Inspect objects", |app, _| app.tool = Tool::Inspect).hint("Click the page to see what is drawn there: fonts, sizes, colors, image details"),
+    command("Edit", "Edit pictures and shapes", |app, _| app.tool = Tool::EditObjects).hint("Move, resize, rotate, crop, replace or delete the pictures and drawings on a page"),
+    command("Edit", "Add picture…", |app, _| app.add_picture()).hint("Place a picture from a file on the current page"),
     command("Tools", "Check spelling…", |app, ctx| app.start_spell_check(ctx)).shortcut("F7").hint("Go through misspelled words in the page text, comments and form fields"),
     command("Tools", "Find QR codes", |app, ctx| app.start_qr_scan(ctx)).hint("Read the QR codes printed on the pages, to open or copy what they hold"),
     command("Tools", "Recognize text (OCR)", |app, ctx| {

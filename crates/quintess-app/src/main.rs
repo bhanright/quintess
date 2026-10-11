@@ -12,6 +12,7 @@ mod sidebar;
 mod spell;
 mod tab;
 mod theme;
+mod object_tool;
 mod viewer;
 
 fn main() -> eframe::Result {

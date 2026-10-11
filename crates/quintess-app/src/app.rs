@@ -155,6 +155,19 @@ impl QuintessApp {
             match key {
                 "organizer" => self.organizer = true,
                 "tool" if value == "edit-text" => self.tool = Tool::EditText,
+                "tool" if value == "edit-objects" => self.tool = Tool::EditObjects,
+                "select-object" => {
+                    // x;y on the current page
+                    let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
+                    if let (Some(tab), [x, y]) = (self.tabs.get(self.active), numbers.as_slice()) {
+                        let objects = tab.page_objects(tab.current_page);
+                        if let Some(object) = quintess_core::objects::object_at(&objects, *x, *y) {
+                            let expected = [(object.kind, object.bounds)];
+                            let page = tab.current_page;
+                            self.reselect_objects(page, &expected);
+                        }
+                    }
+                }
                 "edit-paragraph" => {
                     self.tool = Tool::EditText;
                     if let (Some(tab), Ok(number)) = (self.tabs.get(self.active), value.parse::<usize>()) {
@@ -476,6 +489,40 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     /// Like `edit`, and returns whether the edit was made.
+    /// After pictures or drawings change, selects them again where they
+    /// now are (or clears the selection when nothing is expected).
+    fn reselect_objects(&mut self, page_index: usize, expected: &[(quintess_core::objects::ObjectKind, [f32; 4])]) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let state = self.viewer_states.entry(tab.id).or_default();
+        if expected.is_empty() {
+            state.objects.clear();
+        } else {
+            state.objects.reselect(tab, page_index, expected);
+        }
+    }
+
+    /// Adds a picture from a file to the middle of the current page.
+    fn add_picture(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("Picture", &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp"]).pick_file() else { return };
+        let Some(bytes) = self.report(std::fs::read(&path).map_err(anyhow::Error::from)) else { return };
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let page_index = tab.current_page;
+        let Some(geometry) = tab.pages.get(page_index) else { return };
+        let [left, bottom, right, top] = geometry.bounds;
+        let Some((width, height)) = image::load_from_memory(&bytes).ok().map(|picture| (picture.width() as f32, picture.height() as f32)) else {
+            return self.error("That picture couldn't be read.");
+        };
+        // A third of the page wide at most, keeping the picture's proportions.
+        let scale = ((right - left) / 3.0 / width).min((top - bottom) / 3.0 / height).min(1.0);
+        let (shown_width, shown_height) = (width * scale, height * scale);
+        let (center_x, center_y) = ((left + right) / 2.0, (bottom + top) / 2.0);
+        let area = [center_x - shown_width / 2.0, center_y - shown_height / 2.0, center_x + shown_width / 2.0, center_y + shown_height / 2.0];
+        if self.try_edit("Add picture", |pdf| quintess_core::objects::add_image(pdf, page_index as u32 + 1, &bytes, area)) {
+            self.tool = Tool::EditObjects;
+            self.reselect_objects(page_index, &[(quintess_core::objects::ObjectKind::Image, area)]);
+        }
+    }
+
     fn try_edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) -> bool {
         self.make_edit(label, change, false)
     }
@@ -1478,6 +1525,21 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 ViewerAction::DeleteParagraph(paragraph) => self.edit_page_text("Delete paragraph", |bytes, password| quintess_core::edit_text::delete_paragraph(bytes, password, &paragraph)),
+                ViewerAction::ChangeObjects { page_index, objects, change, label, expected } => {
+                    let page = page_index as u32 + 1;
+                    if self.try_edit(&label, |pdf| quintess_core::objects::change_objects(pdf, page, &objects, &change)) {
+                        self.reselect_objects(page_index, &expected);
+                    }
+                }
+                ViewerAction::ReplacePicture { page_index, objects } => {
+                    let Some(path) = rfd::FileDialog::new().add_filter("Picture", &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp"]).pick_file() else { continue };
+                    let Some(bytes) = self.report(std::fs::read(&path).map_err(anyhow::Error::from)) else { continue };
+                    let page = page_index as u32 + 1;
+                    let change = quintess_core::objects::Change::ReplaceImage(bytes);
+                    if self.try_edit("Replace picture", |pdf| quintess_core::objects::change_objects(pdf, page, &objects, &change)) {
+                        self.reselect_objects(page_index, &[]);
+                    }
+                }
                 ViewerAction::AddPageText { page, x, y, text, style } => self.edit("Add text", |pdf| quintess_core::edit_text::add_text(pdf, page as usize - 1, x, y, &text, &style)),
                 ViewerAction::Inspect { page_index, x, y } => self.inspect_at(page_index, x, y),
                 ViewerAction::ShowCode(code) => self.dialogs.push(Dialog::QrCode(code)),

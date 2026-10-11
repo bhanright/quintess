@@ -102,6 +102,7 @@ pub struct DocumentTab {
     /// Editable lines of existing text, per page, read on demand.
     line_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::edit_text::EditableLine>>>>,
     paragraph_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::edit_text::EditableParagraph>>>>,
+    object_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::objects::PageObject>>>>,
     /// Rendered pages: (page, resolution key) → texture.
     pub textures: HashMap<(usize, u32), egui::TextureHandle>,
     pub pending: HashSet<(usize, u32)>,
@@ -159,6 +160,7 @@ impl DocumentTab {
             text_cache: RefCell::new(HashMap::new()),
             line_cache: RefCell::new(HashMap::new()),
             paragraph_cache: RefCell::new(HashMap::new()),
+            object_cache: RefCell::new(HashMap::new()),
             textures: HashMap::new(),
             pending: HashSet::new(),
             texture_night_mode: false,
@@ -210,6 +212,7 @@ impl DocumentTab {
         self.text_cache.borrow_mut().clear();
         self.line_cache.borrow_mut().clear();
         self.paragraph_cache.borrow_mut().clear();
+        self.object_cache.borrow_mut().clear();
         self.textures.clear();
         self.pending.clear();
         self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
@@ -330,6 +333,16 @@ impl DocumentTab {
         let paragraphs = Rc::new(self.document.as_ref().and_then(|d| quintess_core::edit_text::editable_paragraphs(d, page_index).ok()).unwrap_or_default());
         self.paragraph_cache.borrow_mut().insert(page_index, paragraphs.clone());
         paragraphs
+    }
+
+    /// The pictures and drawings on a page, found once and cached.
+    pub fn page_objects(&self, page_index: usize) -> Rc<Vec<quintess_core::objects::PageObject>> {
+        if let Some(objects) = self.object_cache.borrow().get(&page_index) {
+            return objects.clone();
+        }
+        let objects = Rc::new(self.load_pdf().ok().and_then(|pdf| quintess_core::objects::list_objects(&pdf, page_index as u32 + 1).ok()).unwrap_or_default());
+        self.object_cache.borrow_mut().insert(page_index, objects.clone());
+        objects
     }
 
     pub fn pdfium_document(&self) -> Option<&PdfDocument<'static>> {

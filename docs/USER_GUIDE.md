@@ -109,6 +109,18 @@ Each change is an ordinary edit you can undo. Changing page text rewrites the li
 - Words with digits, ALL-CAPS abbreviations, web and email addresses and file names are not checked.
 
 From the command line: `quintess spell file.pdf` lists misspelled words with suggestions (`--language en-GB`, `--json`, `--languages`, `--download pt-PT`, `--install fr_FR.dic`).
+# Pictures and shapes
+
+The **Edit pictures and shapes** tool (the picture button in the dock, or **Edit ▸ Edit pictures and shapes**) changes the pictures, drawings and grouped artwork already on a page. The text around them is not touched.
+
+- **Click** a picture or drawing to select it; **Shift+click** adds to the selection, and **dragging a box** over empty space selects everything inside it.
+- **Drag** the selection to move it, or use the **arrow keys** (with Shift for bigger steps).
+- **Drag a handle** to resize. Corner handles keep the proportions; hold **Shift** to stretch freely.
+- The toolbar above the selection rotates left or right, flips, **crops** (choose Crop, then drag over the part to keep), **replaces** a picture with another file (fitted into the same space), brings to the front or sends to the back, and deletes. **Delete** on the keyboard deletes too.
+- **Edit ▸ Add picture…** places a picture from a file on the current page, ready to move and resize.
+
+Every change is a normal edit you can undo. Cropping hides the rest of the picture without removing it from the file; to remove content for good, use redaction.
+
 # Comments and markup
 
 The dock holds the common markup tools; **⋯** in the dock (or Tools ▸ Comment) has the rest.

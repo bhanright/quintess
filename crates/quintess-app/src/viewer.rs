@@ -47,6 +47,8 @@ pub enum Tool {
     EditText,
     /// Click to see what is drawn there (font, size, colors, image details).
     Inspect,
+    /// Pick pictures, drawings and groups to move, resize, crop or delete.
+    EditObjects,
 }
 
 impl Tool {
@@ -75,6 +77,7 @@ impl Tool {
             Tool::Sign => "Sign here",
             Tool::EditText => "Edit text",
             Tool::Inspect => "Inspect",
+            Tool::EditObjects => "Edit pictures and shapes",
         }
     }
 
@@ -129,6 +132,11 @@ pub enum ViewerAction {
     ReplaceParagraph { paragraph: EditableParagraph, rich: RichText, style: ParagraphStyle, precomputed: Option<(Vec<u8>, ParagraphReport)> },
     DeleteParagraph(EditableParagraph),
     AddPageText { page: u32, x: f32, y: f32, text: String, style: LineStyle },
+    /// Change pictures and drawings on a page; afterwards, select what lies
+    /// at `expected` (kind and bounds), or clear the selection when empty.
+    ChangeObjects { page_index: usize, objects: Vec<quintess_core::objects::PageObject>, change: quintess_core::objects::Change, label: String, expected: Vec<(quintess_core::objects::ObjectKind, [f32; 4])> },
+    /// Choose a picture file to put in place of these pictures.
+    ReplacePicture { page_index: usize, objects: Vec<quintess_core::objects::PageObject> },
 }
 
 /// Something waiting for the person to type text in a dialog.
@@ -172,6 +180,8 @@ pub struct ViewerState {
     last_viewport_height: f32,
     /// Which split-view pane this state was last drawn in.
     pane: usize,
+    /// The Edit pictures and shapes tool's selection and gesture.
+    pub objects: crate::object_tool::ObjectToolState,
 }
 
 /// An existing line of page text open for editing.
@@ -448,6 +458,9 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
             if on_screen {
                 draw_overlays(ui, tab, page_index, geometry, screen_rect, zoom, state, tool);
                 handle_page_input(ui, tab, state, tool, settings, page_index, geometry, screen_rect, zoom, &mut actions);
+                if tool == Tool::EditObjects {
+                    crate::object_tool::draw(ui, tab, &mut state.objects, page_index, geometry, screen_rect, zoom, &mut actions);
+                }
             }
         }
     });
@@ -481,12 +494,12 @@ fn draw_page(ui: &mut egui::Ui, tab: &mut DocumentTab, worker: &RenderWorker, pa
 }
 
 /// A page-space rectangle on screen.
-fn screen_rect_of(geometry: &PageGeometry, page_rect: Rect, zoom: f32, rect: [f32; 4]) -> Rect {
+pub(crate) fn screen_rect_of(geometry: &PageGeometry, page_rect: Rect, zoom: f32, rect: [f32; 4]) -> Rect {
     let (min, max) = geometry.page_rect_to_top_left(rect);
     Rect::from_min_max(page_rect.min + vec2(min[0], min[1]) * zoom, page_rect.min + vec2(max[0], max[1]) * zoom)
 }
 
-fn to_page(geometry: &PageGeometry, page_rect: Rect, zoom: f32, position: Pos2) -> (f32, f32) {
+pub(crate) fn to_page(geometry: &PageGeometry, page_rect: Rect, zoom: f32, position: Pos2) -> (f32, f32) {
     let local = (position - page_rect.min) / zoom;
     geometry.top_left_to_page(local.x, local.y)
 }
@@ -802,6 +815,10 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
     let response = ui.interact(page_rect, id, sense);
     let pointer = response.interact_pointer_pos().or(response.hover_pos());
     let point = pointer.map(|p| to_page(geometry, page_rect, zoom, p));
+    if tool == Tool::EditObjects {
+        crate::object_tool::input(ui, tab, &mut state.objects, page_index, geometry, page_rect, zoom, &response, actions);
+        return;
+    }
 
     if let Some(point) = point {
         let over_text = tab.page_text(page_index).and_then(|t| t.char_at(point.0, point.1, 0.5)).is_some();

@@ -175,7 +175,13 @@ saves a picture of the window and exits (setup options are documented on
   copies out in PDFium's order (whole line reversed when mostly
   right-to-left); XFDF import reads flat fields only; signature checks do
   not validate certificate chains or revocation (self-signed is flagged).
-- Spelling (`spelling.rs`, `spell.rs`, `app/spelling.rs`): Hunspell dictionaries through`n  `spellbook` (pure Rust; chosen over the Windows spell checker so a Linux`n  release works the same). en-US is compiled in; en-GB/CA/AU ship in`n  `assets/dictionaries` (SCOWL, permissive); more are found in a`n  `dictionaries` folder beside the exe or in the settings folder, and in`n  `/usr/share/hunspell` on Linux. Personal words: `personal-dictionary.txt`.`n  Live red underlines with a right-click menu in the page-text editor,`n  comment, text box, reply and form-field editors; Tools ▸ Check spelling`n  (F7) steps through page text, comments and fields and re-checks after each`n  change; CLI `spell`.`n- Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
+- Spelling (`spelling.rs`, `spell.rs`, `app/spelling.rs`): Hunspell dictionaries through`n  `spellbook` (pure Rust; chosen over the Windows spell checker so a Linux`n  release works the same). en-US is compiled in; en-GB/CA/AU ship in`n  `assets/dictionaries` (SCOWL, permissive); more are found in a`n  `dictionaries` folder beside the exe or in the settings folder, and in`n  `/usr/share/hunspell` on Linux. Personal words: `personal-dictionary.txt`.`n  Live red underlines with a right-click menu in the page-text editor,`n  comment, text box, reply and form-field editors; Tools ▸ Check spelling`n  (F7) steps through page text, comments and fields and re-checks after each`n  change; CLI `spell`.`n- Pictures and shapes (`objects.rs`, `object_tool.rs`): page objects are runs of
+  content operators (image/form `Do`, inline images, painted paths; clipping
+  paths and text are excluded). Changes wrap only that run (`q cm … Q` for a
+  page-space transform T, as C·T·C⁻¹ in the object's space; a clipping path for
+  crops) or remove it; restacking lifts runs with their CTM and color state.
+  The tool reselects by expected bounds after each change. Tests render pages.
+- Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
   shown with a searchable topic list (F1, Help ▸ User guide). Keep it in
   step with features. `README.md` is the GitHub front page.
 - Updates (`updates.rs`, `app/updates.rs`): opt in, asked once on first

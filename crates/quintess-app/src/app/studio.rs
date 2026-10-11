@@ -8,10 +8,11 @@ use super::*;
 use crate::theme::{self, Palette, icon};
 
 /// Tools shown in the dock; the rest are a click away under "more".
-const DOCK_TOOLS: [(Tool, char, &str); 11] = [
+const DOCK_TOOLS: [(Tool, char, &str); 12] = [
     (Tool::Select, icon::POINTER, "↖"),
     (Tool::Hand, icon::HAND, "✋"),
     (Tool::EditText, icon::EDIT_TEXT, "A|"),
+    (Tool::EditObjects, icon::PICTURE, "▣"),
     (Tool::Highlight, icon::HIGHLIGHT, "🖍"),
     (Tool::Note, icon::NOTE, "🗨"),
     (Tool::TextBox, icon::TEXT_BOX, "T"),
