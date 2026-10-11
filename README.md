@@ -20,7 +20,7 @@ A free, open-source, private PDF reader and editor for Windows and Linux. Edit t
 - **Automate**: record your steps as an action, run it on many files, or watch a folder. A full command-line tool (`quintess`) does nearly everything the app does.
 - **Languages**: text in any script, including shaped Hindi and other Indic scripts, Arabic and Hebrew.
 
-The built-in guide (press **F1** in the app, or read [docs/USER_GUIDE.md](docs/USER_GUIDE.md)) explains every feature.
+The built-in guide (press **F1** in the app, or read [docs/USER_GUIDE.md](docs/USER_GUIDE.md)) explains the tools, common workflows and their limits.
 
 ## Install
 
