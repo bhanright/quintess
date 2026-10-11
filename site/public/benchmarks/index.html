@@ -84,7 +84,7 @@
 <ol>
 <li>Build Quintess, or install it, and run <code>python tools/benchmark/make_fixtures.py</code> to make the two documents.</li>
 <li>Close the program you will measure.</li>
-<li>Run <code>powershell -File tools/benchmark/benchmark.ps1 -Program &lt;path to the program&gt; -File &lt;document&gt; -ProcessNames &lt;names&gt;</code>, with the process names without &quot;.exe&quot; (for Quintess, <code>quintess-app</code>; for Acrobat, <code>Acrobat,AcroCEF</code>).</li>
+<li>Run <code>powershell -File tools/benchmark/benchmark.ps1 -Program &lt;path to the program&gt; -File &lt;document&gt; -ProcessNames &lt;names&gt;</code>, with the process names without &quot;.exe&quot; (for Quintess, <code>quintess</code>; for Acrobat, <code>Acrobat,AcroCEF</code>). The 0.2.0 results above were measured when the app was a separate program, <code>quintess-app</code>; from 0.3.0 the app and the command-line tool are one program, and its process is named <code>quintess</code>.</li>
 <li>Run <code>powershell -File tools/benchmark/system_info.ps1 -Programs &lt;paths&gt;</code> and keep its output with the results.</li>
 </ol>
 <p>The scripts are Windows PowerShell. Corrections and results from other computers are welcome as issues on GitHub.</p>
