@@ -59,7 +59,7 @@ fn acroform(pdf: &Pdf) -> Option<Dictionary> {
 }
 
 /// Looks a key up on a field or its ancestors (FT, Ff, V, DA and Opt inherit).
-fn inherited<'a>(pdf: &'a Pdf, field: &'a Dictionary, key: &[u8]) -> Option<&'a Object> {
+pub(crate) fn inherited<'a>(pdf: &'a Pdf, field: &'a Dictionary, key: &[u8]) -> Option<&'a Object> {
     let mut current = field;
     for _ in 0..32 {
         if let Ok(value) = current.get(key) {
@@ -179,7 +179,7 @@ fn page_of_annotation(pdf: &Pdf, annotation_id: ObjectId) -> Option<u32> {
 }
 
 /// The name of a checkbox or radio button's "on" appearance (anything but Off).
-fn on_state_name(pdf: &Pdf, widget_id: ObjectId) -> Option<String> {
+pub(crate) fn on_state_name(pdf: &Pdf, widget_id: ObjectId) -> Option<String> {
     let widget = pdf.doc.get_dictionary(widget_id).ok()?;
     let normal = pdf.resolve(pdf.resolve(widget.get(b"AP").ok()?).as_dict().ok()?.get(b"N").ok()?).as_dict().ok()?;
     normal.iter().map(|(key, _)| String::from_utf8_lossy(key).into_owned()).find(|key| key != "Off")
@@ -222,7 +222,7 @@ pub fn fill_fields(pdf: &mut Pdf, values: &BTreeMap<String, String>) -> Result<V
     Ok(unmatched)
 }
 
-fn widget_ids(pdf: &Pdf, field_id: ObjectId) -> Vec<ObjectId> {
+pub(crate) fn widget_ids(pdf: &Pdf, field_id: ObjectId) -> Vec<ObjectId> {
     let Ok(field) = pdf.doc.get_dictionary(field_id) else { return Vec::new() };
     match field.get(b"Kids").ok().and_then(|k| pdf.resolve(k).as_array().ok()) {
         Some(kids) => kids.iter().filter_map(|k| k.as_reference().ok()).collect(),
@@ -253,14 +253,28 @@ fn parse_default_appearance(da: &str) -> (f32, [f32; 3]) {
     (size, color)
 }
 
+/// Stores a text or choice field's value and draws `shown` in its place:
+/// form scripts store the plain value ("1234.5") but show it formatted
+/// ("$1,234.50"), as Acrobat does. `text_color` overrides the field's own
+/// color, for scripts that show negative amounts in red.
+pub(crate) fn set_text_value(pdf: &mut Pdf, field_id: ObjectId, value: &str, shown: &str, text_color: Option<[f32; 3]>) -> Result<()> {
+    pdf.doc.get_dictionary_mut(field_id)?.set("V", text_string(value));
+    regenerate_text_appearance_in_color(pdf, field_id, shown, text_color)
+}
+
 /// Draws a text field's value into fresh appearance streams for each widget.
 fn regenerate_text_appearance(pdf: &mut Pdf, field_id: ObjectId, value: &str) -> Result<()> {
+    regenerate_text_appearance_in_color(pdf, field_id, value, None)
+}
+
+fn regenerate_text_appearance_in_color(pdf: &mut Pdf, field_id: ObjectId, value: &str, text_color: Option<[f32; 3]>) -> Result<()> {
     let field = pdf.doc.get_dictionary(field_id)?.clone();
     let da = inherited(pdf, &field, b"DA").and_then(object_to_text).or_else(|| acroform(pdf).and_then(|f| f.get(b"DA").ok().and_then(object_to_text))).unwrap_or_else(|| "/Helv 0 Tf 0 g".into());
     let flags = inherited(pdf, &field, b"Ff").and_then(|f| f.as_i64().ok()).unwrap_or(0);
     let alignment = inherited(pdf, &field, b"Q").and_then(|q| q.as_i64().ok()).unwrap_or(0);
     let comb_length = if flags & (1 << 24) != 0 { inherited(pdf, &field, b"MaxLen").and_then(|m| m.as_i64().ok()) } else { None };
-    let (requested_size, color) = parse_default_appearance(&da);
+    let (requested_size, field_color) = parse_default_appearance(&da);
+    let color = text_color.unwrap_or(field_color);
     // Keep the form's default font resource, which readers use when editing.
     ensure_form_font(pdf)?;
     for widget in widget_ids(pdf, field_id) {

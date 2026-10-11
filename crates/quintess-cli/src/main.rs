@@ -16,7 +16,7 @@ use quintess_core::create::{ImagePageSettings, TextPageSettings, blank_document,
 use quintess_core::document::merge_documents;
 use quintess_core::engine::{self, RenderOptions};
 use quintess_core::fonts::StandardFont;
-use quintess_core::forms;
+use quintess_core::{form_scripts, forms};
 use quintess_core::metadata::{self, DocumentInfo, PageLabelRange};
 use quintess_core::pages::{self, Margins, NUpLayout, SplitRule, paper_size};
 use quintess_core::ranges::parse_page_ranges;
@@ -651,8 +651,23 @@ enum FormAction {
         /// Flatten after filling so the values can't be changed.
         #[arg(long)]
         flatten: bool,
+        /// Don't run the form's calculation and format scripts (totals and
+        /// formatted amounts are then left as they were).
+        #[arg(long)]
+        no_scripts: bool,
         #[command(flatten)]
         output: Output,
+    },
+    /// List the form's scripts: which fields calculate, validate, format or
+    /// filter keystrokes, the calculation order, and scripts never run.
+    Scripts {
+        #[command(flatten)]
+        input: Input,
+        /// Print every script's full source.
+        #[arg(long)]
+        source: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Export field values as JSON, XFDF or CSV.
     Export {
@@ -687,6 +702,9 @@ enum FormAction {
         /// Only show how the columns match the fields.
         #[arg(long)]
         dry_run: bool,
+        /// Don't run the form's calculation and format scripts on each copy.
+        #[arg(long)]
+        no_scripts: bool,
     },
     /// Find blanks (____) and boxes and turn them into fields.
     Detect {
@@ -1383,7 +1401,7 @@ fn form(action: FormAction) -> Result<()> {
                 println!("{} fields", fields.len());
             }
         }
-        FormAction::Fill { input, data, values, flatten, output } => {
+        FormAction::Fill { input, data, values, flatten, no_scripts, output } => {
             let mut pdf = open(&input)?;
             let mut map: BTreeMap<String, String> = BTreeMap::new();
             if let Some(path) = data {
@@ -1413,7 +1431,22 @@ fn form(action: FormAction) -> Result<()> {
                     (actual, value)
                 })
                 .collect();
-            let unmatched = forms::fill_fields(&mut pdf, &map)?;
+            let unmatched = if no_scripts {
+                forms::fill_fields(&mut pdf, &map)?
+            } else {
+                let (unmatched, outcome) = form_scripts::fill_fields_and_calculate(&mut pdf, &map)?;
+                for alert in &outcome.alerts {
+                    eprintln!("the form says: {alert}");
+                }
+                for error in &outcome.script_errors {
+                    eprintln!("a form script failed: {error}");
+                }
+                let calculated: Vec<&String> = outcome.changed_fields.iter().filter(|name| !map.contains_key(*name)).collect();
+                if !calculated.is_empty() {
+                    println!("calculated: {}", calculated.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(", "));
+                }
+                unmatched
+            };
             if !unmatched.is_empty() {
                 eprintln!("no field named: {}", unmatched.join(", "));
             }
@@ -1421,6 +1454,47 @@ fn form(action: FormAction) -> Result<()> {
                 forms::flatten(&mut pdf, true)?;
             }
             save(&mut pdf, &input, &output)?;
+        }
+        FormAction::Scripts { input, source, json } => {
+            let pdf = open(&input)?;
+            let inventory = form_scripts::list_scripts(&pdf);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&inventory)?);
+                return Ok(());
+            }
+            // One line per script unless --source asks for all of it.
+            let show = |kind: &str, script: &Option<String>| {
+                let Some(script) = script else { return };
+                if source {
+                    println!("  {kind}:\n{}", script.lines().map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n"));
+                } else {
+                    let first_line = script.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+                    let shortened: String = first_line.chars().take(90).collect();
+                    let more = if shortened.len() < first_line.len() || script.trim().lines().count() > 1 { " ..." } else { "" };
+                    println!("  {kind:<10} {shortened}{more}");
+                }
+            };
+            for field in &inventory.fields {
+                println!("{}", field.name);
+                show("keystroke", &field.scripts.keystroke);
+                show("validate", &field.scripts.validate);
+                show("calculate", &field.scripts.calculate);
+                show("format", &field.scripts.format);
+            }
+            println!("{} fields with scripts", inventory.fields.len());
+            if !inventory.calculation_order.is_empty() {
+                println!("calculation order: {}", inventory.calculation_order.join(", "));
+            }
+            for script in &inventory.document_scripts {
+                if source {
+                    println!("document script {}:\n{}", script.name, script.source);
+                } else {
+                    println!("document script {} ({} lines)", script.name, script.source.lines().count());
+                }
+            }
+            for place in &inventory.never_run {
+                println!("never run: {place}");
+            }
         }
         FormAction::Export { input, format, output } => {
             let pdf = open(&input)?;
@@ -1431,7 +1505,7 @@ fn form(action: FormAction) -> Result<()> {
             };
             write_or_print(&text, &output)?;
         }
-        FormAction::Merge { input, data, out_dir, name, flatten, combined, dry_run } => {
+        FormAction::Merge { input, data, out_dir, name, flatten, combined, dry_run, no_scripts } => {
             use quintess_core::form_merge::{self, MergeSettings, Table};
             let table = Table::read(&data)?;
             let template = std::fs::read(&input.input)?;
@@ -1462,7 +1536,7 @@ fn form(action: FormAction) -> Result<()> {
             let count = match &combined {
                 Some(target) => {
                     let mut copies = Vec::new();
-                    form_merge::fill_rows(&template, input.password.as_deref(), &table, &plan, &settings, &|_, _| {}, |copy| {
+                    form_merge::fill_rows_with(&template, input.password.as_deref(), &table, &plan, &settings, !no_scripts, &|_, _| {}, |copy| {
                         report(&copy);
                         copies.push((copy.file_name, copy.bytes));
                         Ok(())
@@ -1475,7 +1549,7 @@ fn form(action: FormAction) -> Result<()> {
                     let stem = input.input.file_stem().and_then(|s| s.to_str()).unwrap_or("form").to_string();
                     let folder = out_dir.unwrap_or_else(|| input.input.with_file_name(format!("{stem} filled")));
                     std::fs::create_dir_all(&folder)?;
-                    let count = form_merge::fill_rows(&template, input.password.as_deref(), &table, &plan, &settings, &|_, _| {}, |copy| {
+                    let count = form_merge::fill_rows_with(&template, input.password.as_deref(), &table, &plan, &settings, !no_scripts, &|_, _| {}, |copy| {
                         report(&copy);
                         std::fs::write(folder.join(&copy.file_name), &copy.bytes)?;
                         Ok(())

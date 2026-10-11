@@ -157,3 +157,33 @@ fn signing_with_a_pfx_and_trusting_its_root() {
     let json = ok_with_env(&["verify", path(&signed), "--json"], &environment);
     assert!(json.contains("\"verdict\": \"ValidButUntrusted\""), "{json}");
 }
+
+#[test]
+fn form_fill_runs_the_forms_calculations_unless_told_not_to() {
+    use quintess_core::forms::{NewField, NewFieldKind, add_field};
+    use quintess_core::lopdf::{Object, dictionary};
+    let folder = folder("form_scripts");
+    let mut form = quintess_core::Pdf::open(&letter(&folder), None).unwrap();
+    let mut field_ids = Vec::new();
+    for (row, name) in ["qty", "price", "total"].into_iter().enumerate() {
+        let top = 600.0 - row as f32 * 30.0;
+        let kind = NewFieldKind::Text { multiline: false, font_size: 10.0, max_length: None, default_value: String::new() };
+        field_ids.push(add_field(&mut form, &NewField { name: name.into(), page: 1, rect: [300.0, top - 20.0, 500.0, top], kind, tooltip: String::new(), required: false }).unwrap());
+    }
+    let calculate = dictionary! { "S" => "JavaScript", "JS" => Object::string_literal("event.value = this.getField('qty').value * this.getField('price').value;") };
+    form.doc.get_dictionary_mut(field_ids[2]).unwrap().set("AA", dictionary! { "C" => calculate });
+    let pdf = folder.join("form.pdf");
+    std::fs::write(&pdf, form.to_bytes(&quintess_core::SaveSettings::default()).unwrap()).unwrap();
+
+    let listing = ok(&["form", "scripts", path(&pdf)]);
+    assert!(listing.contains("calculate") && listing.contains("calculation order: total"), "{listing}");
+
+    let filled = folder.join("filled.pdf");
+    let output = ok(&["form", "fill", path(&pdf), "--set", "qty=3", "--set", "price=2.5", "-o", path(&filled)]);
+    assert!(output.contains("calculated: total"), "{output}");
+    assert!(ok(&["form", "list", path(&filled)]).contains("= \"7.5\""));
+
+    let unscripted = folder.join("unscripted.pdf");
+    ok(&["form", "fill", path(&pdf), "--set", "qty=3", "--set", "price=2.5", "--no-scripts", "-o", path(&unscripted)]);
+    assert!(!ok(&["form", "list", path(&unscripted)]).contains("7.5"), "--no-scripts leaves the total alone");
+}

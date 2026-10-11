@@ -19,6 +19,7 @@ pub mod folder_search;
 pub mod font_reuse;
 pub mod fonts;
 pub mod form_merge;
+pub mod form_scripts;
 pub mod forms;
 pub mod images;
 pub mod incremental;
