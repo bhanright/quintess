@@ -89,7 +89,10 @@ pub struct QuintessApp {
 /// `command=Reverse order` (any command by its label), `crash` (to test the crash handler),
 /// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
-/// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`.
+/// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`,
+/// `tool=edit-objects`, `select-object=x;y` (page points), then
+/// `wrap=square|tight|top-and-bottom|off` (applies a wrap style to the
+/// selected picture) and `wrap-menu` (opens its Wrap text menu).
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -196,6 +199,30 @@ impl QuintessApp {
                             let page = tab.current_page;
                             self.reselect_objects(page, &expected);
                         }
+                    }
+                }
+                "wrap" => {
+                    // After select-object: wraps text around the selected picture
+                    // as the Wrap text menu would (square, tight, top-and-bottom, off).
+                    use quintess_core::text_wrap::{WrapOptions, WrapStyle};
+                    let style = match value {
+                        "tight" => Some(WrapStyle::Tight),
+                        "top-and-bottom" => Some(WrapStyle::TopAndBottom),
+                        "off" => None,
+                        _ => Some(WrapStyle::Square),
+                    };
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        let (page_index, selected) = self.viewer_states.entry(tab.id).or_default().objects.selection();
+                        if let [picture] = selected.as_slice() {
+                            let options = style.map(|style| WrapOptions { style, ..WrapOptions::default() });
+                            self.apply_viewer_actions(vec![ViewerAction::SetTextWrap { page_index, bounds: picture.bounds, options }]);
+                        }
+                    }
+                }
+                "wrap-menu" => {
+                    // After select-object: opens the toolbar's Wrap text menu.
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        self.viewer_states.entry(tab.id).or_default().objects.open_wrap_menu(tab);
                     }
                 }
                 "edit-paragraph" => {
@@ -1876,12 +1903,21 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 ViewerAction::TagArea { page, rect } => self.dialogs.push(Dialog::TagArea { page, rect, choice: 0 }),
-                ViewerAction::SetTextWrap { page_index, bounds, on } => {
-                    if on {
-                        let options = quintess_core::text_wrap::WrapOptions::default();
-                        self.edit_page_text("Wrap text around the picture", |bytes, password| quintess_core::text_wrap::wrap_around(bytes, password, page_index, bounds, options).map(|(bytes, _)| bytes));
-                    } else {
-                        self.reflow_around(page_index, bounds, None);
+                ViewerAction::SetTextWrap { page_index, bounds, options } => {
+                    match options {
+                        Some(options) => {
+                            let label = if self.tabs.get(self.active).is_some_and(|tab| tab.text_wraps_around(page_index, bounds)) { "Change text wrapping" } else { "Wrap text around the picture" };
+                            let mut outline_unavailable = None;
+                            self.edit_page_text(label, |bytes, password| {
+                                let (bytes, report) = quintess_core::text_wrap::wrap_around(bytes, password, page_index, bounds, options)?;
+                                outline_unavailable = report.outline_unavailable;
+                                Ok(bytes)
+                            });
+                            if let Some(reason) = outline_unavailable {
+                                self.info(format!("The picture's outline couldn't be read ({reason}), so text wraps around its box instead. Ctrl+Z undoes it."));
+                            }
+                        }
+                        None => self.reflow_around(page_index, bounds, None),
                     }
                     self.reselect_objects(page_index, &[(quintess_core::objects::ObjectKind::Image, bounds)]);
                 }

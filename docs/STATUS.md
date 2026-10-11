@@ -305,8 +305,20 @@ et.rs`): .pfx/.p12
   `--example bidi_probe`.
 - XFDF (`forms.rs`): nested fields, several values, rich text (`/RV`),
   nested export; the app imports XFDF through `apply_xfdf`.
-- Text wrap (`text_wrap.rs`): Wrap text in the object tool's toolbar;
-  wrapped text is laid out again after a move, resize or delete.
+- Text wrap (`text_wrap.rs`): the object tool's "Wrap text ▾" menu, as
+  Word's: in line (off), square, tight, top and bottom; side (both, left,
+  right, largest; a side too narrow for the next word is skipped per line);
+  separate left/right and top/bottom distances. Tight reads the picture's
+  outline once (SMask alpha, stencil or color-key /Mask, else pixels unlike
+  the edges' plain background color) into at most 64×64 cells in image
+  space plus its CTM (`PictureShape`, ≤1 KB hex); moves only change the
+  matrix. Unreadable outlines (drawings, inline images, and what
+  `redact::decode_image` can't decode: JPX, CCITT, JBIG2, Indexed, Flate CMYK,
+  non-8-bit) fall back to square with `WrapReport::outline_unavailable`.
+  Wrapped text is laid out again after a move, resize or delete, keeping its
+  options. Records still read and write `gap_points` for older versions.
+  CLI `wrap --style --side --gap --vertical-gap`; self-check `wrap=…`,
+  `wrap-menu`.
 
 - Tag tree editor (`tag_tree.rs`, `marked_content.rs`, `auto_tag.rs`,
   app `tags_panel.rs`): the structure tree as a model (RoleMap resolved,

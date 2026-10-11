@@ -130,9 +130,18 @@ Every change is a normal edit you can undo. Cropping hides the rest of the pictu
 
 ## Text wrap
 
-Select one picture and choose **Wrap text** in its toolbar: the paragraphs beside it are laid out again so their lines flow around the picture, keeping a small gap, and the text below moves down to make room. From then on the text follows the picture: move it, resize it or delete it, and the paragraphs are laid out again. Choose **Wrap text** again to stop, and the lines go back to full width.
+Select one picture and open **Wrap text ▾** in its toolbar (the button is highlighted while text wraps around the picture). Choose how lines meet the picture, as in Word:
 
-Lines use the wider side of the picture. Text you edit by other means afterward is left as it is, as ordinary text.
+- **In line with text**: no wrapping; the lines go back to full width.
+- **Square**: lines stay out of the picture's box.
+- **Tight**: each line comes up to the picture's outline, where it is transparent or plain background color around its edges, so text hugs a round or cut-out picture. A picture whose outline can't be read (a drawing, or an unusual image kind) gets square wrapping, and the status line says so.
+- **Top and bottom**: no text beside the picture; it stops above the picture and goes on below it.
+
+**Wrap on** picks the side for square and tight wrapping: **Both sides** (each line fills the space left of the picture, then the space right of it, skipping a side too narrow for the next word), **Left only**, **Right only** or **Largest side**. **Distance from text** sets the space kept clear left and right of the picture and above and below it, in points; **Apply** lays the text out again with it.
+
+The paragraphs beside the picture are laid out again and the text below moves down to make room. From then on the text follows the picture with the same choices: move it, resize it or delete it, and the paragraphs are laid out again. The choices are saved in the file. Text you edit by other means afterward is left as it is, as ordinary text.
+
+From the command line: `quintess wrap file.pdf --around left,bottom,right,top --style square|tight|top-and-bottom --side both|left|right|largest --gap 8 --vertical-gap 4`.
 
 # Measuring
 
