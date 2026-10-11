@@ -40,6 +40,7 @@ pub mod rich_text;
 pub mod security;
 pub mod settings;
 pub mod signatures;
+pub mod spelling;
 pub mod strings;
 pub mod unicode_text;
 pub mod updates;

@@ -225,7 +225,7 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
                     ui.weak(&comment.author);
                 });
                 if state.editing_comment == Some(comment.id) {
-                    ui.add(egui::TextEdit::multiline(&mut state.comment_draft).desired_rows(2));
+                    crate::spell::text_field(ui, &mut state.comment_draft, true, 2, ui.available_width(), "");
                     ui.horizontal(|ui| {
                         if ui.button("Save").clicked() {
                             actions.push(SidebarAction::EditAnnotation(comment.id, state.comment_draft.clone()));
@@ -243,7 +243,8 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
                 }
                 if selected {
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut state.reply_draft).hint_text("Reply").desired_width(ui.available_width() - 50.0));
+                        let width = ui.available_width() - 50.0;
+                        crate::spell::text_field(ui, &mut state.reply_draft, false, 1, width, "Reply");
                         if ui.button("Send").clicked() && !state.reply_draft.trim().is_empty() {
                             actions.push(SidebarAction::ReplyToAnnotation(comment.id, std::mem::take(&mut state.reply_draft)));
                         }
@@ -307,7 +308,7 @@ fn fields(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, ac
             match field.field_type {
                 FieldType::Text => {
                     let draft = state.field_drafts.entry(field.name.clone()).or_insert_with(|| field.value.clone());
-                    let response = ui.add_enabled(!field.read_only, egui::TextEdit::singleline(draft).desired_width(f32::INFINITY));
+                    let response = ui.add_enabled_ui(!field.read_only, |ui| crate::spell::text_field(ui, draft, false, 1, f32::INFINITY, "")).inner;
                     if response.lost_focus() && *draft != field.value {
                         actions.push(SidebarAction::FillField(field.name.clone(), draft.clone()));
                     }

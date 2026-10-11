@@ -16,6 +16,7 @@ pub enum JobOutcome {
     Message(String),
     FolderSearch(Box<crate::dialogs::FolderResults>),
     QrCodes { tab_id: u64, version: u64, codes: Vec<quintess_core::qr::FoundCode> },
+    Spelling { tab_id: u64, found: Vec<quintess_core::spelling::DocumentMisspelling> },
     /// `manual` checks report even when nothing is new.
     UpdateChecked { found: Option<quintess_core::updates::Release>, manual: bool },
     UpdateDownloaded { path: std::path::PathBuf, verified: bool, version: String },

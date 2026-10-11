@@ -54,6 +54,10 @@ Source: "{#BuildFolder}\quintess.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PdfiumFolder}\bin\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ModelsFolder}\text-detection.onnx"; DestDir: "{app}\models"; Flags: ignoreversion
 Source: "{#ModelsFolder}\text-recognition.onnx"; DestDir: "{app}\models"; Flags: ignoreversion
+; Spelling dictionaries (US English is also built into the programs).
+Source: "..\assets\dictionaries\*.aff"; DestDir: "{app}\dictionaries"; Flags: ignoreversion
+Source: "..\assets\dictionaries\*.dic"; DestDir: "{app}\dictionaries"; Flags: ignoreversion
+Source: "..\assets\dictionaries\*.license.txt"; DestDir: "{app}\licenses\dictionaries"
 Source: "..\LICENSE-MIT"; DestDir: "{app}\licenses"
 Source: "..\LICENSE-APACHE"; DestDir: "{app}\licenses"
 Source: "..\licenses\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}\licenses"

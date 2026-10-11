@@ -82,6 +82,32 @@ Quintess draws new text in the document's own font whenever that font already co
 
 **Ctrl+H** replaces words or phrases throughout the document, line by line. A match split across two lines isn't replaced.
 
+# Spelling
+
+Quintess checks spelling as you type and can go through a whole document. It uses Hunspell dictionaries, the same kind LibreOffice and Firefox use: English for the US, UK, Canada and Australia comes with Quintess.
+
+## While typing
+
+- Misspelled words are underlined in red while you edit page text, write a comment or a text box, or fill in a form field.
+- **Right-click** an underlined word for suggestions, **Add to dictionary** or **Ignore**.
+- A repeated word ("the the") is underlined too; right-click it to delete the repeat.
+
+## Checking a whole document
+
+1. Choose **Tools ▸ Check spelling** (F7).
+2. Quintess looks through the page text, comments and form fields, and shows the first misspelled word on its page.
+3. Pick a suggestion (or type the right spelling) and choose **Change**, or **Change all** for every occurrence. **Skip** moves on, **Ignore all** ignores the word until Quintess closes, and **Add to dictionary** remembers it.
+
+Each change is an ordinary edit you can undo. Changing page text rewrites the line in its own font, as text editing does.
+
+## Languages and your dictionary
+
+- **Edit ▸ Preferences ▸ Spelling** turns checking while typing on or off and picks the dictionary. "System language" follows your computer's setting.
+- For another language, put its Hunspell files (for example `fr_FR.aff` and `fr_FR.dic`, from LibreOffice's dictionaries) in the `dictionaries` folder inside Quintess's settings folder. On Linux, dictionaries installed with the system (`/usr/share/hunspell`) are found automatically.
+- Words you add are kept in `personal-dictionary.txt` in the settings folder, one per line; you can edit it.
+- Words with digits, ALL-CAPS abbreviations, web and email addresses and file names are not checked.
+
+From the command line: `quintess spell file.pdf` lists misspelled words with suggestions (`--language en-GB`, `--json`, `--languages`).
 # Comments and markup
 
 The dock holds the common markup tools; **⋯** in the dock (or Tools ▸ Comment) has the rest.

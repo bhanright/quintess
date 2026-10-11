@@ -29,6 +29,10 @@ pub struct Settings {
     pub last_update_check: Option<String>,
     /// A version the person chose not to be told about again.
     pub skipped_version: Option<String>,
+    /// Underline misspelled words while typing.
+    pub check_spelling: bool,
+    /// The spelling dictionary, such as "en-GB"; empty follows the system.
+    pub spelling_language: String,
 }
 
 /// The page a file was left at, and its zoom (`None` when it was fitted to
@@ -57,6 +61,8 @@ impl Default for Settings {
             check_for_updates: None,
             last_update_check: None,
             skipped_version: None,
+            check_spelling: true,
+            spelling_language: String::new(),
         }
     }
 }

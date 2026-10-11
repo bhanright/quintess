@@ -503,6 +503,20 @@ enum Command {
     },
     /// Ask GitHub whether a newer version of Quintess has been released.
     CheckUpdates,
+    /// Check the spelling of the page text, comments and form fields.
+    Spell {
+        #[command(flatten)]
+        input: Input,
+        /// Dictionary language, such as en-GB (default: the system's).
+        #[arg(long)]
+        language: Option<String>,
+        /// List the installed dictionaries and stop.
+        #[arg(long)]
+        languages: bool,
+        /// Print the results as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Find and read the QR codes printed on the pages.
     Qr {
         #[command(flatten)]
@@ -1176,6 +1190,28 @@ fn run(cli: Cli) -> Result<()> {
             Some(release) => println!("Quintess {} is available (you have {}): {}", release.version, quintess_core::updates::CURRENT_VERSION, release.page),
             None => println!("Quintess {} is the latest version.", quintess_core::updates::CURRENT_VERSION),
         },
+        Command::Spell { input, language, languages, json } => {
+            if languages {
+                println!("{}", quintess_core::spelling::SpellChecker::languages().join("\n"));
+                return Ok(());
+            }
+            let checker = quintess_core::spelling::SpellChecker::new(language.as_deref())?;
+            let found = quintess_core::spelling::check_document(&checker, &std::fs::read(&input.input)?, input.password.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&found)?);
+            } else {
+                for item in &found {
+                    let place = match &item.place {
+                        quintess_core::spelling::Place::PageText { page_index, .. } => format!("page {:>3}", page_index + 1),
+                        quintess_core::spelling::Place::Comment { page_index, .. } => format!("page {:>3} comment", page_index + 1),
+                        quintess_core::spelling::Place::Field { name, .. } => format!("field {name}"),
+                    };
+                    let suggestions = checker.suggestions(&item.word);
+                    println!("{place:<14} {:<18} {}{}", item.word, item.context, if suggestions.is_empty() { String::new() } else { format!("  -> {}", suggestions.iter().take(3).cloned().collect::<Vec<_>>().join(", ")) });
+                }
+                println!("{} misspelled word{} ({})", found.len(), if found.len() == 1 { "" } else { "s" }, checker.language());
+            }
+        }
         Command::Qr { input, json } => {
             let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
             let codes = quintess_core::qr::find_in_document(&document, &|_, _| {})?;

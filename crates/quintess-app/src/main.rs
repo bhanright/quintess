@@ -9,6 +9,7 @@ mod dialogs;
 mod jobs;
 mod render;
 mod sidebar;
+mod spell;
 mod tab;
 mod theme;
 mod viewer;

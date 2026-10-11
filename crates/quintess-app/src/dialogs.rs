@@ -674,7 +674,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 ui.hyperlink_to("Source on GitHub", format!("https://github.com/{}", quintess_core::updates::REPOSITORY));
             });
             ui.add_space(6.0);
-            ui.weak("Licensed under MIT or Apache-2.0. Built on PDFium (BSD), about 400 open-source Rust libraries, and the ocrs recognition models by Robert Knight (CC BY-SA 4.0).");
+            ui.weak("Licensed under MIT or Apache-2.0. Built on PDFium (BSD), about 400 open-source Rust libraries, the ocrs recognition models by Robert Knight (CC BY-SA 4.0) and the SCOWL English spelling dictionaries by Kevin Atkinson and others.");
             ui.horizontal(|ui| {
                 // The installer puts the licenses in a folder beside the program.
                 let licenses = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join("licenses")));
@@ -702,6 +702,18 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     ui.selectable_value(&mut settings.look, "studio".to_string(), "Studio");
                     ui.selectable_value(&mut settings.look, "classic".to_string(), "Classic");
                     ui.checkbox(&mut settings.dark_interface, "Dark");
+                });
+                ui.end_row();
+                ui.label("Spelling");
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut settings.check_spelling, "Underline misspelled words while typing");
+                    let shown = if settings.spelling_language.is_empty() { "System language".to_string() } else { settings.spelling_language.clone() };
+                    egui::ComboBox::from_id_salt("spelling language").selected_text(shown).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut settings.spelling_language, String::new(), "System language");
+                        for language in quintess_core::spelling::SpellChecker::languages() {
+                            ui.selectable_value(&mut settings.spelling_language, language.clone(), language);
+                        }
+                    });
                 });
                 ui.end_row();
                 ui.label("Updates");
@@ -1060,9 +1072,9 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.weak(hint);
             let multiline = matches!(pending.purpose, crate::viewer::TextPurpose::Note | crate::viewer::TextPurpose::TextBox | crate::viewer::TextPurpose::PageText);
             let response = if multiline {
-                ui.add(egui::TextEdit::multiline(&mut pending.text).desired_rows(4).desired_width(f32::INFINITY))
+                crate::spell::text_field(ui, &mut pending.text, true, 4, f32::INFINITY, "")
             } else {
-                ui.add(egui::TextEdit::singleline(&mut pending.text).desired_width(f32::INFINITY))
+                crate::spell::text_field(ui, &mut pending.text, false, 1, f32::INFINITY, "")
             };
             if !response.has_focus() && pending.text.is_empty() {
                 response.request_focus();

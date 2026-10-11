@@ -582,8 +582,13 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
     // An open field editor sits on top of the page and takes the input.
     if let Some(edit) = state.editing_field.as_mut().filter(|e| e.page_index == page_index) {
         let rect = screen_rect_of(geometry, page_rect, zoom, edit.rect);
+        let font = egui::FontId::proportional((rect.height() * 0.6).clamp(10.0, 18.0));
+        let mut layouter = crate::spell::plain_layouter(font.clone(), None);
         let editor = if edit.multiline { egui::TextEdit::multiline(&mut edit.value) } else { egui::TextEdit::singleline(&mut edit.value) };
-        let response = ui.put(rect.expand(1.0), editor.font(egui::FontId::proportional((rect.height() * 0.6).clamp(10.0, 18.0))));
+        let editor = editor.font(font).desired_width(rect.width()).layouter(&mut layouter);
+        let output = ui.scope_builder(egui::UiBuilder::new().max_rect(rect.expand(1.0)), |ui| editor.show(ui)).inner;
+        crate::spell::menu(ui, &output, &mut edit.value);
+        let response = output.response.response;
         if !edit.focus_requested {
             response.request_focus();
             edit.focus_requested = true;
@@ -632,20 +637,24 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                 }
                 None => job.append(current, 0.0, egui::TextFormat { font_id: egui::FontId::proportional(font_size), color: text_color, ..Default::default() }),
             }
+            crate::spell::underline(&mut job);
             ui.painter().layout_job(job)
         };
+        let mut line_layouter = crate::spell::plain_layouter(egui::FontId::proportional(font_size), Some(text_color));
         let editor = if is_paragraph {
             egui::TextEdit::multiline(&mut editing.text).desired_width(editor_rect.width()).desired_rows(2).layouter(&mut layouter)
         } else {
-            egui::TextEdit::singleline(&mut editing.text).font(egui::FontId::proportional(font_size))
+            egui::TextEdit::singleline(&mut editing.text).font(egui::FontId::proportional(font_size)).desired_width(editor_rect.width()).layouter(&mut line_layouter)
         };
-        let response = ui
-            .scope(|ui| {
+        let output = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(editor_rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = Color32::WHITE;
                 ui.visuals_mut().override_text_color = Some(text_color);
-                ui.put(editor_rect, editor.margin(vec2(2.0, 0.0)))
+                editor.margin(vec2(2.0, 0.0)).show(ui)
             })
             .inner;
+        crate::spell::menu(ui, &output, &mut editing.text);
+        let response = output.response.response;
         // Keep the styles in step with what was typed.
         if let Some(rich) = editing.rich.as_mut() {
             if rich.text != editing.text {

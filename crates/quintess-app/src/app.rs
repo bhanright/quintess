@@ -29,6 +29,7 @@ mod inspector;
 mod recording;
 mod watching;
 mod split;
+mod spelling;
 
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
 /// never collides with the viewer's resolutions).
@@ -67,6 +68,7 @@ pub struct QuintessApp {
     recording: Option<Vec<quintess_core::batch::Step>>,
     /// The user guide window, while open (F1).
     help: Option<help::Help>,
+    spelling: Option<spelling::SpellingPanel>,
     update_window: Option<updates::UpdateWindow>,
     /// The startup update check (or question) has happened this session.
     update_startup_done: bool,
@@ -127,11 +129,13 @@ impl QuintessApp {
             inspector: None,
             recording: None,
             help: None,
+            spelling: None,
             update_window: None,
             update_startup_done: false,
             watch: None,
         };
         app.tool_settings.author = app.settings.author.clone();
+        app.configure_spelling();
         if let Err(error) = quintess_core::engine::pdfium() {
             app.error(format!("{error:#}"));
         }
@@ -240,6 +244,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 "split" => self.split_view = true,
+                "spelling" => self.start_spell_check(ctx),
                 "inspect" => {
                     // x;y on the current page
                     let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
@@ -518,6 +523,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let shortcut = |modifiers: Modifiers, key: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, key)));
         if shortcut(Modifiers::NONE, Key::F1) {
             self.open_help("");
+        }
+        if shortcut(Modifiers::NONE, Key::F7) && !self.tabs.is_empty() {
+            self.start_spell_check(ctx);
         }
         if shortcut(Modifiers::COMMAND, Key::K) || shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::P) {
             self.open_palette();
@@ -798,6 +806,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             JobOutcome::FolderSearch(results) => self.dialogs.push(Dialog::FolderResults(results)),
             JobOutcome::UpdateChecked { found, manual } => self.update_checked(found, manual),
             JobOutcome::UpdateDownloaded { path, verified, version } => self.update_window = Some(updates::UpdateWindow::Ready { path, verified, version }),
+            JobOutcome::Spelling { tab_id, found } => self.spelling_checked(tab_id, found),
             JobOutcome::QrCodes { tab_id, version, codes } => {
                 let count = codes.len();
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -1636,6 +1645,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.settings = settings;
                     let ctx = self.worker_context.clone();
                     self.set_theme(&ctx, look, dark);
+                    self.configure_spelling();
                     let result = self.settings.save();
                     if self.report(result).is_some() {
                         self.info("Preferences saved.");
@@ -1882,6 +1892,7 @@ impl eframe::App for QuintessApp {
         self.apply_viewer_actions(viewer_actions);
 
         self.show_help(&ctx);
+        self.show_spelling(&ctx);
         self.show_update_window(&ctx);
 
         if let Some(mut dialog) = self.dialogs.pop() {
