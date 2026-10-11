@@ -215,7 +215,7 @@ Click a field to type in it; checkboxes and radio buttons toggle with a click. F
 
 ## Forms that calculate
 
-Many forms (tax forms, invoices, order forms) add up totals, check what you type and show amounts as currency or dates in a set pattern. Quintess runs these form scripts as Acrobat does. When you finish typing in a field, totals update and amounts show formatted ("$1,234.50"). A value the form won't accept (out of range, a date that doesn't exist, letters in a phone number) is refused with the form's own message, and the field keeps its old value. Importing data, filling from a spreadsheet and **Clear all fields** recalculate too.
+Many forms (tax forms, invoices, order forms) add up totals, check what you type and show amounts as currency or dates in a set pattern. Quintess runs these form scripts as Acrobat does. As you type, a field that takes only numbers or a set pattern refuses other characters, and a mask can add its dashes and parentheses. When you finish typing in a field, totals update and amounts show formatted ("$1,234.50"). A value the form won't accept (out of range, a date that doesn't exist, letters in a phone number) is refused with the form's own message, and the field keeps its old value. Importing data, filling from a spreadsheet and **Clear all fields** recalculate too.
 
 Only the calculation, checking and formatting scripts attached to fields ever run. Scripts a PDF asks to run when it opens, when a page is shown or when a link is clicked are never run. Form scripts can't read or write files, reach the internet or start programs, and a script that runs too long is stopped.
 

@@ -240,8 +240,9 @@ et.rs`): .pfx/.p12
   `keystroke`, `fill_fields_and_calculate`; merge calculates each copy. Never
   runs OpenAction/page/link/mouse scripts. Limits: 1M loop iterations, depth
   400, 2 s; callbacks inside built-ins escape the time limit (caller gives up
-  after 4 s); no memory cap. App: fill, import and Clear run scripts (no
-  per-keystroke filtering yet).
+  after 4 s); no memory cap. App: fill, import and Clear run scripts, and
+  the field editor runs the keystroke script on each change
+  (`viewer::filtered_keystroke`), keeping, reshaping or refusing it.
 - Document conversion (`conversion.rs`, `conversion/`): one provider interface;
   built-in .docx via Oxi (oxidocs =0.8.0, MPL-2.0, feature `word-layout`,
   +15 MB), .odt/HTML subset/Markdown/text as simplified documents, spreadsheets

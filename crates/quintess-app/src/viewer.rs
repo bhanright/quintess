@@ -387,6 +387,31 @@ impl TextEditing {
     }
 }
 
+/// What the field's keystroke script makes of the change from `before` to
+/// `after`: the changed run is found by the common start and end, offered
+/// to the script as one keystroke, and kept, reshaped or refused.
+fn filtered_keystroke(tab: &DocumentTab, field_name: &str, before: &str, after: &str) -> String {
+    let before_chars: Vec<char> = before.chars().collect();
+    let after_chars: Vec<char> = after.chars().collect();
+    let common_start = before_chars.iter().zip(&after_chars).take_while(|(a, b)| a == b).count();
+    let longest_end = before_chars.len().min(after_chars.len()) - common_start;
+    let common_end = before_chars.iter().rev().zip(after_chars.iter().rev()).take(longest_end).take_while(|(a, b)| a == b).count();
+    let replaced: String = before_chars[common_start..before_chars.len() - common_end].iter().collect();
+    let inserted: String = after_chars[common_start..after_chars.len() - common_end].iter().collect();
+    let head: String = before_chars[..common_start].iter().collect();
+    let tail: String = before_chars[before_chars.len() - common_end..].iter().collect();
+    // Scripts count positions in UTF-16 units, as JavaScript does.
+    let selection_start = head.encode_utf16().count();
+    let selection = (selection_start, selection_start + replaced.encode_utf16().count());
+    let outcome = tab.load_pdf().and_then(|pdf| quintess_core::form_scripts::keystroke(&pdf, field_name, before, &inserted, Some(selection)));
+    match outcome {
+        Ok(outcome) if outcome.allowed => format!("{head}{}{tail}", outcome.change),
+        Ok(_) => before.to_string(),
+        // A script that fails lets the typing through.
+        Err(_) => after.to_string(),
+    }
+}
+
 struct FieldEdit {
     name: String,
     page_index: usize,
@@ -394,6 +419,9 @@ struct FieldEdit {
     value: String,
     multiline: bool,
     focus_requested: bool,
+    /// Whether the field has a keystroke script to run on each change;
+    /// found out at the first change.
+    filters_keystrokes: Option<bool>,
 }
 
 /// The resolution key for a zoom: render DPI rounded to steps of 24, so
@@ -672,9 +700,20 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         let rect = screen_rect_of(geometry, page_rect, zoom, edit.rect);
         let font = egui::FontId::proportional((rect.height() * 0.6).clamp(10.0, 18.0));
         let mut layouter = crate::spell::plain_layouter(font.clone(), None);
+        let before = edit.value.clone();
         let editor = if edit.multiline { egui::TextEdit::multiline(&mut edit.value) } else { egui::TextEdit::singleline(&mut edit.value) };
         let editor = editor.font(font).desired_width(rect.width()).layouter(&mut layouter);
         let output = ui.scope_builder(egui::UiBuilder::new().max_rect(rect.expand(1.0)), |ui| editor.show(ui)).inner;
+        if edit.value != before {
+            // The form's keystroke script may refuse a character or reshape
+            // it (a phone mask adds its dashes), as in Acrobat.
+            let filters = *edit.filters_keystrokes.get_or_insert_with(|| {
+                tab.load_pdf().map(|pdf| quintess_core::form_scripts::list_scripts(&pdf).fields.iter().any(|field| field.name == edit.name && field.scripts.keystroke.is_some())).unwrap_or(false)
+            });
+            if filters {
+                edit.value = filtered_keystroke(tab, &edit.name, &before, &edit.value);
+            }
+        }
         crate::spell::menu(ui, &output, &mut edit.value);
         let response = output.response.response;
         if !edit.focus_requested {
@@ -1072,7 +1111,7 @@ fn start_field_interaction(state: &mut ViewerState, field: &FieldInfo, page_inde
                 actions.push(ViewerAction::FillField { name: field.name.clone(), value: field.options[position].clone() });
                 return;
             }
-            state.editing_field = Some(FieldEdit { name: field.name.clone(), page_index, rect: *rect, value: field.value.clone(), multiline: field.multiline, focus_requested: false });
+            state.editing_field = Some(FieldEdit { name: field.name.clone(), page_index, rect: *rect, value: field.value.clone(), multiline: field.multiline, focus_requested: false, filters_keystrokes: None });
         }
         FieldType::CheckBox => {
             let checked = !field.value.is_empty() && field.value != "Off";
@@ -1434,4 +1473,32 @@ pub fn go_to_page(tab: &mut DocumentTab, page_index: usize) {
     let page_index = page_index.min(tab.pages.len().saturating_sub(1));
     tab.scroll_to_page = Some(page_index);
     tab.current_page = page_index;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quintess_core::forms::{NewField, NewFieldKind, add_field};
+    use quintess_core::lopdf::{Object, dictionary};
+
+    /// A one-page form whose "amount" field accepts only digits and a decimal point.
+    fn form_with_number_field() -> DocumentTab {
+        let mut pdf = quintess_core::create::text_to_pdf("Order form", &Default::default()).unwrap();
+        let kind = NewFieldKind::Text { multiline: false, font_size: 10.0, max_length: None, default_value: String::new() };
+        let field = add_field(&mut pdf, &NewField { name: "amount".into(), page: 1, rect: [300.0, 680.0, 500.0, 700.0], kind, tooltip: String::new(), required: false }).unwrap();
+        let script = dictionary! { "S" => "JavaScript", "JS" => Object::string_literal("AFNumber_Keystroke(2, 0, 0, 0, '', true);") };
+        pdf.doc.get_dictionary_mut(field).unwrap().set("AA", dictionary! { "K" => script });
+        let bytes = pdf.to_bytes(&quintess_core::SaveSettings::default()).unwrap();
+        DocumentTab::open(1, None, bytes, None).unwrap()
+    }
+
+    #[test]
+    fn keystroke_scripts_refuse_letters_and_keep_digits() {
+        let tab = form_with_number_field();
+        assert_eq!(filtered_keystroke(&tab, "amount", "12", "123"), "123", "a digit at the end");
+        assert_eq!(filtered_keystroke(&tab, "amount", "12", "12x"), "12", "a letter is refused");
+        assert_eq!(filtered_keystroke(&tab, "amount", "1234", "1x34"), "1234", "a letter typed over a selection is refused");
+        assert_eq!(filtered_keystroke(&tab, "amount", "1234", "1534"), "1534", "a digit typed over a selection");
+        assert_eq!(filtered_keystroke(&tab, "amount", "1234", "14"), "14", "deleting is allowed");
+    }
 }
