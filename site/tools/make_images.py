@@ -66,10 +66,16 @@ def social_preview(icon: Image.Image) -> Image.Image:
     tile = icon.resize((150, 150), Image.LANCZOS)
     image.paste(tile, (110, 110), tile)
     draw.text((290, 128), "quintess", font=font(700, 112, 64), fill=TEXT)
-    draw.text((292, 210), "free · open source · windows", font=mono(24), fill=MUTED)
-    headline = font(800, 125, 84)
-    draw.text((108, 318), "A free PDF editor", font=headline, fill=TEXT)
-    draw.text((108, 410), "for Windows.", font=headline, fill=TEXT)
+    draw.text((292, 210), "free · open source · windows + linux", font=mono(24), fill=MUTED)
+    # The largest headline whose longer line fits inside the crop marks.
+    lines = ("A free PDF editor", "for Windows and Linux.")
+    size = 84
+    headline = font(800, 125, size)
+    while size > 40 and max(draw.textlength(line, font=headline) for line in lines) > width - 108 - 120:
+        size -= 2
+        headline = font(800, 125, size)
+    draw.text((108, 318), lines[0], font=headline, fill=TEXT)
+    draw.text((108, 318 + size * 1.1), lines[1], font=headline, fill=TEXT)
     draw.text((width - 112, height - 112), "quintess.cc", font=mono(24), fill=VIOLET, anchor="rs")
     # A folded corner, as on the logo's page.
     fold = 70
