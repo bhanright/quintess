@@ -288,6 +288,38 @@ pub enum MoreCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Wrap page text around a picture (or any area), lay it out again after
+    /// the picture moved, or stop wrapping.
+    Wrap {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long, default_value_t = 1)]
+        page: u32,
+        /// The picture's box in points from the bottom left: left,bottom,right,top.
+        #[arg(long)]
+        around: Option<String>,
+        /// Space kept clear around the picture, in points.
+        #[arg(long, default_value_t = 8.0)]
+        gap: f32,
+        /// Which side lines beside the picture use: largest, both, left or right.
+        #[arg(long, default_value = "largest")]
+        side: String,
+        /// The picture moved: lay out the text that wrapped around --from again
+        /// around --around (or without --around, stop wrapping around it).
+        #[arg(long)]
+        reflow: bool,
+        /// Where the picture was, for --reflow.
+        #[arg(long)]
+        from: Option<String>,
+        /// Stop wrapping around --around (or around everything on the page).
+        #[arg(long)]
+        unwrap: bool,
+        /// List the wrapped paragraphs and the pictures with wrapping on.
+        #[arg(long)]
+        list: bool,
+        #[command(flatten)]
+        output: Output,
+    },
     /// Show or change settings, e.g. `quintess settings author="Jane Doe"`.
     Settings {
         /// key=value pairs: author, language, signing_identity.
@@ -669,6 +701,71 @@ pub fn run(command: MoreCommand) -> Result<()> {
             eprintln!();
             println!("sent to {printer}");
         }
+        MoreCommand::Wrap { input, page, around, gap, side, reflow, from, unwrap, list, output } => {
+            use quintess_core::text_wrap::{self, FlowSelection, ObstacleChange, WrapOptions, WrapSide};
+            let page_index = page.checked_sub(1).context("pages are numbered from 1")? as usize;
+            let bytes = std::fs::read(&input.input)?;
+            let password = input.password.as_deref();
+            if list {
+                let pdf = Pdf::from_bytes(&bytes, password)?;
+                let flows = text_wrap::list_flows(&pdf, page_index);
+                let pictures = text_wrap::wrapping_pictures(&pdf, page_index);
+                if flows.is_empty() && pictures.is_empty() {
+                    println!("Nothing on page {page} wraps.");
+                }
+                for picture in pictures {
+                    println!("picture {}  gap {} pt, {:?} side", rectangle_text(picture.bounds), picture.options.gap_points, picture.options.side);
+                }
+                for flow in flows {
+                    let preview: String = flow.text().chars().take(70).collect();
+                    println!("flow {:>2}  around {}  {}{}", flow.id, flow.obstacles.iter().map(|o| rectangle_text(o.bounds)).collect::<Vec<_>>().join(" and "), preview, if flow.text().chars().count() > 70 { "…" } else { "" });
+                }
+                return Ok(());
+            }
+            let around = around.as_deref().map(parse_rectangle).transpose()?;
+            let (edited, report) = if reflow {
+                let from = from.as_deref().map(parse_rectangle).transpose()?.context("--reflow needs --from (where the picture was)")?;
+                match text_wrap::obstacle_changed(&bytes, password, page_index, from, around)? {
+                    Some(result) => result,
+                    None => bail!("no text on page {page} wraps around a picture at {}", rectangle_text(from)),
+                }
+            } else if unwrap {
+                match around {
+                    Some(bounds) => text_wrap::obstacle_changed(&bytes, password, page_index, bounds, None)?.with_context(|| format!("no text on page {page} wraps around a picture at {}", rectangle_text(bounds)))?,
+                    None => text_wrap::reflow(&bytes, password, page_index, &FlowSelection::All, &ObstacleChange::Unwrap)?,
+                }
+            } else {
+                let bounds = around.context("give --around left,bottom,right,top (the picture's box)")?;
+                let side = match side.as_str() {
+                    "largest" => WrapSide::Largest,
+                    "both" => WrapSide::Both,
+                    "left" => WrapSide::Left,
+                    "right" => WrapSide::Right,
+                    other => bail!("--side takes largest, both, left or right, not {other}"),
+                };
+                text_wrap::wrap_around(&bytes, password, page_index, bounds, WrapOptions { gap_points: gap, side })?
+            };
+            if report.flows.is_empty() {
+                println!("No text needed to move{}.", if !reflow && !unwrap { "; wrapping is on for this picture and takes effect when it is moved onto text" } else { "" });
+            }
+            for flow in &report.flows {
+                let paragraph = &flow.paragraph;
+                println!(
+                    "{} \"{}…\": {} lines → {}{}{}{}",
+                    if flow.wrapping { "wrapped" } else { "unwrapped" },
+                    flow.sample,
+                    paragraph.lines_before,
+                    paragraph.lines_after,
+                    if paragraph.moved_by > 0.0 { format!("; moved {} items below down {:.1} pt", paragraph.moved_below, paragraph.moved_by) } else if paragraph.moved_by < 0.0 { format!("; moved {} items below back up {:.1} pt", paragraph.moved_below, -paragraph.moved_by) } else { String::new() },
+                    if paragraph.overlaps { "; the text below had no room to move, so this overlaps it" } else { "" },
+                    if paragraph.reused_font { String::new() } else { format!("; {}", paragraph.stand_ins.iter().map(|s| format!("{} stands in for {}", s.stand_in, s.original)).collect::<Vec<_>>().join(", ")) }
+                );
+            }
+            for id in &report.released {
+                println!("flow {id} was edited since it was wrapped, so it was left as ordinary text");
+            }
+            save_edited_bytes(&edited, &input, &output)?;
+        }
         MoreCommand::EditText { input, find, replace, regex, ignore_case, page, paragraphs, paragraph, text, overflow, output } => {
             let bytes = std::fs::read(&input.input)?;
             if let Some(number) = paragraph {
@@ -741,6 +838,19 @@ pub fn run(command: MoreCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Four comma-separated numbers: left,bottom,right,top in points.
+fn parse_rectangle(text: &str) -> Result<[f32; 4]> {
+    let numbers: Vec<f32> = text.split(',').map(|n| n.trim().parse()).collect::<Result<_, _>>().with_context(|| format!("\"{text}\" is not four numbers"))?;
+    match numbers[..] {
+        [left, bottom, right, top] => Ok([left, bottom, right, top]),
+        _ => bail!("a box is four numbers: left,bottom,right,top (not \"{text}\")"),
+    }
+}
+
+fn rectangle_text(bounds: [f32; 4]) -> String {
+    format!("{:.1},{:.1},{:.1},{:.1}", bounds[0], bounds[1], bounds[2], bounds[3])
 }
 
 fn print_signature_check(check: &signatures::SignatureCheck, revocation_checked: bool) {

@@ -112,6 +112,30 @@ fn find_and_replace_finishes_when_the_replacement_still_matches() {
     assert!(ok(&["text", path(&edited)]).contains("Notices"));
 }
 
+#[test]
+fn wrapping_text_around_an_area_then_moving_it_and_unwrapping() {
+    let folder = folder("wrap");
+    let text = folder.join("report.txt");
+    std::fs::write(&text, "Every region reported growth this quarter, led by the northern offices, where two new contracts more than doubled the revenue of the same months last year. The western offices held steady despite the loss of a large client, and the southern team opened a second location that is already profitable.\n").unwrap();
+    let pdf = folder.join("report.pdf");
+    ok(&["create", "text", path(&text), "-o", path(&pdf)]);
+    // The text starts near the top left of a Letter page with one-inch margins.
+    let wrapped = folder.join("wrapped.pdf");
+    let output = ok(&["wrap", path(&pdf), "--page", "1", "--around", "380,640,540,710", "--gap", "8", "-o", path(&wrapped)]);
+    assert!(output.contains("wrapped \"Every region"), "{output}");
+    let listed = ok(&["wrap", path(&wrapped), "--list"]);
+    assert!(listed.contains("flow  1") && listed.contains("picture 380.0,640.0,540.0,710.0"), "{listed}");
+    let moved = folder.join("moved.pdf");
+    let output = ok(&["wrap", path(&wrapped), "--reflow", "--from", "380,640,540,710", "--around", "72,640,232,710", "-o", path(&moved)]);
+    assert!(output.contains("wrapped"), "{output}");
+    let unwrapped = folder.join("unwrapped.pdf");
+    let output = ok(&["wrap", path(&moved), "--unwrap", "--around", "72,640,232,710", "-o", path(&unwrapped)]);
+    assert!(output.contains("unwrapped"), "{output}");
+    assert!(ok(&["wrap", path(&unwrapped), "--list"]).contains("Nothing on page 1 wraps"));
+    let words = |file: &Path| ok(&["text", path(file)]).split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words(&unwrapped).contains("the southern team opened a second location that is already profitable."), "{}", words(&unwrapped));
+}
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../quintess-core/tests/fixtures").join(name)
 }

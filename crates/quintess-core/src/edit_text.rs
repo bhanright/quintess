@@ -386,13 +386,13 @@ fn take_out_lines(bytes: &[u8], password: Option<&str>, lines: &[EditableLine]) 
 
 /// What is known about the font of some original text, for drawing new
 /// text in it.
-struct OriginalFont {
-    name: String,
+pub(crate) struct OriginalFont {
+    pub(crate) name: String,
     /// The embedded program, when there is one.
-    program: Option<Vec<u8>>,
+    pub(crate) program: Option<Vec<u8>>,
     /// Characters the document already shows in this font, which a subset
     /// font is sure to have glyphs for.
-    shown: std::collections::HashSet<char>,
+    pub(crate) shown: std::collections::HashSet<char>,
 }
 
 /// How many pages are read for the characters each font already shows.
@@ -400,7 +400,7 @@ const PAGES_READ_FOR_CHARACTERS: usize = 40;
 
 /// The characters each font shows, by font name without its subset tag:
 /// this page first, then the rest of the document up to a limit.
-fn characters_by_font(document: &PdfDocument, first_page: usize) -> std::collections::HashMap<String, std::collections::HashSet<char>> {
+pub(crate) fn characters_by_font(document: &PdfDocument, first_page: usize) -> std::collections::HashMap<String, std::collections::HashSet<char>> {
     let mut shown: std::collections::HashMap<String, std::collections::HashSet<char>> = std::collections::HashMap::new();
     let page_count = document.pages().len() as usize;
     let pages = std::iter::once(first_page).chain((0..page_count).filter(|p| *p != first_page)).take(PAGES_READ_FOR_CHARACTERS);
@@ -427,7 +427,7 @@ fn original_setter(pdf: &mut Pdf, page_id: lopdf::ObjectId, font: &OriginalFont,
 
 /// Like [`take_out_lines`], returning the original font of each of
 /// `objects` (page object indices).
-fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[EditableLine], objects: &[usize]) -> Result<(Pdf, std::collections::HashMap<usize, OriginalFont>)> {
+pub(crate) fn take_out_lines_keeping_fonts(bytes: &[u8], password: Option<&str>, lines: &[EditableLine], objects: &[usize]) -> Result<(Pdf, std::collections::HashMap<usize, OriginalFont>)> {
     let Some(line) = lines.first() else { bail!("nothing to edit") };
     let programs = {
         let document = crate::engine::open_document(bytes.to_vec(), password)?;
@@ -687,7 +687,11 @@ fn mostly_bold(line: &EditableLine) -> bool {
 
 /// Groups a page's lines into paragraphs by how they sit on the page.
 pub fn editable_paragraphs(document: &PdfDocument, page_index: usize) -> Result<Vec<EditableParagraph>> {
-    let lines = editable_lines(document, page_index)?;
+    Ok(paragraphs_from_lines(page_index, editable_lines(document, page_index)?))
+}
+
+/// Groups lines (top to bottom, from [`editable_lines`]) into paragraphs.
+pub(crate) fn paragraphs_from_lines(page_index: usize, lines: Vec<EditableLine>) -> Vec<EditableParagraph> {
     let mut groups: Vec<Vec<EditableLine>> = Vec::new();
     for line in lines {
         let size = line.apparent_size.max(1.0);
@@ -722,7 +726,7 @@ pub fn editable_paragraphs(document: &PdfDocument, page_index: usize) -> Result<
             None => groups.push(vec![line]),
         }
     }
-    Ok(groups.into_iter().map(|lines| paragraph_from(page_index, lines)).collect())
+    groups.into_iter().map(|lines| paragraph_from(page_index, lines)).collect()
 }
 
 /// Joins wrapped lines back into running text with each character's
@@ -848,7 +852,8 @@ pub struct ParagraphReport {
     pub scale: f32,
     /// The box the new paragraph occupies, in page space.
     pub area: [f32; 4],
-    /// The content below that moves down (where it was), and how far.
+    /// The content below that moves down (where it was), and how far
+    /// (negative when it moved back up because the paragraph got shorter).
     pub moved_region: Option<[f32; 4]>,
     pub moved_by: f32,
     /// What the paragraph runs over when it overlaps the content below.
@@ -857,6 +862,8 @@ pub struct ParagraphReport {
     pub footer_line: Option<f32>,
     /// Fonts standing in for original fonts that could not be reused.
     pub stand_ins: Vec<FontStandIn>,
+    /// The box around each laid-out line, in page space.
+    pub line_boxes: Vec<[f32; 4]>,
 }
 
 /// A font used in place of an original that could not draw the new text.
@@ -874,6 +881,16 @@ struct Word {
     width: f32,
 }
 
+/// A stretch of a line where text may go: from `left` (page space), `width`
+/// points wide. An ordinary paragraph has one per line, its full width; a
+/// paragraph wrapping around a picture has narrower ones beside it, or one
+/// on each side.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Slot {
+    pub(crate) left: f32,
+    pub(crate) width: f32,
+}
+
 /// One laid-out line of rich text.
 struct RichLine {
     words: Vec<Word>,
@@ -882,15 +899,46 @@ struct RichLine {
     /// The last line of its paragraph is never justified.
     ends_paragraph: bool,
     indent: f32,
+    /// Which line of the block this sits on, counting from 0 at the first
+    /// baseline; two slots beside a picture share one row.
+    row: usize,
+    /// Where on the row the line goes.
+    slot: Slot,
 }
 
-/// Breaks rich text into lines no wider than `width`, measuring each run in
-/// its own font. Explicit line breaks start new paragraphs; the first line
-/// of the first one is indented by `indent`.
-fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], width: f32, indent: f32) -> Vec<RichLine> {
+/// More rows than any page holds: a guard against slots that never open up.
+const MOST_ROWS: usize = 2000;
+
+/// The first slot at or after (`row`, `slot_index`), moving down rows that
+/// have none (a picture spanning the whole width). Past [`MOST_ROWS`] the
+/// full width is used, so layout always ends.
+fn next_slot(slots_for_row: &dyn Fn(usize) -> Vec<Slot>, full: Slot, row: &mut usize, slot_index: &mut usize) -> Slot {
+    loop {
+        if *row >= MOST_ROWS {
+            return full;
+        }
+        if let Some(slot) = slots_for_row(*row).get(*slot_index) {
+            return *slot;
+        }
+        *row += 1;
+        *slot_index = 0;
+    }
+}
+
+/// Breaks rich text into lines, measuring each run in its own font. Lines
+/// fill the slots `slots_for_row` gives for each row, left to right and top
+/// to bottom; `full` is the paragraph's whole width, which a fixed-width
+/// paragraph uses on every row. Explicit line breaks start new paragraphs
+/// on a new row; the first line of the first one is indented by `indent`.
+///
+/// A word too wide for an empty narrowed slot moves on to the next slot
+/// rather than sticking out beside a picture; in a full-width slot it is
+/// set anyway, as there is nowhere wider to go.
+fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], slots_for_row: &dyn Fn(usize) -> Vec<Slot>, full: Slot, indent: f32) -> Vec<RichLine> {
     let measure = |text: &str, style: usize| setters[style].as_ref().map(|s| s.width(text, sizes[style])).unwrap_or(0.0);
     let characters: Vec<(char, usize)> = rich.text.chars().zip(rich.styles.iter().copied()).collect();
     let mut lines = Vec::new();
+    let (mut row, mut slot_index) = (0usize, 0usize);
     for (paragraph_number, paragraph) in characters.split(|(c, _)| *c == '\n').enumerate() {
         // Words and the style of the space after each.
         let mut words: Vec<(Word, Option<usize>)> = Vec::new();
@@ -915,21 +963,30 @@ fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], 
         }
         finish(&mut current, &mut words, None);
         let first_indent = if paragraph_number == 0 { indent } else { 0.0 };
+        let slot = next_slot(slots_for_row, full, &mut row, &mut slot_index);
         if words.is_empty() {
-            lines.push(RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: true, indent: 0.0 });
+            lines.push(RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: true, indent: 0.0, row, slot });
+            row += 1;
+            slot_index = 0;
             continue;
         }
-        let mut line = RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: false, indent: first_indent };
+        let mut line = RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: false, indent: first_indent, row, slot };
         let mut line_width = 0.0;
         let mut pending_gap = 0.0;
         for (word, space_after) in words {
-            let available = width - line.indent;
-            if !line.words.is_empty() && line_width + pending_gap + word.width > available {
-                lines.push(std::mem::replace(&mut line, RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: false, indent: 0.0 }));
+            if !line.words.is_empty() && line_width + pending_gap + word.width > line.slot.width - line.indent {
+                slot_index += 1;
+                let slot = next_slot(slots_for_row, full, &mut row, &mut slot_index);
+                lines.push(std::mem::replace(&mut line, RichLine { words: Vec::new(), gaps: Vec::new(), ends_paragraph: false, indent: 0.0, row, slot }));
                 line_width = 0.0;
             } else if !line.words.is_empty() {
                 line.gaps.push(pending_gap);
                 line_width += pending_gap;
+            }
+            while line.words.is_empty() && word.width > line.slot.width - line.indent && line.slot.width < full.width - 0.5 && row < MOST_ROWS {
+                slot_index += 1;
+                line.slot = next_slot(slots_for_row, full, &mut row, &mut slot_index);
+                line.row = row;
             }
             line_width += word.width;
             line.words.push(word);
@@ -937,10 +994,16 @@ fn lay_out_rich(rich: &RichText, setters: &[Option<TextSetter>], sizes: &[f32], 
         }
         line.ends_paragraph = true;
         lines.push(line);
+        row += 1;
+        slot_index = 0;
     }
     lines
 }
 
+/// How many rows laid-out lines take, from the first baseline to the last.
+fn rows_used(lines: &[RichLine]) -> usize {
+    lines.last().map(|line| line.row + 1).unwrap_or(0)
+}
 fn word_is_right_to_left(word: &Word) -> bool {
     word.segments.iter().flat_map(|(text, _)| text.chars()).find(|c| c.is_alphabetic()).is_some_and(crate::unicode_text::is_right_to_left)
 }
@@ -1068,52 +1131,125 @@ pub fn replace_paragraph_rich(bytes: &[u8], password: Option<&str>, paragraph: &
 
 fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &EditableParagraph, rich: &RichText, style: &ParagraphStyle) -> Result<(Vec<u8>, ParagraphReport)> {
     let objects: Vec<usize> = rich.palette.iter().filter_map(|s| s.sample_object).collect();
-    let (mut pdf, originals) = take_out_lines_keeping_fonts(bytes, password, &paragraph.lines, &objects)?;
-    let page_id = pdf.page_id(paragraph.page_index as u32 + 1)?;
+    let (pdf, originals) = take_out_lines_keeping_fonts(bytes, password, &paragraph.lines, &objects)?;
     let first = paragraph.first();
-    let (setters, stand_ins) = setters_for(&mut pdf, page_id, rich, &originals);
-    let indent = paragraph.first_line_indent;
-    let before = paragraph.lines.len();
+    let placement = ParagraphPlacement {
+        page_index: paragraph.page_index,
+        main_size: first.apparent_size,
+        left: paragraph.left,
+        first_baseline: first.matrix[5],
+        first_line_indent: paragraph.first_line_indent,
+        invisible: first.invisible,
+        column: (paragraph.left, paragraph.width),
+        old_rows: paragraph.lines.len(),
+        old_last_baseline: first.matrix[5] - (paragraph.lines.len() as f32 - 1.0) * paragraph.leading,
+        old_bottom: paragraph.bounds[1],
+        slots: None,
+        marked_content: None,
+        stays_put: &[],
+        pull_up_limit: 0.0,
+    };
+    let (mut pdf, report) = set_paragraph(pdf, rich, &originals, style, &placement)?;
+    Ok((pdf.to_bytes(&crate::SaveSettings::default())?, report))
+}
+
+/// Where a paragraph goes once its old text is off the page, and what is
+/// known about the old text (to work out how far the content below moves).
+pub(crate) struct ParagraphPlacement<'a> {
+    pub(crate) page_index: usize,
+    /// The paragraph's main size; `ParagraphStyle::apparent_size` scales
+    /// every run by its ratio to this.
+    pub(crate) main_size: f32,
+    /// The left edge of the lines and the first baseline, before the
+    /// style's offset.
+    pub(crate) left: f32,
+    pub(crate) first_baseline: f32,
+    pub(crate) first_line_indent: f32,
+    /// Invisible text (an OCR layer) stays invisible.
+    pub(crate) invisible: bool,
+    /// The column whose content moves when the paragraph grows: left edge
+    /// and width.
+    pub(crate) column: (f32, f32),
+    /// The old text: how many rows it took, its last baseline and the
+    /// bottom of its box.
+    pub(crate) old_rows: usize,
+    pub(crate) old_last_baseline: f32,
+    pub(crate) old_bottom: f32,
+    /// Where text may go on the row with this baseline, for text this large
+    /// at most: `None` for the full width on every row.
+    pub(crate) slots: Option<&'a dyn Fn(f32, f32) -> Vec<Slot>>,
+    /// Draws the text inside a marked-content sequence with this tag and
+    /// these properties (such as `/Span <</QsFlow 3>>`), so it can be found
+    /// and taken out exactly later.
+    pub(crate) marked_content: Option<String>,
+    /// Content wholly inside these areas (pictures text wraps around) stays
+    /// where it is when the content below moves.
+    pub(crate) stays_put: &'a [[f32; 4]],
+    /// When the paragraph gets shorter, the content below moves back up by
+    /// up to this much (what this paragraph pushed it down earlier).
+    pub(crate) pull_up_limit: f32,
+}
+
+/// Lays out rich text and draws it on a page from which the old text has
+/// already been taken, moving the content below out of the way (or back)
+/// as `style.overflow` says. `originals` are the fonts of the old text, by
+/// the `sample_object` in each palette entry.
+pub(crate) fn set_paragraph(mut pdf: Pdf, rich: &RichText, originals: &std::collections::HashMap<usize, OriginalFont>, style: &ParagraphStyle, placement: &ParagraphPlacement) -> Result<(Pdf, ParagraphReport)> {
+    let page_number = placement.page_index as u32 + 1;
+    let page_id = pdf.page_id(page_number)?;
+    let (setters, stand_ins) = setters_for(&mut pdf, page_id, rich, originals);
+    let indent = placement.first_line_indent;
+    let before = placement.old_rows;
     // The style bar's size scales every run, keeping their proportions.
-    let requested_scale = style.apparent_size / first.apparent_size.max(0.1);
+    let requested_scale = style.apparent_size / placement.main_size.max(0.1);
     let sizes_at = |scale: f32| -> Vec<f32> { rich.palette.iter().map(|s| s.apparent_size * requested_scale * scale).collect() };
+    let left = placement.left + style.offset.0;
+    let first_baseline = placement.first_baseline + style.offset.1;
+    let full = Slot { left, width: style.width };
+    let lay_out = |sizes: &[f32], leading: f32| {
+        let largest_size = sizes.iter().copied().fold(0.0, f32::max);
+        let slots_for_row = |row: usize| match placement.slots {
+            Some(slots) => slots(first_baseline - row as f32 * leading, largest_size),
+            None => vec![full],
+        };
+        lay_out_rich(rich, &setters, sizes, &slots_for_row, full, indent)
+    };
     let mut scale = 1.0f32;
     let mut sizes = sizes_at(scale);
-    let mut laid_out = lay_out_rich(rich, &setters, &sizes, style.width, indent);
+    let mut laid_out = lay_out(&sizes, style.leading);
     if style.overflow == Overflow::ShrinkToFit {
-        while laid_out.len() > before && scale > 0.76 {
+        while rows_used(&laid_out) > before && scale > 0.76 {
             scale -= 0.05;
             sizes = sizes_at(scale);
-            laid_out = lay_out_rich(rich, &setters, &sizes, style.width, indent);
+            laid_out = lay_out(&sizes, style.leading * scale);
         }
     }
     let leading = style.leading * scale;
-    let left = paragraph.left + style.offset.0;
-    let first_baseline = first.matrix[5] + style.offset.1;
+    let rows = rows_used(&laid_out);
 
     // Make room below when the paragraph grows.
-    let old_bottom_baseline = first.matrix[5] - (before as f32 - 1.0) * paragraph.leading;
-    let new_bottom_baseline = first_baseline - (laid_out.len() as f32 - 1.0) * leading;
-    let growth = old_bottom_baseline - new_bottom_baseline;
+    let new_bottom_baseline = first_baseline - (rows as f32 - 1.0) * leading;
+    let growth = placement.old_last_baseline - new_bottom_baseline;
     let mut moved_below = 0;
+    let mut moved_by = 0.0;
     let mut would_leave_page = false;
     let mut overlaps = false;
     let mut moved_region = None;
     let mut footer_zone = None;
     let largest_size = sizes.iter().copied().fold(0.0, f32::max);
     let area = [left, new_bottom_baseline - largest_size * 0.25, left + style.width, first_baseline + largest_size * 0.8];
+    let page_box = pdf.page_box(page_id)?;
+    // Page numbers and running footers live in the bottom few percent of
+    // the page; they stay put, and pushed content must not reach them.
+    let footer_line = page_box[1] + (page_box[3] - page_box[1]) * 0.06;
+    // The paragraph's column, from just below it down to the footer zone.
+    let (column_left, column_width) = placement.column;
+    let region = [column_left - 2.0, footer_line, column_left + column_width + 2.0, placement.old_bottom + 0.5];
     if growth > 0.5 {
-        let page_id = pdf.page_id(paragraph.page_index as u32 + 1)?;
-        let page_box = pdf.page_box(page_id)?;
-        // Page numbers and running footers live in the bottom few percent of
-        // the page; they stay put, and pushed content must not reach them.
-        let footer_line = page_box[1] + (page_box[3] - page_box[1]) * 0.06;
-        // The paragraph's column, from just below it down to the footer zone.
-        let region = [paragraph.left - 2.0, footer_line, paragraph.left + paragraph.width + 2.0, paragraph.bounds[1] + 0.5];
         if style.overflow == Overflow::PushDown {
             // Try it on a copy first, so nothing is pushed off the page.
             let mut trial = Pdf { doc: pdf.doc.clone() };
-            let (count, lowest) = crate::redact::shift_content(&mut trial, paragraph.page_index as u32 + 1, region, (0.0, -growth))?;
+            let (count, lowest) = crate::redact::shift_content_except(&mut trial, page_number, region, (0.0, -growth), placement.stays_put)?;
             if count > 0 && lowest - growth < footer_line {
                 would_leave_page = true;
                 overlaps = true;
@@ -1121,34 +1257,51 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
             } else if count > 0 {
                 pdf = trial;
                 moved_below = count;
+                moved_by = growth;
                 moved_region = Some([region[0], lowest, region[2], region[3]]);
             }
         } else {
-            let (count, _) = crate::redact::shift_content(&mut Pdf { doc: pdf.doc.clone() }, paragraph.page_index as u32 + 1, region, (0.0, -growth))?;
+            let (count, _) = crate::redact::shift_content_except(&mut Pdf { doc: pdf.doc.clone() }, page_number, region, (0.0, -growth), placement.stays_put)?;
             overlaps = count > 0;
+        }
+    } else if growth < -0.5 && placement.pull_up_limit > 0.5 && style.overflow == Overflow::PushDown {
+        // Shorter now: undo (part of) an earlier push, never lifting the
+        // content higher than it was before this paragraph pushed it.
+        let lift = (-growth).min(placement.pull_up_limit);
+        let (count, lowest) = crate::redact::shift_content_except(&mut pdf, page_number, region, (0.0, lift), placement.stays_put)?;
+        if count > 0 {
+            moved_below = count;
+            moved_by = -lift;
+            moved_region = Some([region[0], lowest, region[2], region[3]]);
         }
     }
 
-    let page_id = pdf.page_id(paragraph.page_index as u32 + 1)?;
     let mut setters = setters;
-    let mut content = format!("q BT {} ", if first.invisible { "3 Tr" } else { "0 Tr" });
+    let mut content = String::new();
+    if let Some(tag) = &placement.marked_content {
+        content.push_str(&format!("{tag} BDC "));
+    }
+    content.push_str(&format!("q BT {} ", if placement.invisible { "3 Tr" } else { "0 Tr" }));
     let mut current_color: Option<[f32; 3]> = None;
     let mut rules: Vec<TextRule> = Vec::new();
-    for (index, line) in laid_out.iter().enumerate() {
+    let mut line_boxes: Vec<[f32; 4]> = Vec::new();
+    for line in &laid_out {
         if line.words.is_empty() {
             continue;
         }
-        let baseline = first_baseline - index as f32 * leading;
+        let baseline = first_baseline - line.row as f32 * leading;
         let natural: f32 = line.words.iter().map(|w| w.width).sum::<f32>() + line.gaps.iter().sum::<f32>();
-        let available = style.width - line.indent;
+        let available = line.slot.width - line.indent;
         let justify = style.alignment == Alignment::Justified && !line.ends_paragraph && line.words.len() > 1;
         // Extra space per gap when justifying, never stretching absurdly.
-        let extra = if justify { ((available - natural) / line.gaps.len().max(1) as f32).min(sizes.iter().copied().fold(0.0, f32::max)) } else { 0.0 };
+        let extra = if justify { ((available - natural) / line.gaps.len().max(1) as f32).min(largest_size) } else { 0.0 };
+        let start = line.slot.left + line.indent;
         let mut x = match style.alignment {
-            Alignment::Center => left + line.indent + (available - natural) / 2.0,
-            Alignment::Right => left + line.indent + (available - natural),
-            _ => left + line.indent,
+            Alignment::Center => start + (available - natural) / 2.0,
+            Alignment::Right => start + (available - natural),
+            _ => start,
         };
+        let line_start = x;
         let mut line_rules: Vec<TextRule> = Vec::new();
         let order = visual_word_order(&line.words);
         for (position, &word_index) in order.iter().enumerate() {
@@ -1177,10 +1330,14 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
                 x += between.unwrap_or(average) + extra;
             }
         }
+        line_boxes.push([line_start, baseline - largest_size * 0.25, x, baseline + largest_size * 0.8]);
         rules.extend(join_rules(line_rules, largest_size));
     }
     content.push_str("ET Q\n");
     content.push_str(&rules_content(&rules));
+    if placement.marked_content.is_some() {
+        content.push_str("EMC\n");
+    }
     let mut fonts = lopdf::Dictionary::new();
     for setter in setters.into_iter().flatten() {
         for (name, value) in setter.finish(&mut pdf.doc)?.iter() {
@@ -1190,10 +1347,10 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
     add_fonts_to_page(&mut pdf, page_id, &fonts)?;
     pdf.add_page_content(page_id, content.into_bytes(), true)?;
     // What the paragraph covers that it did not before.
-    let overlap_region = overlaps.then(|| [area[0], area[1], area[2], paragraph.bounds[1] + style.offset.1]);
+    let overlap_region = overlaps.then(|| [area[0], area[1], area[2], placement.old_bottom + style.offset.1]);
     let report = ParagraphReport {
         lines_before: before,
-        lines_after: laid_out.iter().filter(|l| !l.words.is_empty()).count(),
+        lines_after: laid_out.iter().filter(|l| !l.words.is_empty()).map(|l| l.row).collect::<std::collections::BTreeSet<usize>>().len(),
         reused_font: stand_ins.is_empty(),
         moved_below,
         overlaps,
@@ -1201,12 +1358,13 @@ fn replace_paragraph_once(bytes: &[u8], password: Option<&str>, paragraph: &Edit
         scale,
         area,
         moved_region,
-        moved_by: if moved_below > 0 { growth } else { 0.0 },
+        moved_by,
         overlap_region,
         footer_line: footer_zone,
         stand_ins,
+        line_boxes,
     };
-    Ok((pdf.to_bytes(&crate::SaveSettings::default())?, report))
+    Ok((pdf, report))
 }
 
 /// Deletes a whole paragraph.

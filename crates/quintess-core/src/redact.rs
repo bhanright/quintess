@@ -185,7 +185,7 @@ pub fn remove_text_and_rules(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]]
     let content = pdf.doc.get_page_content(page_id);
     let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
     let mut report = RedactionReport::default();
-    let mut remover = Redactor { pdf, areas: areas.to_vec(), rule_areas: rule_areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true, shift: None, shifted_items: 0, lowest_shifted: f32::MAX, needs_flattening: false };
+    let mut remover = Redactor { pdf, areas: areas.to_vec(), rule_areas: rule_areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true, shift: None, shifted_items: 0, lowest_shifted: f32::MAX, stays_put: Vec::new(), needs_flattening: false };
     let resources = remover.page_resources();
     let (new_operations, changed) = remover.process(operations, &resources, IDENTITY)?;
     let added = std::mem::take(&mut remover.pending_resources);
@@ -212,6 +212,12 @@ pub fn remove_text_and_rules(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]]
 /// fonts and spacing. Returns how many items moved and the lowest point
 /// among them before moving (or `f32::MAX` when nothing moved).
 pub fn shift_content(pdf: &mut Pdf, page_number: u32, region: [f32; 4], offset: (f32, f32)) -> Result<(usize, f32)> {
+    shift_content_except(pdf, page_number, region, offset, &[])
+}
+
+/// Like [`shift_content`], except that whatever lies wholly inside one of
+/// `stays_put` (such as a picture that text wraps around) is not moved.
+pub fn shift_content_except(pdf: &mut Pdf, page_number: u32, region: [f32; 4], offset: (f32, f32), stays_put: &[[f32; 4]]) -> Result<(usize, f32)> {
     let page_id = pdf.page_id(page_number)?;
     pdf.materialize_inherited_attributes(page_id)?;
     let content = pdf.doc.get_page_content(page_id);
@@ -230,6 +236,8 @@ pub fn shift_content(pdf: &mut Pdf, page_number: u32, region: [f32; 4], offset: 
         shift: Some(ShiftRegion { region, offset }),
         shifted_items: 0,
         lowest_shifted: f32::MAX,
+        // A little slack, as bounds worked out by different code differ slightly.
+        stays_put: stays_put.iter().map(|area| pad(*area, 1.0)).collect(),
         needs_flattening: false,
     };
     let resources = mover.page_resources();
@@ -408,6 +416,8 @@ struct Redactor<'a> {
     /// Items moved by a shift, and the lowest point among them.
     shifted_items: usize,
     lowest_shifted: f32,
+    /// During a shift, content wholly inside these areas stays where it is.
+    stays_put: Vec<[f32; 4]>,
     /// Something under a box can't be cut out precisely (a picture in a
     /// format this can't repaint, or a detailed shape crossing the box's
     /// edge), so the page must be flattened into a picture with the boxes
@@ -424,6 +434,14 @@ struct ShiftRegion {
 
 fn inside(rect: [f32; 4], region: [f32; 4]) -> bool {
     rect[0] >= region[0] && rect[1] >= region[1] && rect[2] <= region[2] && rect[3] <= region[3]
+}
+
+impl ShiftRegion {
+    /// Whether something drawn at `rect` moves: it lies wholly inside the
+    /// region and not inside an area that stays put.
+    fn moves(&self, rect: [f32; 4], stays_put: &[[f32; 4]]) -> bool {
+        inside(rect, self.region) && !stays_put.iter().any(|area| inside(rect, *area))
+    }
 }
 
 /// A clipping path covering everything except the areas (page space),
@@ -570,7 +588,7 @@ impl Redactor<'_> {
                     let mut boxes = Vec::new();
                     let (new_elements, removed) = self.redact_text(&elements, &metrics, &state, &mut text_matrix, &mut boxes);
                     if let Some(shift) = self.shift {
-                        let all_inside = !boxes.is_empty() && boxes.iter().all(|b| center_is_inside(*b, &[shift.region]));
+                        let all_inside = !boxes.is_empty() && boxes.iter().all(|b| center_is_inside(*b, &[shift.region])) && !boxes.iter().all(|b| self.stays_put.iter().any(|area| inside(*b, *area)));
                         if all_inside {
                             changed = true;
                             self.shifted_items += 1;
@@ -633,7 +651,7 @@ impl Redactor<'_> {
                 "S" | "s" | "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "n" => {
                     if let (Some(shift), Some(path)) = (self.shift, path_box) {
                         let clips = path_operations.iter().any(|o| o.operator == "W" || o.operator == "W*");
-                        if inside(path, shift.region) && !clips && operation.operator != "n" {
+                        if shift.moves(path, &self.stays_put) && !clips && operation.operator != "n" {
                             changed = true;
                             self.shifted_items += 1;
                             self.lowest_shifted = self.lowest_shifted.min(path[1]);
@@ -689,7 +707,7 @@ impl Redactor<'_> {
                 "BI" => {
                     let image_box = transformed_box(state.ctm, [0.0, 0.0, 1.0, 1.0]);
                     if let Some(shift) = self.shift {
-                        if inside(image_box, shift.region) {
+                        if shift.moves(image_box, &self.stays_put) {
                             changed = true;
                             self.shifted_items += 1;
                             self.lowest_shifted = self.lowest_shifted.min(image_box[1]);
@@ -727,7 +745,7 @@ impl Redactor<'_> {
                                 _ => None,
                             }
                         });
-                        if drawn.is_some_and(|b| inside(b, shift.region)) {
+                        if drawn.is_some_and(|b| shift.moves(b, &self.stays_put)) {
                             let drawn = drawn.expect("checked");
                             changed = true;
                             self.shifted_items += 1;
@@ -1025,7 +1043,7 @@ pub fn apply_redactions(pdf: &mut Pdf, areas: &[RedactionArea], settings: &Redac
         pdf.materialize_inherited_attributes(page_id)?;
         let content = pdf.doc.get_page_content(page_id);
         let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
-        let mut redactor = Redactor { pdf, areas: page_areas.clone(), rule_areas: Vec::new(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false, shift: None, shifted_items: 0, lowest_shifted: f32::MAX, needs_flattening: false };
+        let mut redactor = Redactor { pdf, areas: page_areas.clone(), rule_areas: Vec::new(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false, shift: None, shifted_items: 0, lowest_shifted: f32::MAX, stays_put: Vec::new(), needs_flattening: false };
         let resources = redactor.page_resources();
         let (new_operations, _) = redactor.process(operations, &resources, IDENTITY)?;
         if redactor.needs_flattening {
