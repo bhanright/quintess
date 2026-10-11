@@ -24,7 +24,7 @@ ocrs = "0.13"
 rten = "0.26"
 ureq = "3.4.2"
 rcgen = "0.14"
-x509-parser = "0.18.1"
+x509-parser = { version = "0.18.1", features = ["verify"] }
 sha2 = "0.11.0"
 ring = "0.17"
 csv = "1.4.0"
@@ -35,6 +35,8 @@ rqrr = "0.11.0"
 spellbook = "0.4.2"
 rust_xlsxwriter = "0.99.1"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+p12-keystore = "0.4.0"
+webpki-root-certs = "1.0.9"
 
 [dev-dependencies]
 image = "0.25"
@@ -43,4 +45,4 @@ regex = "1"
 quick-xml = "0.41"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Storage_Xps"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Storage_Xps", "Win32_Security_Cryptography"] }

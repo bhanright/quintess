@@ -129,6 +129,23 @@ pub enum MoreCommand {
         /// Identity file from `quintess identity`; defaults to the one in settings.
         #[arg(long)]
         identity: Option<PathBuf>,
+        /// Sign with a certificate and key from a .pfx or .p12 file. The
+        /// password is read from an environment variable (QUINTESS_PFX_PASSWORD
+        /// unless --password-env names another), never from the command line.
+        #[arg(long, conflicts_with_all = ["identity", "cert_store"])]
+        pfx: Option<PathBuf>,
+        /// Name of the environment variable that holds the .pfx password.
+        #[arg(long, default_value = "QUINTESS_PFX_PASSWORD")]
+        password_env: String,
+        /// Sign with a certificate from the Windows personal store, by
+        /// thumbprint (see `quintess certificates`). The key never leaves
+        /// Windows, so smart cards and non-exportable keys work.
+        #[arg(long, conflicts_with = "identity")]
+        cert_store: Option<String>,
+        /// Address of an RFC 3161 timestamp server, such as
+        /// http://timestamp.digicert.com; adds proof of when the signature was made.
+        #[arg(long)]
+        timestamp: Option<String>,
         /// Page for a visible signature.
         #[arg(long)]
         page: Option<u32>,
@@ -148,11 +165,45 @@ pub enum MoreCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Check the document's digital signatures.
+    /// Check the document's digital signatures: integrity, the certificate
+    /// chain, trust, timestamps and any stored revocation data.
     Verify {
         #[command(flatten)]
         input: Input,
+        /// Also ask the certificates' OCSP responders or CRL servers whether
+        /// they were revoked. Uses the network; verification is otherwise offline.
+        #[arg(long)]
+        check_revocation: bool,
+        /// Print the findings as JSON.
+        #[arg(long)]
+        json: bool,
     },
+    /// Store certificates and revocation answers inside the document so its
+    /// signatures can be validated later, offline (long-term validation).
+    /// Downloads the answers now.
+    AddLtv {
+        #[command(flatten)]
+        input: Input,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Add a document timestamp (RFC 3161) over the whole file.
+    Timestamp {
+        #[command(flatten)]
+        input: Input,
+        /// Address of the timestamp server.
+        #[arg(long)]
+        server: String,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Choose which certificates to trust when checking signatures.
+    Trust {
+        #[command(subcommand)]
+        action: TrustAction,
+    },
+    /// List your personal certificates that can sign (Windows certificate store).
+    Certificates,
     /// Check accessibility, and optionally fix what can be fixed.
     Accessibility {
         #[command(flatten)]
@@ -246,6 +297,16 @@ pub enum MoreCommand {
 
 fn document(input: &Input) -> Result<quintess_core::pdfium_render::prelude::PdfDocument<'static>> {
     engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())
+}
+
+#[derive(Subcommand)]
+pub enum TrustAction {
+    /// Trust the certificates in a PEM or DER file (a root or an issuing authority, or a signer).
+    Add { certificate: PathBuf },
+    /// Stop trusting a certificate, by the start of its thumbprint (at least 8 digits).
+    Remove { thumbprint: String },
+    /// List the certificates you chose to trust.
+    List,
 }
 
 pub fn run(command: MoreCommand) -> Result<()> {
@@ -431,9 +492,19 @@ pub fn run(command: MoreCommand) -> Result<()> {
             signatures::SigningIdentity::self_signed(&name, &email, &organization)?.save(&output)?;
             println!("wrote {} — keep this file private; it contains your signing key", output.display());
         }
-        MoreCommand::Sign { input, identity, page, rect, field, reason, location, image, output } => {
-            let identity_path = identity.or(Settings::load().signing_identity).context("give --identity (create one with `quintess identity`)")?;
-            let identity = signatures::SigningIdentity::load(&identity_path)?;
+        MoreCommand::Sign { input, identity, pfx, password_env, cert_store, timestamp, page, rect, field, reason, location, image, output } => {
+            let identity = if let Some(pfx) = pfx {
+                let password = std::env::var(&password_env).unwrap_or_default();
+                if password.is_empty() {
+                    eprintln!("note: {password_env} is not set or empty, so the .pfx is opened with an empty password");
+                }
+                signatures::SigningIdentity::from_pkcs12(&std::fs::read(&pfx).with_context(|| format!("could not read {}", pfx.display()))?, &password)?
+            } else if let Some(thumbprint) = cert_store {
+                quintess_core::cert_store::identity_from_store(&thumbprint)?
+            } else {
+                let identity_path = identity.or(Settings::load().signing_identity).context("give --identity (create one with `quintess identity`), --pfx or --cert-store")?;
+                signatures::SigningIdentity::load(&identity_path)?
+            };
             let numbers: Vec<f32> = rect.split(',').map(|n| n.trim().parse()).collect::<Result<_, _>>().context("--rect takes four numbers")?;
             if numbers.len() != 4 {
                 bail!("--rect takes four numbers: left,bottom,right,top");
@@ -445,23 +516,78 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 location,
                 contact: String::new(),
                 signature_image: image,
+                timestamp_server: timestamp.clone(),
             };
             let signed = signatures::sign(&std::fs::read(&input.input)?, &identity, &options)?;
             let target = output.unwrap_or_else(|| input.input.with_file_name(format!("{}-signed.pdf", input.input.file_stem().unwrap_or_default().to_string_lossy())));
             quintess_core::document::write_file_safely(&target, &signed)?;
-            println!("wrote {} (signed by {})", target.display(), identity.signer_name());
+            println!("wrote {} (signed by {}{})", target.display(), identity.signer_name(), if timestamp.is_some() { ", with a trusted timestamp" } else { "" });
         }
-        MoreCommand::Verify { input } => {
-            let checks = signatures::verify(&std::fs::read(&input.input)?)?;
+        MoreCommand::Verify { input, check_revocation, json } => {
+            let mut checks = signatures::verify(&std::fs::read(&input.input)?)?;
+            if check_revocation {
+                let transport = quintess_core::net::NetworkTransport::default();
+                for check in &mut checks {
+                    signatures::check_revocation_online(check, &transport);
+                }
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&checks)?);
+                return Ok(());
+            }
             if checks.is_empty() {
                 println!("No signatures.");
             }
             for check in checks {
-                let verdict = if check.intact { "VALID" } else { "INVALID" };
-                println!("{verdict}  {}  signed by {} at {}", check.field_name, check.signer, check.signing_time);
-                for problem in &check.problems {
-                    println!("         - {problem}");
+                print_signature_check(&check, check_revocation);
+            }
+        }
+        MoreCommand::AddLtv { input, output } => {
+            let bytes = std::fs::read(&input.input)?;
+            let result = quintess_core::ltv::add_long_term_validation(&bytes, &quintess_core::net::NetworkTransport::default(), &signatures::VerifyOptions::default())?;
+            for note in &result.notes {
+                println!("{note}");
+            }
+            let target = output.unwrap_or_else(|| input.input.clone());
+            quintess_core::document::write_file_safely(&target, &result.bytes)?;
+            println!("wrote {}", target.display());
+        }
+        MoreCommand::Timestamp { input, server, output } => {
+            let stamped = signatures::add_document_timestamp(&std::fs::read(&input.input)?, &server)?;
+            let target = output.unwrap_or_else(|| input.input.clone());
+            quintess_core::document::write_file_safely(&target, &stamped)?;
+            println!("wrote {} (document timestamp added)", target.display());
+        }
+        MoreCommand::Trust { action } => {
+            let folder = quintess_core::validation::trusted_certificates_folder();
+            match action {
+                TrustAction::Add { certificate } => {
+                    for added in quintess_core::validation::add_trusted_certificates(&folder, &std::fs::read(&certificate).with_context(|| format!("could not read {}", certificate.display()))?)? {
+                        println!("now trusting {} (thumbprint {})", added.name, added.thumbprint);
+                    }
                 }
+                TrustAction::Remove { thumbprint } => {
+                    let removed = quintess_core::validation::remove_trusted_certificate(&folder, &thumbprint)?;
+                    println!("no longer trusting {} (thumbprint {})", removed.name, removed.thumbprint);
+                }
+                TrustAction::List => {
+                    let list = quintess_core::validation::list_trusted_certificates(&folder);
+                    if list.is_empty() {
+                        println!("No certificates chosen. Mozilla's root list{} always trusted.", if cfg!(windows) { " and the Windows root store are" } else { " is" });
+                    }
+                    for certificate in list {
+                        println!("{}  {}  expires {}", certificate.thumbprint, certificate.name, &certificate.expires[..10.min(certificate.expires.len())]);
+                    }
+                }
+            }
+        }
+        MoreCommand::Certificates => {
+            let list = quintess_core::cert_store::list_personal_certificates();
+            if list.is_empty() {
+                println!("{}", if cfg!(windows) { "No personal certificates with a private key were found." } else { "The Windows certificate store is only available on Windows." });
+            }
+            for certificate in list {
+                println!("{}  {}  issued by {}  expires {}", certificate.thumbprint, certificate.name, certificate.issuer, &certificate.expires[..10.min(certificate.expires.len())]);
             }
         }
         MoreCommand::Accessibility { input, fix, language, output } => {
@@ -615,4 +741,35 @@ pub fn run(command: MoreCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_signature_check(check: &signatures::SignatureCheck, revocation_checked: bool) {
+    use signatures::{SignatureKind, SignatureVerdict};
+    let verdict = match check.verdict {
+        SignatureVerdict::Valid => "VALID",
+        SignatureVerdict::ValidButUntrusted => "VALID, SIGNER NOT TRUSTED",
+        SignatureVerdict::Invalid => "INVALID",
+    };
+    let what = if check.kind == SignatureKind::DocumentTimestamp { "timestamped by" } else { "signed by" };
+    println!("{verdict}  {}  {what} {} at {}", check.field_name, check.signer, check.signing_time);
+    for reason in &check.reasons {
+        println!("         - {reason}");
+    }
+    if !check.chain.is_empty() {
+        println!("         certificate chain:");
+        for (depth, certificate) in check.chain.iter().enumerate() {
+            let trust = certificate.trusted_because.as_deref().map(|why| format!("  [trusted: {why}]")).unwrap_or_default();
+            let revocation = if revocation_checked || certificate.revocation != quintess_core::revocation::RevocationStatus::NotChecked { format!("  [revocation: {}]", certificate.revocation.describe()) } else { String::new() };
+            println!("           {}{}  (valid {} to {}){trust}{revocation}", "  ".repeat(depth), certificate.name, &certificate.not_before[..10.min(certificate.not_before.len())], &certificate.not_after[..10.min(certificate.not_after.len())]);
+        }
+    }
+    if let Some(timestamp) = &check.timestamp {
+        if check.kind == SignatureKind::Signature {
+            let state = if timestamp.intact && timestamp.trusted { "trusted" } else if timestamp.intact { "genuine but authority not trusted" } else { "NOT VALID" };
+            println!("         timestamp: {} by {} ({state})", timestamp.time, timestamp.authority);
+            for problem in timestamp.problems.iter().chain(&timestamp.trust_problems) {
+                println!("           - {problem}");
+            }
+        }
+    }
 }
