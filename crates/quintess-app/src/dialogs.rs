@@ -57,6 +57,8 @@ pub enum AppRequest {
     OpenWithSystem { name: String, bytes: Vec<u8> },
     /// Mark the document as PDF/UA-1, given the accessibility check's results.
     DeclarePdfUa { checks: Vec<quintess_core::accessibility::Check>, reviewed: bool },
+    /// Tag the document afresh, replacing the tags it has.
+    ReplaceTags,
     /// Convert with the choices made in the Convert dialog.
     Convert(Box<ConvertDialog>),
     /// Trust a certificate (DER) from now on, then check the signatures again.
@@ -177,6 +179,8 @@ pub enum Dialog {
     Threads(Box<crate::tool_dialogs::ThreadsDialog>),
     /// What to tag the content in a dragged box as.
     TagArea { page: u32, rect: [f32; 4], choice: usize },
+    /// Confirming that automatic tagging should replace the document's tags.
+    ConfirmReplaceTags,
     /// Making a PDF from another kind of file, or a web page.
     Convert(Box<ConvertDialog>),
     AccessibilityResults(Vec<quintess_core::accessibility::Check>),
@@ -280,6 +284,7 @@ impl Dialog {
             Dialog::Media(_) => "Audio, video and 3D",
             Dialog::Threads(_) => "Article threads",
             Dialog::TagArea { .. } => "Tag this area",
+            Dialog::ConfirmReplaceTags => "Replace all tags?",
             Dialog::Convert(convert) if convert.web_page => "Create a PDF from a web page",
             Dialog::Convert(_) => "Create a PDF from a file",
             Dialog::AccessibilityResults(_) => "Accessibility check",
@@ -1359,6 +1364,15 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             return Ok(());
         }
         Dialog::CreatePortfolio(create) => return create.show(ui, outcome),
+        Dialog::ConfirmReplaceTags => {
+            ui.label("Automatic tagging will remove every tag this document has, including any that were corrected by hand, and tag it again from its layout.");
+            ui.weak("You can undo it with Ctrl+Z.");
+            if buttons(ui, "Replace all tags", outcome) {
+                outcome.requests.push(AppRequest::ReplaceTags);
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
         _ => {}
     }
 

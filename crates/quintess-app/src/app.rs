@@ -1128,6 +1128,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             });
             ui.menu_button("View", |ui| {
                 self.command_buttons(ui, "View");
+                ui.menu_button("Read out loud", |ui| self.command_buttons(ui, "View ▸ Read out loud"));
                 ui.separator();
                 ui.checkbox(&mut self.organizer, "Organize pages");
                 ui.checkbox(&mut self.show_sidebar, "Sidebar");
@@ -1190,7 +1191,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         ui.separator();
         self.command_buttons(ui, "Tools");
         ui.menu_button("Accessibility", |ui| self.command_buttons(ui, "Tools ▸ Accessibility"));
-        ui.menu_button("PDF/A (archiving)", |ui| self.command_buttons(ui, "Tools ▸ PDF/A (archiving)"));
+        ui.menu_button("Standards", |ui| self.command_buttons(ui, "Tools ▸ Standards"));
+        ui.menu_button("Print production", |ui| self.command_buttons(ui, "Tools ▸ Print production"));
     }
 
     fn export_menu(&mut self, ui: &mut egui::Ui) {
@@ -1929,7 +1931,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.edit("Reply", |pdf| reply_to_annotation(pdf, id, &text, &author).map(|_| ()));
                 }
                 SidebarAction::EditTags { label, edit } => self.edit(label, edit),
-                SidebarAction::AutoTag { replace_existing } => self.auto_tag(replace_existing),
+                SidebarAction::AutoTag { replace_existing: false } => self.auto_tag(false),
+                // Replacing throws away tags a person may have corrected: ask first.
+                SidebarAction::AutoTag { replace_existing: true } => self.dialogs.push(Dialog::ConfirmReplaceTags),
                 SidebarAction::UseTagAreaTool => {
                     self.tool = Tool::TagArea;
                     self.info("Drag a box around the text or picture to tag.");
@@ -2124,6 +2128,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         let _ = quintess_core::system::open_in_default_app(&path);
                     }
                 }
+                AppRequest::ReplaceTags => self.auto_tag(true),
                 AppRequest::DeclarePdfUa { checks, reviewed } => {
                     let mut blockers = Vec::new();
                     self.edit("Declare PDF/UA-1", |pdf| {

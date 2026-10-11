@@ -82,16 +82,18 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut TagsPanelState
     let untagged_total: usize = tree.pages.iter().map(|page| page.untagged_items).sum();
 
     ui.horizontal_wrapped(|ui| {
-        if !tree.exists || untagged_total > 0 {
+        // Only for an untagged document: on a tagged one it would replace
+        // tags a person may have corrected (that is More ▸ Replace, with a warning).
+        if !tree.exists {
             if ui.button("Add tags to document").on_hover_text("Tag the document from its layout: headings, paragraphs, lists, pictures, simple tables, links and fields").clicked() {
-                actions.push(SidebarAction::AutoTag { replace_existing: tree.exists });
+                actions.push(SidebarAction::AutoTag { replace_existing: false });
             }
         }
         if ui.button("Tag an area").on_hover_text("Drag a box around untagged text or a picture to tag it").clicked() {
             actions.push(SidebarAction::UseTagAreaTool);
         }
         ui.menu_button("More", |ui| {
-            if tree.exists && ui.button("Replace all tags automatically").clicked() {
+            if tree.exists && ui.button("Replace all tags automatically…").clicked() {
                 actions.push(SidebarAction::AutoTag { replace_existing: true });
                 ui.close();
             }

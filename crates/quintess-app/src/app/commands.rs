@@ -125,7 +125,7 @@ pub(super) const COMMANDS: &[Command] = &[
     .shortcut("F11")
     .always(),
     command("View", "Command palette", |app, _| app.open_palette()).shortcut("Ctrl+K").always(),
-    command("Tools ▸ Comment", "Flatten all comments into the page", |app, _| app.edit_recording("Flatten comments", Step::Flatten { forms_only: false }, |pdf| forms::flatten(pdf, false).map(|_| ()))),
+    command("Tools ▸ Comment", "Flatten comments and form fields into the page", |app, _| app.edit_recording("Flatten comments", Step::Flatten { forms_only: false }, |pdf| forms::flatten(pdf, false).map(|_| ()))),
     command("Tools ▸ Comment", "Remove all comments", |app, _| app.edit_removing_recording("Remove comments", Step::RemoveComments, |pdf| remove_annotations(pdf, &[]).map(|_| ()))),
     command("Tools ▸ Comment", "Copy comment summary", |app, ctx| {
         if let Some(pdf) = app.tabs.get(app.active).map(|t| t.load_pdf()) {
@@ -234,9 +234,12 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools ▸ Accessibility", "Tags and reading order", |app, _| app.sidebar.page = crate::sidebar::SidebarPage::Tags)
         .hint("Edit the tags screen readers use, and the order they read the page in"),
     command("Tools ▸ Accessibility", "Add tags to document", |app, _| {
-        let tagged = app.tabs.get(app.active).is_some_and(|tab| tab.tag_tree().exists);
         app.sidebar.page = crate::sidebar::SidebarPage::Tags;
-        app.apply_sidebar_actions(vec![crate::sidebar::SidebarAction::AutoTag { replace_existing: tagged }]);
+        if app.tabs.get(app.active).is_some_and(|tab| tab.tag_tree().exists) {
+            app.info("This document already has tags. Edit them in the Tags panel, or use More ▸ Replace all tags there.");
+        } else {
+            app.apply_sidebar_actions(vec![crate::sidebar::SidebarAction::AutoTag { replace_existing: false }]);
+        }
     })
     .hint("Tag an untagged document from its layout: headings, paragraphs, lists, pictures, tables, links"),
     command("Tools ▸ Accessibility", "Fix automatically", |app, _| {
@@ -288,7 +291,7 @@ pub(super) const COMMANDS: &[Command] = &[
 ];
 
 /// Tools offered in the palette, besides the commands.
-const PALETTE_TOOLS: [Tool; 23] = [
+const PALETTE_TOOLS: [Tool; 24] = [
     Tool::Select,
     Tool::Inspect,
     Tool::Hand,
@@ -312,6 +315,7 @@ const PALETTE_TOOLS: [Tool; 23] = [
     Tool::CheckBox,
     Tool::SignatureField,
     Tool::Sign,
+    Tool::TagArea,
 ];
 
 /// The command palette's state while it is open.
@@ -551,6 +555,26 @@ impl QuintessApp {
             if let Some(bytes) = self.report(result) {
                 self.open_new_document("Combined.pdf".into(), bytes);
             }
+        }
+    }
+}
+
+/// The command groups the menus show (see `App::tools_menu` and the menu
+/// bar). A command in any other group would be reachable only from the
+/// palette, so the test below catches it.
+#[cfg(test)]
+const MENU_GROUPS: &[&str] = &[
+    "File", "File ▸ Create", "File ▸ Export as", "Edit", "View", "View ▸ Read out loud", "Help",
+    "Tools", "Tools ▸ Comment", "Tools ▸ Stamp and number", "Tools ▸ Pages", "Tools ▸ Forms", "Tools ▸ Redact",
+    "Tools ▸ Protect", "Tools ▸ Sign", "Tools ▸ Accessibility", "Tools ▸ Standards", "Tools ▸ Print production",
+];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_command_is_in_a_menu() {
+        for command in super::COMMANDS {
+            assert!(super::MENU_GROUPS.contains(&command.menu), "\"{}\" is in \"{}\", which no menu shows", command.label, command.menu);
         }
     }
 }

@@ -156,7 +156,11 @@ def guide_html(markdown: str) -> tuple[str, list[tuple[str, str]]]:
         elif line.startswith("## "):
             close_list()
             heading = line[3:].strip()
-            out.append(f'<h3 id="{topics[-1][1]}-{slug(heading)}">{inline(heading)}</h3>')
+            # "Installing on Linux" under "Installing" is #installing-on-linux,
+            # not #installing-installing-on-linux.
+            section = slug(heading)
+            anchor = section if section.startswith(topics[-1][1] + "-") else f"{topics[-1][1]}-{section}"
+            out.append(f'<h3 id="{anchor}">{inline(heading)}</h3>')
         elif line.startswith("- "):
             if open_list != "ul":
                 close_list()
