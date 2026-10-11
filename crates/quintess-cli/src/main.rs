@@ -5,6 +5,7 @@
 
 mod more;
 mod production;
+mod tags;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -635,6 +636,8 @@ enum Command {
     More(more::MoreCommand),
     #[command(flatten)]
     Production(production::ProductionCommand),
+    #[command(flatten)]
+    Tags(tags::TagsCommand),
     /// Save every embedded image as a PNG.
     Images {
         #[command(flatten)]
@@ -1482,6 +1485,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::More(command) => more::run(command)?,
         Command::Production(command) => production::run(command)?,
+        Command::Tags(command) => tags::run(command)?,
         Command::Images { input, min_size, output_folder } => {
             let document = input.open_document()?;
             let folder = folder_or_parent(&output_folder, &input.input)?;
