@@ -141,19 +141,35 @@ async function latestRelease(context) {
   const answer = await fetchGitHub("/releases/latest");
   if (!answer.ok) return Response.json({ error: "no release yet" }, { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
   const release = await answer.json();
-  const installer = (release.assets || []).find((asset) => asset.name.toLowerCase().endsWith("-setup.exe"));
-  const checksumAsset = installer && release.assets.find((asset) => asset.name.toLowerCase() === installer.name.toLowerCase() + ".sha256");
-  let sha256 = null;
-  if (checksumAsset) {
-    const file = await fetch(checksumAsset.browser_download_url, { headers: { "User-Agent": "quintess.cc" } });
-    if (file.ok) sha256 = ((await file.text()).trim().split(/\s+/)[0] || "").toLowerCase() || null;
-  }
+  // The three packages of a release, each with the checksum published beside it.
+  const files = release.assets || [];
+  const pick = (matches) => files.find((asset) => matches(asset.name.toLowerCase()));
+  const packages = {
+    windows: pick((name) => name.endsWith("-setup.exe")),
+    deb: pick((name) => name.endsWith(".deb")),
+    tarball: pick((name) => name.endsWith(".tar.gz")),
+  };
+  const describe = async (asset) => {
+    if (!asset) return null;
+    const checksumAsset = files.find((file) => file.name.toLowerCase() === asset.name.toLowerCase() + ".sha256");
+    let sha256 = null;
+    if (checksumAsset) {
+      try {
+        const file = await fetch(checksumAsset.browser_download_url, { headers: { "User-Agent": "quintess.cc" } });
+        if (file.ok) sha256 = ((await file.text()).trim().split(/\s+/)[0] || "").toLowerCase() || null;
+      } catch {}
+    }
+    return { name: asset.name, url: asset.browser_download_url, size: asset.size, downloads: asset.download_count, sha256 };
+  };
+  const [windows, deb, tarball] = await Promise.all([describe(packages.windows), describe(packages.deb), describe(packages.tarball)]);
   const body = {
     version: String(release.tag_name || "").replace(/^v/i, ""),
     published: release.published_at,
     page: release.html_url,
-    installer: installer ? { name: installer.name, url: installer.browser_download_url, size: installer.size, downloads: installer.download_count } : null,
-    sha256,
+    assets: { windows, deb, tarball },
+    // The Windows installer on its own, as before, for anything that still reads these.
+    installer: windows ? { name: windows.name, url: windows.url, size: windows.size, downloads: windows.downloads } : null,
+    sha256: windows ? windows.sha256 : null,
   };
   const response = Response.json(body, { headers: { "Cache-Control": `public, max-age=${RELEASE_CACHE_SECONDS}` } });
   context.waitUntil(cache.put(key, response.clone()));
@@ -194,14 +210,14 @@ async function stats(request, env, context) {
     query("SELECT SUM(kind = 'view') AS views, COUNT(DISTINCT CASE WHEN kind = 'view' THEN visitor || day END) AS visitors, SUM(kind = 'download') AS downloads, SUM(kind = 'github') AS github FROM hits WHERE day >= date('now', ?)"),
   ]);
 
-  // GitHub's own count of installer downloads, for every release.
+  // GitHub's own count of package downloads (.exe, .deb, .tar.gz), for every release.
   let releases = [];
   try {
     const answer = await fetchGitHub("/releases?per_page=20");
     if (answer.ok) {
       releases = (await answer.json()).map((release) => ({
         tag: release.tag_name,
-        downloads: (release.assets || []).filter((asset) => asset.name.toLowerCase().endsWith(".exe")).reduce((sum, asset) => sum + asset.download_count, 0),
+        downloads: (release.assets || []).filter((asset) => /\.(exe|deb|tar\.gz)$/i.test(asset.name)).reduce((sum, asset) => sum + asset.download_count, 0),
       }));
     }
   } catch {}
@@ -237,12 +253,12 @@ table{width:100%;border-collapse:collapse}td{padding:6px 0;border-bottom:1px sol
 <div><b>${total.views || 0}</b><span>page views</span></div>
 <div><b>${total.downloads || 0}</b><span>download clicks</span></div>
 <div><b>${total.github || 0}</b><span>GitHub link clicks</span></div>
-<div><b>${releases.reduce((sum, release) => sum + release.downloads, 0)}</b><span>installer downloads (GitHub, all time)</span></div>
+<div><b>${releases.reduce((sum, release) => sum + release.downloads, 0)}</b><span>package downloads (GitHub, all time)</span></div>
 </div>
 <div class="chart">${bars}</div>
 <div class="grid">
 ${table("pages", pages)}${table("referrers", referrers)}${table("countries", countries)}${table("devices", devices)}${table("browsers", browsers)}
-${table("installer downloads by release", releases.map((release) => ({ name: release.tag, n: release.downloads })))}
+${table("package downloads by release", releases.map((release) => ({ name: release.tag, n: release.downloads })))}
 </div></body></html>`;
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
 }
