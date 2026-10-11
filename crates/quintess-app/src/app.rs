@@ -71,6 +71,8 @@ pub struct QuintessApp {
     help: Option<help::Help>,
     spelling: Option<spelling::SpellingPanel>,
     read_aloud: Option<read_aloud::ReadAloud>,
+    /// The window title last set.
+    window_title: String,
     update_window: Option<updates::UpdateWindow>,
     /// The startup update check (or question) has happened this session.
     update_startup_done: bool,
@@ -133,6 +135,7 @@ impl QuintessApp {
             help: None,
             spelling: None,
             read_aloud: None,
+            window_title: String::new(),
             update_window: None,
             update_startup_done: false,
             watch: None,
@@ -1944,6 +1947,13 @@ fn write_export(path: &std::path::Path, bytes: Vec<u8>) -> anyhow::Result<JobOut
 impl eframe::App for QuintessApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // A developer aid: QUINTESS_DEBUG_REPAINT=1 prints why each frame was drawn.
+        if std::env::var_os("QUINTESS_DEBUG_REPAINT").is_some() {
+            let causes = ctx.repaint_causes();
+            if !causes.is_empty() {
+                eprintln!("frame {}: {:?}", ctx.cumulative_pass_nr(), causes);
+            }
+        }
         self.receive_rendered_pages(&ctx);
         self.receive_watch_events();
         crate::crash::note_unsaved(self.tabs.iter().filter(|t| t.dirty).map(|t| (t.title.clone(), t.bytes.clone())).collect());
@@ -1992,7 +2002,12 @@ impl eframe::App for QuintessApp {
             Some(tab) => format!("{} — Quintess", tab.display_title()),
             None => "Quintess".to_string(),
         };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        // Only when it changes: every command to the window asks for another
+        // frame, so sending it each frame kept the app redrawing nonstop.
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
 
         let colors = crate::theme::palette(&ctx);
         let studio = self.look == crate::theme::Look::Studio;

@@ -23,9 +23,25 @@ fn main() -> eframe::Result {
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/quintess-256.png")) {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
     }
-    let options = eframe::NativeOptions {
-        viewport,
-        ..Default::default()
+    // OpenGL ("glow") is the default: measured on a one-page document it
+    // needs about half the memory of wgpu (about 200 MB against 400 MB),
+    // which mostly goes to setting up a Vulkan or DirectX device. When a
+    // computer's OpenGL driver can't start, wgpu takes over.
+    // QUINTESS_RENDERER=wgpu chooses wgpu outright.
+    let first_choice = match std::env::var("QUINTESS_RENDERER").as_deref() {
+        Ok("wgpu") => eframe::Renderer::Wgpu,
+        _ => eframe::Renderer::Glow,
     };
-    eframe::run_native("Quintess", options, Box::new(|cc| Ok(Box::new(app::QuintessApp::new(cc, files)))))
+    let options = |renderer| eframe::NativeOptions { renderer, viewport: viewport.clone(), ..Default::default() };
+    let result = eframe::run_native("Quintess", options(first_choice), Box::new({
+        let files = files.clone();
+        move |cc| Ok(Box::new(app::QuintessApp::new(cc, files)))
+    }));
+    match result {
+        Err(error) if first_choice == eframe::Renderer::Glow => {
+            eprintln!("OpenGL couldn't start ({error}); using wgpu instead");
+            eframe::run_native("Quintess", options(eframe::Renderer::Wgpu), Box::new(move |cc| Ok(Box::new(app::QuintessApp::new(cc, files)))))
+        }
+        other => other,
+    }
 }
