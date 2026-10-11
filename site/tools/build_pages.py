@@ -177,6 +177,7 @@ def build_guide() -> str:
     <p class="mono doc-toc-title">user guide · {len(topics)} topics</p>
     <input class="doc-search" type="search" placeholder="Filter topics" aria-label="Filter topics" data-doc-search>
     <ol>{toc}</ol>
+    <p class="doc-empty" data-doc-empty hidden>No matching topics. Try another word or clear the filter.</p>
   </aside>
   <article class="doc-body">
     <p class="kicker"><span class="dot"></span>the same guide as F1 in the program</p>
@@ -202,16 +203,16 @@ def build_privacy() -> str:
     body = """<article class="prose">
   <p class="kicker"><span class="dot"></span>site privacy</p>
   <h1 class="display-2">What this website counts.</h1>
-  <p>This page is about the quintess.cc website. The Quintess program itself sends nothing anywhere; see the <a href="/guide/#privacy-and-updates">guide</a>.</p>
-  <h2>No cookies, no trackers</h2>
-  <p>The site sets no cookies, uses no third-party scripts, fonts or analytics services, and shows no ads. Fonts and images are served from quintess.cc itself.</p>
+  <p>The Quintess program processes documents on your computer and has no telemetry; its optional update check contacts GitHub (see the <a href="/guide/#privacy-and-updates">guide</a>). This page is about the quintess.cc website, which keeps its own simple counts of visits and clicks.</p>
+  <h2>No cookies, no advertising</h2>
+  <p>The site sets no cookies and shows no ads. Fonts and images are served from quintess.cc itself. The only outside script is Cloudflare Web Analytics, from the company that hosts the site; it also uses no cookies and records page loads and loading speed without identifying you.</p>
   <h2>A simple visit count</h2>
   <p>To know whether anyone finds the site, it counts page views and clicks on the download and GitHub links. For each, it keeps:</p>
   <ul>
-    <li>the page, and the name of the site that linked to it (not the full address);</li>
+    <li>the page, and the address of the site that linked to it (only the site, never the page it came from);</li>
     <li>the country, as reported by Cloudflare;</li>
     <li>whether the device is a desktop, phone or tablet, and the browser's name;</li>
-    <li>a code that counts a visitor once per day. It is made from the date, your IP address, your browser's description and a secret, then scrambled one way. Because the date is part of it, the code changes every day, so visits on different days can't be connected, and it can't be turned back into your IP address.</li>
+    <li>a code that counts a visitor once per day. It is made from the date, your IP address, your browser's description and a secret, then scrambled one way. Because the date is part of it, the code changes every day, and it is built so it can't be turned back into your IP address.</li>
   </ul>
   <p>Your IP address itself is never stored. Counts older than 400 days are deleted automatically.</p>
   <h2>Opting out</h2>
@@ -228,8 +229,8 @@ def build_not_found() -> str:
     body = """<article class="prose not-found">
   <p class="kicker mono"><span class="dot"></span>error 404</p>
   <h1 class="display">Page not<br>found.</h1>
-  <p>This page doesn't exist. It may have been redacted.</p>
-  <p><a class="button" href="/">Back to the start</a></p>
+  <p>We couldn't find this page. Maybe it was redacted.</p>
+  <p><a class="button" href="/">Quintess home</a> <a class="button button-ghost" href="/guide/">User guide</a></p>
 </article>"""
     return page("Page not found · Quintess", "This page doesn't exist.", body, None)
 

@@ -13,8 +13,8 @@ A free, open-source, private PDF reader and editor for Windows. Edit text, sign,
 - **Comment and mark up**: highlights, notes, text boxes, shapes, freehand ink, stamps and links.
 - **Pages**: organize by drag and drop, rotate, insert, extract, split, merge, crop, resize, several pages per sheet, page labels.
 - **Forms**: fill, create, detect fields automatically, import and export data, and fill one copy per row of a spreadsheet (CSV, Excel, OpenDocument).
-- **Redact for real**: text, pictures and shapes under the boxes are removed from the file, then the whole file is checked for anything left behind (properties, comments, fields, attachments, hidden entries, earlier versions).
-- **Sign and protect**: digital signatures that stay valid through later edits, verification, AES-256 encryption and permissions.
+- **Redact for real**: text, pictures and shapes under the boxes are removed from the file, then the rest of the file is checked for the removed text (properties, comments, fields, attachments, hidden entries, earlier versions), with a report of anything that couldn't be checked.
+- **Sign and protect**: digital signatures (later edits are saved on top, keeping the signed revision intact), verification, AES-256 encryption and permissions.
 - **Scans and codes**: offline OCR makes scanned pages searchable; QR codes on pages are read and opened safely.
 - **Convert**: export to Word, Markdown, HTML, text and images; compare two versions; reduce file size; accessibility fixes; PDF/A.
 - **Automate**: record your steps as an action, run it on many files, or watch a folder. A full command-line tool (`quintess`) does nearly everything the app does.

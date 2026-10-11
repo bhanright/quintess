@@ -5,13 +5,38 @@
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // The pause button stops every demo; sleeps wait while paused, so the
+  // scripted demos stop where they are and carry on when resumed.
+  let paused = false;
+  try { paused = localStorage.getItem("quintess-paused") === "1"; } catch {}
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sleep = async (ms) => {
+    await wait(ms);
+    while (paused) await wait(200);
+  };
+  const pauseButton = $("[data-pause]");
+  const showPaused = () => {
+    document.body.classList.toggle("paused", paused);
+    if (pauseButton) {
+      pauseButton.setAttribute("aria-pressed", String(paused));
+      pauseButton.textContent = paused ? "play animation" : "pause animation";
+    }
+  };
+  pauseButton?.addEventListener("click", () => {
+    paused = !paused;
+    try { localStorage.setItem("quintess-paused", paused ? "1" : "0"); } catch {}
+    showPaused();
+  });
+  showPaused();
 
   // ---- Page-view count (first party, no cookies, see /privacy/) ----
   function track(kind, extra = {}) {
     // Browsers that ask not to be tracked are not counted.
     if (navigator.globalPrivacyControl || navigator.doNotTrack === "1") return;
-    const body = JSON.stringify({ kind, path: location.pathname, referrer: document.referrer || "", ...extra });
+    // Only the referring site's address is sent, never the full page it came from.
+    let referrer = "";
+    try { referrer = document.referrer ? new URL(document.referrer).origin : ""; } catch {}
+    const body = JSON.stringify({ kind, path: location.pathname, referrer, ...extra });
     try {
       if (!navigator.sendBeacon("/api/hit", new Blob([body], { type: "application/json" }))) throw new Error();
     } catch {
@@ -21,7 +46,7 @@
   track("view");
   document.addEventListener("click", (event) => {
     const link = event.target.closest("[data-track]");
-    if (link) track(link.dataset.track, { target: link.href });
+    if (link) track(link.dataset.track);
   });
 
   // ---- Header: scroll progress and the pointer readout in PDF points ----
@@ -203,7 +228,7 @@
       scanLine.style.top = target.top + target.height + "px";
       await sleep(950);
       scanLine.style.opacity = 0;
-      showNote("<b>link</b> · https://quintess.cc · looks safe", target.left + target.width - 260, target.top - 38);
+      showNote("<b>destination</b> · https://quintess.cc · review before opening", target.left + target.width - 330, target.top - 38);
       await sleep(2400);
       note.classList.remove("on");
       steps.forEach((step) => step.classList.replace("active", "done"));
@@ -329,7 +354,7 @@
       const script = [
         ["cmd", "quintess redact contract.pdf --pattern ssn --report"],
         ["out", "removed 3 matches on pages 2, 5"],
-        ["ok", "check: nothing left behind"],
+        ["ok", "check: no matching text found"],
         ["cmd", "quintess bates *.pdf --prefix ACME-"],
         ["ok", "numbered 412 pages in 9 files"],
         ["cmd", "quintess pdfa scan.pdf --convert"],
@@ -437,6 +462,8 @@
       topic.hidden = !matches;
       links.get(topic.id)?.parentElement.toggleAttribute("hidden", !matches);
     });
+    const empty = document.querySelector("[data-doc-empty]");
+    if (empty) empty.hidden = topics.some((topic) => !topic.hidden);
   });
   if (!("IntersectionObserver" in window)) return;
   const observer = new IntersectionObserver((entries) => {

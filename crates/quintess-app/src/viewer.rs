@@ -680,9 +680,12 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
         let mut cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
         let mut delete = false;
         // Above the text when there is room, so what follows stays readable.
-        let bar_height = 52.0;
+        // The bar grows a second row while the preview is shown, so use its
+        // height from the last frame to keep it clear of the text below.
+        let bar_id = ui.id().with(("text style", page_index));
+        let bar_height = ui.ctx().memory(|memory| memory.area_rect(bar_id)).map_or(52.0, |rect| rect.height() + 6.0);
         let bar_position = if editor_rect.top() - bar_height > ui.clip_rect().top() { editor_rect.left_top() - vec2(0.0, bar_height) } else { editor_rect.left_bottom() + vec2(0.0, 6.0) };
-        egui::Area::new(ui.id().with(("text style", page_index))).order(egui::Order::Foreground).fixed_pos(bar_position).show(ui.ctx(), |ui| {
+        egui::Area::new(bar_id).order(egui::Order::Foreground).fixed_pos(bar_position).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).inner_margin(4.0).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if editing.rich.is_some() {
