@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 /// What a finished job hands back.
 pub enum JobOutcome {
     /// New bytes for a tab, applied as one undoable step.
-    ReplaceBytes { tab_id: u64, label: String, bytes: Vec<u8> },
+    /// `removes_content` rewrites a signed file rather than adding an update.
+    ReplaceBytes { tab_id: u64, label: String, bytes: Vec<u8>, removes_content: bool },
     /// Text to show in a result window (batch results).
     ShowText { title: String, text: String },
     Comparison { summary: String, report_path: std::path::PathBuf },

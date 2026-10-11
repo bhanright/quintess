@@ -119,7 +119,7 @@ pub(super) const COMMANDS: &[Command] = &[
     .always(),
     command("View", "Command palette", |app, _| app.open_palette()).shortcut("Ctrl+K").always(),
     command("Tools ▸ Comment", "Flatten all comments into the page", |app, _| app.edit_recording("Flatten comments", Step::Flatten { forms_only: false }, |pdf| forms::flatten(pdf, false).map(|_| ()))),
-    command("Tools ▸ Comment", "Remove all comments", |app, _| app.edit_recording("Remove comments", Step::RemoveComments, |pdf| remove_annotations(pdf, &[]).map(|_| ()))),
+    command("Tools ▸ Comment", "Remove all comments", |app, _| app.edit_removing_recording("Remove comments", Step::RemoveComments, |pdf| remove_annotations(pdf, &[]).map(|_| ()))),
     command("Tools ▸ Comment", "Copy comment summary", |app, ctx| {
         if let Some(pdf) = app.tabs.get(app.active).map(|t| t.load_pdf()) {
             if let Some(pdf) = app.report(pdf) {
@@ -167,6 +167,7 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools ▸ Protect", "Remove protection", |app, _| {
         if let Some(tab) = app.tab() {
             tab.protection = None;
+            tab.original_encryption = None;
             // Re-writing the bytes stores them without encryption.
             let result = tab.apply("Remove protection", |_| Ok(()));
             if app.report(result).is_some() {
@@ -174,7 +175,7 @@ pub(super) const COMMANDS: &[Command] = &[
             }
         }
     }),
-    command("Tools ▸ Protect", "Remove metadata", |app, _| app.edit_recording("Remove metadata", Step::RemoveMetadata, vellum_core::metadata::strip_metadata)),
+    command("Tools ▸ Protect", "Remove metadata", |app, _| app.edit_removing_recording("Remove metadata", Step::RemoveMetadata, vellum_core::metadata::strip_metadata)),
     command("Tools ▸ Sign", "Sign here (draw a box)", |app, _| {
         app.tool = Tool::Sign;
         app.info("Drag a box where the signature should appear.");

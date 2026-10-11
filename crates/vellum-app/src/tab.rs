@@ -92,6 +92,9 @@ pub struct DocumentTab {
     pub signed: bool,
     /// The last edit was saved as an update that left the signatures valid.
     pub last_edit_kept_signatures: bool,
+    /// The password protection the file had when opened (key, passwords and
+    /// permissions), put back when it is saved unless taken off.
+    pub original_encryption: Option<vellum_core::lopdf::EncryptionState>,
     /// PDFium's view of the current bytes, for text and search on this thread.
     document: Option<PdfDocument<'static>>,
     text_cache: RefCell<HashMap<usize, Rc<PageText>>>,
@@ -150,6 +153,7 @@ impl DocumentTab {
             attachments: Vec::new(),
             signed: false,
             last_edit_kept_signatures: false,
+            original_encryption: None,
             document: None,
             text_cache: RefCell::new(HashMap::new()),
             line_cache: RefCell::new(HashMap::new()),
@@ -171,6 +175,7 @@ impl DocumentTab {
             protection: None,
         };
         tab.refresh()?;
+        tab.original_encryption = tab.load_pdf().ok().and_then(|pdf| pdf.original_encryption());
         Ok(tab)
     }
 
@@ -219,14 +224,30 @@ impl DocumentTab {
         self.replace_bytes(label, new_bytes)
     }
 
+    /// Like [`DocumentTab::apply`] for an edit that removes content for good
+    /// (redaction, deleting pages, stripping metadata, comments or
+    /// attachments): the whole file is rewritten, never kept as an earlier
+    /// version, even when that breaks its signatures.
+    pub fn apply_removing(&mut self, label: &str, edit: impl FnOnce(&mut Pdf) -> Result<()>) -> Result<()> {
+        let mut pdf = self.load_pdf()?;
+        edit(&mut pdf)?;
+        let new_bytes = pdf.to_bytes(&SaveSettings::default())?;
+        self.replace_bytes_as(label, new_bytes, true)
+    }
+
     /// Swaps in new bytes (from an edit or a whole-document operation).
     pub fn replace_bytes(&mut self, label: &str, new_bytes: Vec<u8>) -> Result<()> {
-        // A signed document takes edits as updates after the signed bytes,
-        // which keeps the signatures valid; failing that, the whole file is
-        // rewritten and the signatures break.
+        self.replace_bytes_as(label, new_bytes, false)
+    }
+
+    /// Swaps in new bytes. A signed document takes ordinary edits as updates
+    /// after the signed bytes, which keeps the signatures valid; edits that
+    /// remove content (`removes_content`) rewrite the whole file instead, so
+    /// nothing removed survives inside it.
+    pub fn replace_bytes_as(&mut self, label: &str, new_bytes: Vec<u8>, removes_content: bool) -> Result<()> {
         let mut new_bytes = new_bytes;
         self.last_edit_kept_signatures = false;
-        if self.signed {
+        if self.signed && !removes_content {
             if let Ok(updated) = vellum_core::incremental::update_from_bytes(&self.bytes, &new_bytes, self.password.as_deref()) {
                 new_bytes = updated;
                 self.last_edit_kept_signatures = true;
@@ -379,16 +400,28 @@ impl DocumentTab {
     }
 
     pub fn save_to(&mut self, path: PathBuf) -> Result<()> {
-        match &self.protection {
+        let bytes = match &self.protection {
             Some(settings) => {
                 let mut pdf = self.load_pdf()?;
+                pdf.forget_encryption();
                 vellum_core::security::protect(&mut pdf, settings)?;
                 // Encrypted objects must be written exactly as encrypted.
-                let bytes = pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?;
-                std::fs::write(&path, bytes)?;
+                pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?
             }
-            None => std::fs::write(&path, self.bytes.as_ref())?,
-        }
+            None => {
+                let still_encrypted = vellum_core::security::inspect_security(&self.bytes).encrypted;
+                match &self.original_encryption {
+                    // Edits leave the bytes unprotected; protect them as the file was.
+                    Some(encryption) if !still_encrypted => vellum_core::document::encrypt_as_before(&self.bytes, encryption)?,
+                    // An unsigned file is written without the earlier versions an
+                    // incremental save may have left in it (they can hold removed
+                    // content); a signed one needs them for its signatures.
+                    _ if !self.signed && !still_encrypted && vellum_core::incremental::revision_count(&self.bytes) > 1 => self.load_pdf()?.to_bytes(&SaveSettings::default())?,
+                    _ => self.bytes.as_ref().clone(),
+                }
+            }
+        };
+        vellum_core::document::write_file_safely(&path, &bytes)?;
         self.title = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         self.path = Some(path);
         self.dirty = false;

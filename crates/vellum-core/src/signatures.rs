@@ -388,11 +388,26 @@ pub fn verify(bytes: &[u8]) -> Result<Vec<SignatureCheck>> {
 }
 
 fn check_one(bytes: &[u8], signature: &lopdf::Dictionary, check: &mut SignatureCheck) -> Result<()> {
-    let range: Vec<usize> = signature.get(b"ByteRange")?.as_array()?.iter().map(|v| v.as_i64().unwrap_or(0) as usize).collect();
-    if range.len() != 4 || range[0] + range[1] > bytes.len() || range[2] + range[3] > bytes.len() {
+    // [start of the first part, its length, start of the second part, its length]
+    let numbers: Vec<i64> = signature.get(b"ByteRange")?.as_array()?.iter().map(|v| v.as_i64().unwrap_or(-1)).collect();
+    if numbers.len() != 4 || numbers.iter().any(|n| *n < 0) {
         bail!("the byte range is malformed");
     }
-    check.covers_whole_document = range[2] + range[3] == bytes.len();
+    let range: Vec<usize> = numbers.iter().map(|n| *n as usize).collect();
+    let first_end = range[0].checked_add(range[1]);
+    let second_end = range[2].checked_add(range[3]);
+    let (Some(first_end), Some(second_end)) = (first_end, second_end) else { bail!("the byte range is malformed") };
+    if range[0] != 0 || first_end > range[2] || second_end > bytes.len() {
+        bail!("the byte range is malformed");
+    }
+    // The only bytes left unsigned must be the signature value itself, <hex>;
+    // a wider gap could hold content changed after signing.
+    let gap = &bytes[first_end..range[2]];
+    let gap_is_signature = gap.first() == Some(&b'<') && gap.last() == Some(&b'>') && gap[1..gap.len() - 1].iter().all(|b| b.is_ascii_hexdigit() || b.is_ascii_whitespace());
+    if !gap_is_signature {
+        bail!("the signature leaves bytes other than its own value unsigned");
+    }
+    check.covers_whole_document = second_end == bytes.len();
     let signed_parts = [&bytes[range[0]..range[0] + range[1]], &bytes[range[2]..range[2] + range[3]]];
     let Object::String(contents, _) = signature.get(b"Contents")? else { bail!("the signature has no contents") };
     let sub_filter = signature.get(b"SubFilter").ok().and_then(|s| s.as_name().ok()).unwrap_or(b"");

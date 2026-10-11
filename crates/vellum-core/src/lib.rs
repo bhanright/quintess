@@ -47,4 +47,5 @@ pub mod watch;
 pub use document::{Pdf, SaveSettings};
 
 /// Re-exported so front ends use the same PDFium types as the engine.
+pub use lopdf;
 pub use pdfium_render;

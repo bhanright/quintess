@@ -608,18 +608,24 @@ pub fn find_and_replace(bytes: &[u8], password: Option<&str>, pattern: &regex::R
     let mut replaced = 0;
     let page_count = crate::engine::open_document(current.clone(), password)?.pages().len() as usize;
     for page_index in 0..page_count {
+        // Lines already rewritten, by text and starting point: the new text
+        // may match again ("Notice" → "Notices"), and must not be replaced twice.
+        let mut rewritten: Vec<(String, f32, f32)> = Vec::new();
+        let is_rewritten = |line: &EditableLine, rewritten: &[(String, f32, f32)]| rewritten.iter().any(|(text, x, y)| *text == line.text && (x - line.matrix[4]).abs() < 1.0 && (y - line.matrix[5]).abs() < 1.0);
         // Each replacement renumbers the page's objects, so re-read after each one.
         loop {
             let document = crate::engine::open_document(current.clone(), password)?;
             let lines = editable_lines(&document, page_index)?;
             drop(document);
-            let Some(line) = lines.into_iter().find(|l| pattern.is_match(&l.text)) else { break };
+            let Some(line) = lines.into_iter().find(|l| pattern.is_match(&l.text) && !is_rewritten(l, &rewritten)) else { break };
             let new_text = pattern.replace_all(&line.text, replacement).into_owned();
             if new_text == line.text {
-                break;
+                rewritten.push((line.text.clone(), line.matrix[4], line.matrix[5]));
+                continue;
             }
             replaced += pattern.find_iter(&line.text).count();
             current = replace_line(&current, password, &line, &new_text, &LineStyle::of(&line))?;
+            rewritten.push((new_text.trim_end().to_string(), line.matrix[4], line.matrix[5]));
         }
     }
     Ok((current, replaced))

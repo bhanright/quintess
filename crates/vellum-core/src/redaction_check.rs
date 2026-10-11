@@ -485,13 +485,7 @@ fn hidden_strings(pdf: &Pdf, texts: &[String], checked: &HashSet<ObjectId>) -> C
 /// Earlier versions of the file kept inside it by incremental saves: each
 /// ends at its own "%%EOF" and can be opened on its own.
 fn earlier_versions(bytes: &[u8], password: Option<&str>, texts: &[String]) -> CheckedPlace {
-    let marker = b"%%EOF";
-    let mut ends: Vec<usize> = bytes.windows(marker.len()).enumerate().filter(|(_, w)| *w == marker).map(|(i, _)| i + marker.len()).collect();
-    // A linearized ("fast web view") file has an extra end marker for its first page.
-    let head = &bytes[..bytes.len().min(1024)];
-    if head.windows(11).any(|w| w == b"/Linearized") && ends.len() > 1 {
-        ends.remove(0);
-    }
+    let ends = crate::incremental::version_ends(bytes);
     let earlier = ends.len().saturating_sub(1);
     if earlier == 0 {
         return CheckedPlace { place: "Earlier versions inside the file", verdict: Verdict::Clear, details: vec!["the file holds only its current version".into()] };
@@ -512,7 +506,7 @@ fn earlier_versions(bytes: &[u8], password: Option<&str>, texts: &[String]) -> C
             }
         }
     }
-    details.push("saving a full copy (File ▸ Save As) writes only the current version".into());
+    details.push("Vellum writes only the current version when it saves an unsigned file; a signed file keeps its earlier versions for its signatures, so redact it in Vellum, which rewrites it".into());
     CheckedPlace { place: "Earlier versions inside the file", verdict: if found_any { Verdict::Found } else { Verdict::Review }, details }
 }
 

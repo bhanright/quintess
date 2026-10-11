@@ -1293,7 +1293,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             ui.horizontal(|ui| {
                 if ui.button("Remove all metadata").clicked() {
-                    match tab.apply("Remove metadata", metadata::strip_metadata) {
+                    match tab.apply_removing("Remove metadata", metadata::strip_metadata) {
                         Ok(()) => outcome.requests.push(AppRequest::Record(Step::RemoveMetadata)),
                         Err(error) => outcome.error = Some(error.to_string()),
                     }
@@ -1369,7 +1369,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     None => Vec::new(),
                 };
                 let mut report = None;
-                tab.apply("Redact", |pdf| {
+                tab.apply_removing("Redact", |pdf| {
                     report = Some(redact::apply_redactions(pdf, &areas, &settings)?);
                     Ok(())
                 })?;
@@ -1416,7 +1416,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             pages_field(ui, pages);
             if buttons(ui, "Delete", outcome) {
                 let chosen = parse_pages(tab, pages)?;
-                tab.apply("Delete pages", |pdf| pages::delete_pages(pdf, &chosen))?;
+                tab.apply_removing("Delete pages", |pdf| pages::delete_pages(pdf, &chosen))?;
                 outcome.requests.push(AppRequest::Record(Step::Delete { pages: pages.clone() }));
                 outcome.keep_open = false;
             }

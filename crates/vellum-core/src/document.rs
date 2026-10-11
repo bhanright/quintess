@@ -100,8 +100,22 @@ impl Pdf {
 
     pub fn save(&mut self, path: impl AsRef<Path>, settings: &SaveSettings) -> Result<()> {
         let bytes = self.to_bytes(settings)?;
-        let path = path.as_ref();
-        std::fs::write(path, bytes).with_context(|| format!("could not write {}", path.display()))
+        write_file_safely(path.as_ref(), &bytes)
+    }
+
+    /// The encryption the file had when it was opened (its key, passwords
+    /// and permissions), if it had any.
+    pub fn original_encryption(&self) -> Option<lopdf::EncryptionState> {
+        self.doc.encryption_state.clone()
+    }
+
+    /// Like [`Pdf::to_bytes`], encrypting the result again exactly as the
+    /// file was when opened, so saving never quietly removes its protection.
+    pub fn to_bytes_keeping_encryption(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
+        match self.original_encryption() {
+            Some(encryption) => encrypt_as_before(&self.to_bytes(settings)?, &encryption),
+            None => self.to_bytes(settings),
+        }
     }
 
     pub fn to_bytes(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
@@ -119,6 +133,11 @@ impl Pdf {
             self.doc.save_to(&mut bytes)?;
         }
         Ok(bytes)
+    }
+
+    /// Forgets the encryption the file was opened with, so it saves unprotected.
+    pub fn forget_encryption(&mut self) {
+        self.doc.encryption_state = None;
     }
 
     /// The id of the root `/Pages` node.
@@ -319,22 +338,21 @@ impl Pdf {
 
     /// The visible area of a page in PDF units: the crop box when present,
     /// otherwise the media box, as `[left, bottom, right, top]`.
+    /// The page's visible box (crop box, else media box). A missing or
+    /// malformed box falls back to the media box and then to US Letter, as
+    /// readers do, so one odd page doesn't stop the whole document.
     pub fn page_box(&self, page_id: ObjectId) -> Result<[f32; 4]> {
-        let object = match self.inherited_attribute(page_id, b"CropBox")? {
-            Some(crop) => crop,
-            None => self
-                .inherited_attribute(page_id, b"MediaBox")?
-                .unwrap_or_else(|| letter_media_box().into()),
-        };
-        rectangle_from_object(&self.doc, &object)
+        let crop = self.inherited_attribute(page_id, b"CropBox")?.and_then(|crop| rectangle_from_object(&self.doc, &crop).ok());
+        match crop {
+            Some(crop) => Ok(crop),
+            None => self.media_box(page_id),
+        }
     }
 
     /// The page's media box as `[left, bottom, right, top]`.
     pub fn media_box(&self, page_id: ObjectId) -> Result<[f32; 4]> {
-        match self.inherited_attribute(page_id, b"MediaBox")? {
-            Some(object) => rectangle_from_object(&self.doc, &object),
-            None => Ok([0.0, 0.0, 612.0, 792.0]),
-        }
+        let media = self.inherited_attribute(page_id, b"MediaBox")?.and_then(|object| rectangle_from_object(&self.doc, &object).ok());
+        Ok(media.unwrap_or([0.0, 0.0, 612.0, 792.0]))
     }
 
     /// The page rotation in degrees, normalized to 0, 90, 180 or 270.
@@ -357,9 +375,6 @@ impl Pdf {
     }
 }
 
-fn letter_media_box() -> Vec<Object> {
-    vec![0.into(), 0.into(), 612.into(), 792.into()]
-}
 
 /// Reads a `[left bottom right top]` array, normalizing reversed corners.
 pub fn rectangle_from_object(doc: &Document, object: &Object) -> Result<[f32; 4]> {
@@ -467,4 +482,29 @@ pub fn merge_documents(sources: &[(String, Pdf)], bookmark_each_source: bool) ->
 /// Number each page id against its position, for callers that need a lookup.
 pub fn page_numbers_by_id(pdf: &Pdf) -> BTreeMap<ObjectId, u32> {
     pdf.page_ids().into_iter().enumerate().map(|(index, id)| (id, index as u32 + 1)).collect()
+}
+
+/// Writes a file without risking the old one: the bytes go to a temporary
+/// file beside it, which then replaces it, so a crash or power cut midway
+/// leaves either the old file or the new one, never half of each.
+pub fn write_file_safely(path: &Path, bytes: &[u8]) -> Result<()> {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+    let partial = path.with_file_name(format!(".{name}.partial"));
+    std::fs::write(&partial, bytes).with_context(|| format!("could not write {}", partial.display()))?;
+    std::fs::rename(&partial, path).with_context(|| {
+        let _ = std::fs::remove_file(&partial);
+        format!("could not replace {}", path.display())
+    })
+}
+
+/// Encrypts an unprotected file with the same key, passwords and
+/// permissions as an earlier version of it had.
+pub fn encrypt_as_before(plain: &[u8], encryption: &lopdf::EncryptionState) -> Result<Vec<u8>> {
+    let mut doc = Document::load_mem(plain)?;
+    doc.compress();
+    doc.encrypt(encryption).map_err(|error| anyhow::anyhow!("could not encrypt the file again: {error}"))?;
+    let mut bytes = Vec::new();
+    // Encrypted objects are written as they are (no object streams).
+    doc.save_to(&mut bytes)?;
+    Ok(bytes)
 }

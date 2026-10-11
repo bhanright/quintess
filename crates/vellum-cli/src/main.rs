@@ -23,6 +23,7 @@ use vellum_core::ranges::parse_page_ranges;
 use vellum_core::redact::{self, RedactionSettings};
 use vellum_core::security::{self, AllowedActions, Cipher, ProtectionSettings};
 use vellum_core::stamp::{self, Anchor, HeaderFooter, ImageStamp, TextStamp};
+use vellum_core::document::write_file_safely;
 use vellum_core::{Pdf, SaveSettings};
 
 #[derive(Parser)]
@@ -725,24 +726,66 @@ fn open(input: &Input) -> Result<Pdf> {
     Pdf::open(&input.input, input.password.as_deref())
 }
 
-fn save(pdf: &mut Pdf, input: &Path, output: &Output) -> Result<PathBuf> {
-    let target = output.output.clone().unwrap_or_else(|| input.to_path_buf());
-    // A signed input takes the edit as an update after the signed bytes, so its signatures stay valid.
-    let original = std::fs::read(input).unwrap_or_default();
+/// What an edit does to the document, for saving it rightly.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Edit {
+    /// An ordinary change; a signed file takes it as an update after the
+    /// signed bytes, so its signatures stay valid.
+    Changes,
+    /// Removes content for good (redaction, deleting pages, stripping
+    /// metadata, comments or attachments): the whole file is rewritten so
+    /// nothing removed survives in an earlier version, even if that breaks
+    /// signatures.
+    RemovesContent,
+    /// Takes the password protection off.
+    Unprotects,
+}
+
+fn save(pdf: &mut Pdf, input: &Input, output: &Output) -> Result<PathBuf> {
+    save_edit(pdf, input, output, Edit::Changes)
+}
+
+fn save_removing(pdf: &mut Pdf, input: &Input, output: &Output) -> Result<PathBuf> {
+    save_edit(pdf, input, output, Edit::RemovesContent)
+}
+
+/// Writes an edited document over the input (or to `-o`), safely, keeping
+/// the input's password protection unless the edit takes it off.
+pub(crate) fn save_edit(pdf: &mut Pdf, input: &Input, output: &Output, edit: Edit) -> Result<PathBuf> {
+    let target = output.output.clone().unwrap_or_else(|| input.input.clone());
+    let original = std::fs::read(&input.input).unwrap_or_default();
     let signed = !original.is_empty() && vellum_core::signatures::verify(&original).is_ok_and(|checks| !checks.is_empty());
-    if signed {
+    if edit == Edit::Unprotects {
+        pdf.forget_encryption();
+    } else if pdf.original_encryption().is_none() {
+        // Edits that produced new bytes lost track of the input's protection; take it from the input.
+        if let Some(encryption) = Pdf::from_bytes(&original, input.password.as_deref()).ok().and_then(|p| p.original_encryption()) {
+            pdf.doc.encryption_state = Some(encryption);
+        }
+    }
+    if signed && edit == Edit::Changes {
         let mut plain = Pdf { doc: pdf.doc.clone() };
+        plain.forget_encryption();
         let edited = plain.to_bytes(&SaveSettings::default())?;
         if let Ok(updated) = vellum_core::incremental::update_from_bytes(&original, &edited, None) {
-            std::fs::write(&target, updated)?;
+            write_file_safely(&target, &updated)?;
             println!("wrote {} (as an update after the signatures, which stay valid)", target.display());
             return Ok(target);
         }
         eprintln!("note: this edit invalidates the document's signatures");
+    } else if signed {
+        eprintln!("note: content was removed for good, so the whole file was rewritten; its digital signatures no longer verify");
     }
-    pdf.save(&target, &SaveSettings { use_object_streams: output.compact, ..Default::default() })?;
+    let bytes = pdf.to_bytes_keeping_encryption(&SaveSettings { use_object_streams: output.compact, ..Default::default() })?;
+    write_file_safely(&target, &bytes)?;
     println!("wrote {}", target.display());
     Ok(target)
+}
+
+/// Saves a whole edited file that an engine function produced as bytes.
+pub(crate) fn save_edited_bytes(bytes: &[u8], input: &Input, output: &Output) -> Result<PathBuf> {
+    let mut pdf = Pdf::from_bytes(bytes, input.password.as_deref())?;
+    save(&mut pdf, input, output)
 }
 
 fn save_to(pdf: &mut Pdf, target: &Path) -> Result<()> {
@@ -838,24 +881,24 @@ fn run(cli: Cli) -> Result<()> {
             let mut pdf = open(&input)?;
             let doomed = pages_of(&pdf, &pages)?;
             pages::delete_pages(&mut pdf, &doomed)?;
-            save(&mut pdf, &input.input, &output)?;
+            save_removing(&mut pdf, &input, &output)?;
         }
         Command::Rotate { input, degrees, pages, output } => {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             pages::rotate_pages(&mut pdf, &chosen, degrees)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Reorder { input, order, output } => {
             let mut pdf = open(&input)?;
             let new_order = pages_of(&pdf, &order)?;
             pages::reorder_pages(&mut pdf, &new_order)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Reverse { input, output } => {
             let mut pdf = open(&input)?;
             pages::reverse_pages(&mut pdf)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Insert { input, after, from, from_pages, count, size, output } => {
             let mut pdf = open(&input)?;
@@ -870,25 +913,25 @@ fn run(cli: Cli) -> Result<()> {
                     pages::insert_blank_pages(&mut pdf, after, count, size)?;
                 }
             }
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Duplicate { input, pages, output } => {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             pages::duplicate_pages(&mut pdf, &chosen)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Crop { input, pages, left, right, top, bottom, output } => {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             pages::crop_pages(&mut pdf, &chosen, Margins { left, bottom, right, top })?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Resize { input, size, landscape, pages, output } => {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             pages::resize_pages(&mut pdf, &chosen, paper(&size, landscape)?)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Nup { input, columns, rows, sheet, landscape, frames, output } => {
             let pdf = open(&input)?;
@@ -905,7 +948,7 @@ fn run(cli: Cli) -> Result<()> {
             let mut pdf = open(&input)?;
             let removed = pages::remove_blank_pages(&mut pdf)?;
             println!("blank pages: {removed:?}");
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Bookmarks { input, set, clear, output } => {
             let mut pdf = open(&input)?;
@@ -915,7 +958,7 @@ fn run(cli: Cli) -> Result<()> {
                     None => Vec::new(),
                 };
                 set_bookmarks(&mut pdf, &entries)?;
-                save(&mut pdf, &input.input, &output)?;
+                save(&mut pdf, &input, &output)?;
             } else {
                 for (depth, entry) in flatten_bookmarks(&read_bookmarks(&pdf)?) {
                     println!("{}{}  (page {})", "  ".repeat(depth), entry.title, entry.page);
@@ -926,10 +969,10 @@ fn run(cli: Cli) -> Result<()> {
             let mut pdf = open(&input)?;
             if strip {
                 metadata::strip_metadata(&mut pdf)?;
-                save(&mut pdf, &input.input, &output)?;
+                save_removing(&mut pdf, &input, &output)?;
             } else if title.is_some() || author.is_some() || subject.is_some() || keywords.is_some() || creator.is_some() {
                 metadata::write_info(&mut pdf, &DocumentInfo { title, author, subject, keywords, creator, ..Default::default() })?;
-                save(&mut pdf, &input.input, &output)?;
+                save(&mut pdf, &input, &output)?;
             } else {
                 println!("{}", serde_json::to_string_pretty(&metadata::read_info(&pdf))?);
             }
@@ -949,7 +992,7 @@ fn run(cli: Cli) -> Result<()> {
                 })
                 .collect::<Result<Vec<_>>>()?;
             metadata::write_page_labels(&mut pdf, &parsed)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Protect { input, user_password, owner_password, aes128, no_print, no_copy, no_edit, no_comments, no_forms, output } => {
             let mut pdf = open(&input)?;
@@ -974,21 +1017,21 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Unprotect { input, output } => {
             let mut pdf = open(&input)?;
-            save(&mut pdf, &input.input, &output)?;
+            save_edit(&mut pdf, &input, &output, Edit::Unprotects)?;
         }
         Command::Watermark { input, text, pages, size, font: font_name, color, opacity, rotation, position, behind, outline, output } => {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             let stamp_settings = TextStamp { text: text.replace("\\n", "\n"), font: font(&font_name)?, size, color: hex_color(&color)?, opacity, rotation, anchor: anchor(&position)?, margin: 36.0, behind_content: behind, outline_only: outline };
             stamp::stamp_text(&mut pdf, &chosen, &stamp_settings, &file_name(&input.input))?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::HeaderFooter { input, header_left, header_center, header_right, footer_left, footer_center, footer_right, size, margin, pages, output } => {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             let settings = HeaderFooter { header_left, header_center, header_right, footer_left, footer_center, footer_right, size, margin, ..Default::default() };
             stamp::add_header_footer(&mut pdf, &chosen, &settings, &file_name(&input.input))?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Bates { inputs, prefix, suffix, start, digits, position, output_folder } => {
             let mut next = start;
@@ -1022,13 +1065,13 @@ fn run(cli: Cli) -> Result<()> {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             stamp::stamp_image(&mut pdf, &chosen, &image, &ImageStamp { width, anchor: anchor(&position)?, margin: 36.0, opacity, behind_content: false })?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Background { input, color, pages, output } => {
             let mut pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             stamp::set_background_color(&mut pdf, &chosen, hex_color(&color)?)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         Command::Create { source } => create(source)?,
         Command::Comments { input, summary, remove, json, output } => {
@@ -1037,7 +1080,7 @@ fn run(cli: Cli) -> Result<()> {
                 let kinds: Vec<&str> = if remove.iter().any(|r| r.eq_ignore_ascii_case("all")) { Vec::new() } else { remove.iter().map(String::as_str).collect() };
                 let count = remove_annotations(&mut pdf, &kinds)?;
                 println!("removed {count} annotations");
-                save(&mut pdf, &input.input, &output)?;
+                save_removing(&mut pdf, &input, &output)?;
             } else if summary {
                 println!("{}", comments_summary(&pdf));
             } else if json {
@@ -1085,10 +1128,14 @@ fn run(cli: Cli) -> Result<()> {
             };
             let report = redact::apply_redactions(&mut pdf, &areas, &RedactionSettings { overlay_text: label.clone(), remove_metadata: strip_metadata, ..Default::default() })?;
             println!("{}", serde_json::to_string_pretty(&report)?);
-            save(&mut pdf, &input.input, &output)?;
+            save_removing(&mut pdf, &input, &output)?;
             let saved = std::fs::read(output.output.as_ref().unwrap_or(&input.input))?;
             let check = vellum_core::redaction_check::check_redaction(&saved, input.password.as_deref(), &areas, &texts, &label)?;
             print_redaction_check(&check, report_path.as_deref())?;
+            // Text that should be gone is still in the file: fail, so scripts notice.
+            if check.verdict() == vellum_core::redaction_check::Verdict::Found {
+                std::process::exit(2);
+            }
         }
         Command::CheckRedaction { input, text, report } => {
             let bytes = std::fs::read(&input.input)?;
@@ -1305,7 +1352,7 @@ fn form(action: FormAction) -> Result<()> {
             if flatten {
                 forms::flatten(&mut pdf, true)?;
             }
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         FormAction::Export { input, format, output } => {
             let pdf = open(&input)?;
@@ -1386,19 +1433,19 @@ fn form(action: FormAction) -> Result<()> {
                 for proposal in &proposals {
                     forms::add_field(&mut pdf, proposal)?;
                 }
-                save(&mut pdf, &input.input, &output)?;
+                save(&mut pdf, &input, &output)?;
             }
         }
         FormAction::Reset { input, output } => {
             let mut pdf = open(&input)?;
             forms::reset_form(&mut pdf)?;
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         FormAction::Flatten { input, all, output } => {
             let mut pdf = open(&input)?;
             let count = forms::flatten(&mut pdf, !all)?;
             println!("flattened {count} items");
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
     }
     Ok(())

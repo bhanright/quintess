@@ -178,8 +178,13 @@ pub fn inspect_security(bytes: &[u8]) -> SecurityReport {
     let Ok(doc) = lopdf::Document::load_mem_with_options(bytes, lopdf::LoadOptions::default()).or_else(|_| lopdf::Document::load_mem(bytes)) else {
         return SecurityReport { encrypted: true, needs_password_to_open: true, cipher: "unknown".into(), allowed: None };
     };
-    let Ok(encrypt) = doc.get_encrypted() else {
-        return SecurityReport { encrypted: false, needs_password_to_open: false, cipher: "none".into(), allowed: None };
+    // A file that only restricts permissions opens with an empty password,
+    // and the loader then decrypts it straight away; its settings are kept.
+    let decrypted_on_load = doc.encryption_state.as_ref().and_then(|state| state.encode().ok());
+    let encrypt = match (doc.get_encrypted(), decrypted_on_load.as_ref()) {
+        (Ok(encrypt), _) => encrypt,
+        (Err(_), Some(settings)) => settings,
+        (Err(_), None) => return SecurityReport { encrypted: false, needs_password_to_open: false, cipher: "none".into(), allowed: None },
     };
     let version = encrypt.get(b"V").and_then(|v| v.as_i64()).unwrap_or(0);
     let length = encrypt.get(b"Length").and_then(|v| v.as_i64()).unwrap_or(40);
@@ -189,6 +194,6 @@ pub fn inspect_security(bytes: &[u8]) -> SecurityReport {
         _ => format!("RC4-{length}"),
     };
     let bits = encrypt.get(b"P").and_then(|v| v.as_i64()).unwrap_or(-1) as u32;
-    let needs_password = doc.authenticate_user_password("").is_err();
+    let needs_password = decrypted_on_load.is_none() && doc.authenticate_user_password("").is_err();
     SecurityReport { encrypted: true, needs_password_to_open: needs_password, cipher, allowed: Some(AllowedActions::from_bits(bits)) }
 }

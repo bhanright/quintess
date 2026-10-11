@@ -8,7 +8,7 @@ use clap::Subcommand;
 use vellum_core::settings::Settings;
 use vellum_core::{Pdf, SaveSettings, accessibility, attachments, batch, compare, convert, engine, ocr, optimize, preflight, signatures};
 
-use crate::{Input, Output, pages_of, save, write_or_print};
+use crate::{Input, Output, pages_of, save, save_edited_bytes, save_removing, write_or_print};
 
 #[derive(Subcommand)]
 pub enum MoreCommand {
@@ -246,7 +246,11 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 bytes = std::fs::read(&input.input)?;
             }
             let target = output.unwrap_or_else(|| input.input.with_file_name(format!("{}-optimized.pdf", input.input.file_stem().unwrap_or_default().to_string_lossy())));
-            std::fs::write(&target, &bytes)?;
+            // A protected input stays protected.
+            if let Some(encryption) = pdf.original_encryption() {
+                bytes = vellum_core::document::encrypt_as_before(&bytes, &encryption)?;
+            }
+            vellum_core::document::write_file_safely(&target, &bytes)?;
             println!("wrote {} ({:.0} KB → {:.0} KB, {:.0}% smaller)", target.display(), original_size / 1024.0, bytes.len() as f64 / 1024.0, (1.0 - bytes.len() as f64 / original_size.max(1.0)) * 100.0);
             println!("{} images resampled, {} recompressed, {} duplicate streams merged", report.images_resampled, report.images_recompressed, report.duplicate_streams_merged);
         }
@@ -297,7 +301,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
                         eprintln!("no attachment named {name}");
                     }
                 }
-                save(&mut pdf, &input.input, &output)?;
+                save_removing(&mut pdf, &input, &output)?;
             }
             for attachment in attachments::list(&pdf) {
                 let place = attachment.page.map(|p| format!("comment on page {p}")).unwrap_or_else(|| "document".into());
@@ -342,7 +346,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 std::fs::write(&path, &report.text)?;
                 println!("wrote {}", path.display());
             }
-            save(&mut pdf, &input.input, &output)?;
+            save(&mut pdf, &input, &output)?;
         }
         MoreCommand::Identity { name, email, organization, output } => {
             signatures::SigningIdentity::self_signed(&name, &email, &organization)?.save(&output)?;
@@ -365,7 +369,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             };
             let signed = signatures::sign(&std::fs::read(&input.input)?, &identity, &options)?;
             let target = output.unwrap_or_else(|| input.input.with_file_name(format!("{}-signed.pdf", input.input.file_stem().unwrap_or_default().to_string_lossy())));
-            std::fs::write(&target, signed)?;
+            vellum_core::document::write_file_safely(&target, &signed)?;
             println!("wrote {} (signed by {})", target.display(), identity.signer_name());
         }
         MoreCommand::Verify { input } => {
@@ -388,7 +392,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 for done in accessibility::fix(&mut pdf, &title, &language.unwrap_or_else(|| Settings::load().language))? {
                     println!("fixed: {done}");
                 }
-                save(&mut pdf, &input.input, &output)?;
+                save(&mut pdf, &input, &output)?;
             }
             let bytes = pdf.to_bytes(&SaveSettings::default())?;
             let document = engine::open_document(bytes, None)?;
@@ -400,7 +404,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;
             let issues = if convert {
                 let remaining = preflight::convert_to_pdfa(&mut pdf)?;
-                save(&mut pdf, &input.input, &output)?;
+                save(&mut pdf, &input, &output)?;
                 remaining
             } else {
                 preflight::check_pdfa(&pdf)
@@ -484,9 +488,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     if report.moved_below > 0 { format!("; moved {} items below down {:.1} pt", report.moved_below, report.moved_by) } else { String::new() },
                     if report.would_leave_page { format!("; the text below had no room to move, so the paragraph was set at {:.0}% size{}", report.scale * 100.0, if report.overlaps { " and still overlaps what follows" } else { "" }) } else if report.overlaps { "; overlaps what follows".to_string() } else { String::new() }
                 );
-                let target_path = output.output.clone().unwrap_or_else(|| input.input.clone());
-                std::fs::write(&target_path, edited)?;
-                println!("wrote {}", target_path.display());
+                save_edited_bytes(&edited, &input, &output)?;
                 return Ok(());
             }
             if paragraphs {
@@ -505,9 +507,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     let (edited, count) = vellum_core::edit_text::find_and_replace(&bytes, input.password.as_deref(), &pattern, &replacement)?;
                     println!("{count} replacements");
                     if count > 0 {
-                        let target = output.output.clone().unwrap_or_else(|| input.input.clone());
-                        std::fs::write(&target, edited)?;
-                        println!("wrote {}", target.display());
+                        save_edited_bytes(&edited, &input, &output)?;
                     }
                 }
                 None => {

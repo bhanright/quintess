@@ -438,11 +438,20 @@ impl VellumApp {
         self.try_edit(label, change);
     }
 
+    /// An edit that removes content for good (see `DocumentTab::apply_removing`).
+    fn edit_removing(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) -> bool {
+        self.make_edit(label, change, true)
+    }
+
     /// Like `edit`, and returns whether the edit was made.
     fn try_edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) -> bool {
+        self.make_edit(label, change, false)
+    }
+
+    fn make_edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>, removes_content: bool) -> bool {
         let Some(tab) = self.tabs.get_mut(self.active) else { return false };
         let was_signed = tab.signed;
-        let result = tab.apply(label, change);
+        let result = if removes_content { tab.apply_removing(label, change) } else { tab.apply(label, change) };
         let kept = tab.last_edit_kept_signatures;
         if self.report(result).is_none() {
             return false;
@@ -552,7 +561,7 @@ impl VellumApp {
         if !typing {
             if shortcut(Modifiers::NONE, Key::Delete) {
                 if let Some(id) = self.tab().and_then(|t| t.selected_annotation) {
-                    self.edit("Delete comment", |pdf| delete_annotation(pdf, id));
+                    self.edit_removing("Delete comment", |pdf| delete_annotation(pdf, id));
                 }
             }
             let jump = |app: &mut Self, delta: i64| {
@@ -638,7 +647,7 @@ impl VellumApp {
             if report.pages_recognized.is_empty() {
                 return Ok(JobOutcome::Message("Every page already has text; nothing to recognize.".into()));
             }
-            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words)", report.words), bytes: pdf.to_bytes(&SaveSettings::default())? })
+            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words)", report.words), bytes: pdf.to_bytes(&SaveSettings::default())?, removes_content: false })
         });
     }
 
@@ -650,7 +659,7 @@ impl VellumApp {
             if optimized.len() >= bytes.len() {
                 return Ok(JobOutcome::Message("The file is already as small as these settings can make it.".into()));
             }
-            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Reduce file size ({:.0} KB → {:.0} KB, {} images resampled)", bytes.len() as f64 / 1024.0, optimized.len() as f64 / 1024.0, report.images_resampled), bytes: optimized })
+            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Reduce file size ({:.0} KB → {:.0} KB, {} images resampled)", bytes.len() as f64 / 1024.0, optimized.len() as f64 / 1024.0, report.images_resampled), bytes: optimized, removes_content: true })
         });
     }
 
@@ -712,7 +721,7 @@ impl VellumApp {
     fn report_edit(&mut self, label: &str, was_signed: bool, kept_signatures: bool) {
         match (was_signed, kept_signatures) {
             (true, true) => self.info(format!("{label} done, saved as an update after the signatures, which stay valid. Ctrl+Z undoes it.")),
-            (true, false) => self.error(format!("{label} done, but it invalidated the document's digital signatures. Ctrl+Z undoes it.")),
+            (true, false) => self.error(format!("{label} done. The file was rewritten so nothing removed stays in it, which invalidates its digital signatures. Ctrl+Z undoes it.")),
             _ => self.info(format!("{label} done. Ctrl+Z undoes it.")),
         }
     }
@@ -743,9 +752,9 @@ impl VellumApp {
 
     fn apply_job_outcome(&mut self, outcome: JobOutcome) {
         match outcome {
-            JobOutcome::ReplaceBytes { tab_id, label, bytes } => {
+            JobOutcome::ReplaceBytes { tab_id, label, bytes, removes_content } => {
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
-                    let result = tab.replace_bytes(&label, bytes);
+                    let result = tab.replace_bytes_as(&label, bytes, removes_content);
                     if self.report(result).is_some() {
                         self.info(format!("{label}. Ctrl+Z undoes it."));
                     }
@@ -1296,7 +1305,7 @@ impl VellumApp {
         match request {
             OrganizerRequest::Rotate(degrees) => self.edit("Rotate pages", |pdf| pages::rotate_pages(pdf, &selected, degrees)),
             OrganizerRequest::Delete => {
-                self.edit("Delete pages", |pdf| pages::delete_pages(pdf, &selected));
+                self.edit_removing("Delete pages", |pdf| pages::delete_pages(pdf, &selected));
                 if let Some(tab) = self.tab() {
                     tab.organizer_selection.clear();
                 }
@@ -1441,7 +1450,9 @@ impl VellumApp {
     fn apply_sidebar_actions(&mut self, actions: Vec<SidebarAction>) {
         for action in actions {
             match action {
-                SidebarAction::DeleteAnnotation(id) => self.edit("Delete comment", |pdf| delete_annotation(pdf, id)),
+                SidebarAction::DeleteAnnotation(id) => {
+                    self.edit_removing("Delete comment", |pdf| delete_annotation(pdf, id));
+                }
                 SidebarAction::EditAnnotation(id, text) => self.edit("Edit comment", |pdf| set_annotation_contents(pdf, id, &text)),
                 SidebarAction::ReplyToAnnotation(id, text) => {
                     let author = self.tool_settings.author.clone();
@@ -1474,7 +1485,9 @@ impl VellumApp {
                         }
                     }
                 }
-                SidebarAction::RemoveAttachment(name) => self.edit("Remove attachment", |pdf| vellum_core::attachments::remove(pdf, &name).map(|_| ())),
+                SidebarAction::RemoveAttachment(name) => {
+                    self.edit_removing("Remove attachment", |pdf| vellum_core::attachments::remove(pdf, &name).map(|_| ()));
+                }
             }
         }
     }
@@ -1610,7 +1623,7 @@ impl VellumApp {
                         if count == 0 {
                             return Ok(JobOutcome::Message("No matches found.".into()));
                         }
-                        Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Replace text ({count} replacements)"), bytes: new_bytes })
+                        Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Replace text ({count} replacements)"), bytes: new_bytes, removes_content: false })
                     });
                 }
                 AppRequest::ApplyAccessibilityFixes => {

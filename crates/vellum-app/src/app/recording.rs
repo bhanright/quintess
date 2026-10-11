@@ -15,6 +15,13 @@ impl VellumApp {
         }
     }
 
+    /// Makes an edit that removes content and records the step it stands for.
+    pub(super) fn edit_removing_recording(&mut self, label: &str, step: Step, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) {
+        if self.edit_removing(label, change) {
+            self.record(step);
+        }
+    }
+
     /// Makes an edit and, when it succeeds, records the step it stands for.
     pub(super) fn edit_recording(&mut self, label: &str, step: Step, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) {
         if self.try_edit(label, change) {

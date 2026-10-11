@@ -77,9 +77,11 @@ pub fn insert_blank_pages(pdf: &mut Pdf, after_page: u32, count: u32, size: Opti
     if after_page as usize > order.len() {
         bail!("cannot insert after page {after_page}; the document has {} pages", order.len());
     }
-    let (width, height) = match size {
-        Some(size) => size,
-        None => {
+    let (width, height) = match (size, order.is_empty()) {
+        (Some(size), _) => size,
+        // A document with no pages yet gets US Letter pages.
+        (None, true) => (612.0, 792.0),
+        (None, false) => {
             let neighbor = order[(after_page.max(1) - 1) as usize];
             let [left, bottom, right, top] = pdf.media_box(neighbor)?;
             (right - left, top - bottom)
@@ -266,6 +268,9 @@ pub struct NUpLayout {
 /// Builds a new document with `columns × rows` source pages on each sheet,
 /// filled left to right, top to bottom.
 pub fn n_up(source: &Pdf, layout: &NUpLayout) -> Result<Pdf> {
+    if layout.columns == 0 || layout.rows == 0 {
+        bail!("pages per sheet needs at least one column and one row");
+    }
     let mut output = Pdf::new_empty();
     let all_pages: Vec<u32> = (1..=source.page_count()).collect();
     let imported = output.import_pages(source, &all_pages)?;

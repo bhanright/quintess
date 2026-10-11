@@ -53,3 +53,21 @@ pub fn update_from_bytes(original: &[u8], edited_bytes: &[u8], password: Option<
     let edited = crate::Pdf::from_bytes(edited_bytes, password)?;
     save_as_update(original, &edited.doc)
 }
+
+/// Where each version of the file ends: incremental saves append versions,
+/// each ending at its own "%%EOF". A linearized ("fast web view") file has
+/// an extra marker for its first page, which is not a version.
+pub fn version_ends(bytes: &[u8]) -> Vec<usize> {
+    let marker = b"%%EOF";
+    let mut ends: Vec<usize> = bytes.windows(marker.len()).enumerate().filter(|(_, w)| *w == marker).map(|(i, _)| i + marker.len()).collect();
+    let head = &bytes[..bytes.len().min(1024)];
+    if head.windows(11).any(|w| w == b"/Linearized") && ends.len() > 1 {
+        ends.remove(0);
+    }
+    ends
+}
+
+/// How many versions the file holds (1 for a file saved in one go).
+pub fn revision_count(bytes: &[u8]) -> usize {
+    version_ends(bytes).len().max(1)
+}

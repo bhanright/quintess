@@ -187,7 +187,7 @@ pub fn remove_text_and_rules(pdf: &mut Pdf, page_number: u32, areas: &[[f32; 4]]
     let content = pdf.doc.get_page_content(page_id);
     let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
     let mut report = RedactionReport::default();
-    let mut remover = Redactor { pdf, areas: areas.to_vec(), rule_areas: rule_areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
+    let mut remover = Redactor { pdf, areas: areas.to_vec(), rule_areas: rule_areas.to_vec(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: true, shift: None, shifted_items: 0, lowest_shifted: f32::MAX, needs_flattening: false };
     let resources = remover.page_resources();
     let (new_operations, changed) = remover.process(operations, &resources, IDENTITY)?;
     let added = std::mem::take(&mut remover.pending_resources);
@@ -232,6 +232,7 @@ pub fn shift_content(pdf: &mut Pdf, page_number: u32, region: [f32; 4], offset: 
         shift: Some(ShiftRegion { region, offset }),
         shifted_items: 0,
         lowest_shifted: f32::MAX,
+        needs_flattening: false,
     };
     let resources = mover.page_resources();
     let (new_operations, changed) = mover.process(operations, &resources, IDENTITY)?;
@@ -409,6 +410,11 @@ struct Redactor<'a> {
     /// Items moved by a shift, and the lowest point among them.
     shifted_items: usize,
     lowest_shifted: f32,
+    /// Something under a box can't be cut out precisely (a picture in a
+    /// format this can't repaint, or a detailed shape crossing the box's
+    /// edge), so the page must be flattened into a picture with the boxes
+    /// painted in.
+    needs_flattening: bool,
 }
 
 /// Content wholly inside `region` (page space) moves by `offset`.
@@ -420,6 +426,27 @@ struct ShiftRegion {
 
 fn inside(rect: [f32; 4], region: [f32; 4]) -> bool {
     rect[0] >= region[0] && rect[1] >= region[1] && rect[2] <= region[2] && rect[3] <= region[3]
+}
+
+/// A clipping path covering everything except the areas (page space),
+/// written in the user space of `ctm`, for drawing a shape around them.
+fn outside_areas_clip(areas: &[[f32; 4]], ctm: Matrix) -> Vec<Operation> {
+    let to_user = invert(ctm);
+    let polygon = |rect: [f32; 4]| -> Vec<Operation> {
+        let corners = [(rect[0], rect[1]), (rect[2], rect[1]), (rect[2], rect[3]), (rect[0], rect[3])].map(|(x, y)| transform(to_user, x, y));
+        let mut operations = vec![Operation::new("m", vec![corners[0].0.into(), corners[0].1.into()])];
+        operations.extend(corners[1..].iter().map(|(x, y)| Operation::new("l", vec![(*x).into(), (*y).into()])));
+        operations.push(Operation::new("h", vec![]));
+        operations
+    };
+    // A huge outer rectangle with each area cut out of it by the even-odd rule.
+    let mut operations = polygon([-100_000.0, -100_000.0, 100_000.0, 100_000.0]);
+    for area in areas {
+        operations.extend(polygon(*area));
+    }
+    operations.push(Operation::new("W*", vec![]));
+    operations.push(Operation::new("n", vec![]));
+    operations
 }
 
 fn invert(m: Matrix) -> Matrix {
@@ -624,12 +651,32 @@ impl Redactor<'_> {
                     let within = |b: [f32; 4], areas: &[[f32; 4]]| areas.iter().any(|a| b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]);
                     let is_rule = |b: [f32; 4]| b[3] - b[1] <= 3.0 && b[2] - b[0] >= (b[3] - b[1]) * 3.0;
                     let fully_inside = self.shift.is_none() && path_box.is_some_and(|b| (!self.text_only && within(b, &self.areas)) || (is_rule(b) && within(b, &self.rule_areas)));
+                    let crossing = self.shift.is_none() && !self.text_only && !fully_inside && path_box.is_some_and(|b| self.areas.iter().any(|a| intersects(b, *a)));
                     if fully_inside && operation.operator != "n" {
                         // Keep the path (it may be a clip) but paint nothing.
                         output.append(&mut path_operations);
                         output.push(Operation::new("n", vec![]));
                         self.report.shapes_removed += 1;
                         changed = true;
+                    } else if crossing && operation.operator != "n" {
+                        // A shape reaching into a box. A simple one (a line, a rule, a
+                        // rectangle) is drawn clipped to outside the boxes; a detailed
+                        // one (outlined lettering, a drawn signature) could show what
+                        // was redacted in its outline, so the page is flattened.
+                        let segments = path_operations.iter().filter(|o| matches!(o.operator.as_str(), "m" | "l" | "c" | "v" | "y" | "re")).count();
+                        let clips = path_operations.iter().any(|o| o.operator == "W" || o.operator == "W*");
+                        if segments <= 6 && !clips {
+                            output.push(Operation::new("q", vec![]));
+                            output.extend(outside_areas_clip(&self.areas, state.ctm));
+                            output.append(&mut path_operations);
+                            output.push(operation);
+                            output.push(Operation::new("Q", vec![]));
+                            changed = true;
+                        } else {
+                            self.needs_flattening = true;
+                            output.append(&mut path_operations);
+                            output.push(operation);
+                        }
                     } else {
                         output.append(&mut path_operations);
                         output.push(operation);
@@ -658,9 +705,8 @@ impl Redactor<'_> {
                         continue;
                     }
                     if !self.text_only && self.areas.iter().any(|a| intersects(image_box, *a)) {
-                        self.report.images_removed += 1;
-                        changed = true;
-                        continue;
+                        // An inline image isn't repainted here; the page is flattened instead.
+                        self.needs_flattening = true;
                     }
                 }
                 "Do" => {
@@ -701,7 +747,6 @@ impl Redactor<'_> {
                         if let Some(replacement) = self.redact_xobject(xobject_id, state.ctm)? {
                             changed = true;
                             match replacement {
-                                XObjectChange::Removed => continue,
                                 XObjectChange::Replaced(new_id) => {
                                     let new_name = format!("VlR{}", new_xobjects.len() + 1);
                                     new_xobjects.push((new_name.clone(), new_id));
@@ -808,8 +853,10 @@ impl Redactor<'_> {
                     XObjectChange::Replaced(new_id)
                 }
                 None => {
-                    self.report.images_removed += 1;
-                    XObjectChange::Removed
+                    // A format this can't repaint (such as a 1-bit scan): the image
+                    // stays, and the page is flattened with the boxes painted in.
+                    self.needs_flattening = true;
+                    return Ok(None);
                 }
             }));
         }
@@ -892,7 +939,6 @@ fn is_space_only(chunk: &[u8]) -> bool {
 }
 
 enum XObjectChange {
-    Removed,
     Replaced(ObjectId),
 }
 
@@ -974,15 +1020,19 @@ pub fn apply_redactions(pdf: &mut Pdf, areas: &[RedactionArea], settings: &Redac
     let mut pages: Vec<u32> = areas.iter().map(|a| a.page).collect();
     pages.sort_unstable();
     pages.dedup();
+    let mut pages_to_flatten: Vec<u32> = Vec::new();
     for &page_number in &pages {
         let page_id = pdf.page_id(page_number)?;
         let page_areas: Vec<[f32; 4]> = areas.iter().filter(|a| a.page == page_number).map(|a| a.rect).collect();
         pdf.materialize_inherited_attributes(page_id)?;
         let content = pdf.doc.get_page_content(page_id);
         let operations = Content::decode(&content).map(|c| c.operations).unwrap_or_default();
-        let mut redactor = Redactor { pdf, areas: page_areas.clone(), rule_areas: Vec::new(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false, shift: None, shifted_items: 0, lowest_shifted: f32::MAX };
+        let mut redactor = Redactor { pdf, areas: page_areas.clone(), rule_areas: Vec::new(), page_id, report: &mut report, font_cache: HashMap::new(), depth: 0, pending_resources: Vec::new(), text_only: false, shift: None, shifted_items: 0, lowest_shifted: f32::MAX, needs_flattening: false };
         let resources = redactor.page_resources();
         let (new_operations, _) = redactor.process(operations, &resources, IDENTITY)?;
+        if redactor.needs_flattening {
+            pages_to_flatten.push(page_number);
+        }
         let added = std::mem::take(&mut redactor.pending_resources);
         let mut resources = resources;
         if !added.is_empty() {
@@ -1009,12 +1059,17 @@ pub fn apply_redactions(pdf: &mut Pdf, areas: &[RedactionArea], settings: &Redac
     if settings.remove_metadata {
         crate::metadata::strip_metadata(pdf)?;
     }
+    // Pages holding content that couldn't be cut out precisely are always
+    // flattened; pages where text still shows through, when allowed.
+    let mut flatten = pages_to_flatten;
     if settings.rasterize_if_needed {
-        let leaking = verify(pdf, areas)?;
-        for page_number in leaking {
-            rasterize_page(pdf, page_number, areas, settings)?;
-            report.pages_rasterized.push(page_number);
-        }
+        flatten.extend(verify(pdf, areas)?);
+    }
+    flatten.sort_unstable();
+    flatten.dedup();
+    for page_number in flatten {
+        rasterize_page(pdf, page_number, areas, settings)?;
+        report.pages_rasterized.push(page_number);
     }
     // The overlay label is real text, so it is drawn only after verification.
     for &page_number in pages.iter().filter(|page| !report.pages_rasterized.contains(page)) {
