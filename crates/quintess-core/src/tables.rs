@@ -763,6 +763,16 @@ pub(crate) fn detect_with_rules(text: &PageText, rules: &Rules) -> Vec<Table> {
     tables
 }
 
+/// Only the tables drawn as ruled grids on page `page_index` (0-based): the
+/// strongest evidence, used where a wrong guess costs more than a missed
+/// table (automatic tagging).
+pub(crate) fn detect_ruled_tables_on_page(document: &PdfDocument, page_index: usize) -> Result<Vec<Table>> {
+    let text = engine::page_text(document, page_index)?;
+    let page = document.pages().get(page_index as i32)?;
+    let chars = drawn_chars(&text);
+    Ok(grid_tables(page_index, &chars, &page_rules(&page)))
+}
+
 /// Tables on page `page_index` (0-based) of a document.
 pub fn detect_tables_on_page(document: &PdfDocument, page_index: usize) -> Result<Vec<Table>> {
     let text = engine::page_text(document, page_index)?;

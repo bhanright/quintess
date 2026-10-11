@@ -259,18 +259,18 @@ pub(crate) fn glyph_is_covered(glyph: [f32; 4], areas: &[[f32; 4]]) -> bool {
 }
 
 /// The metrics needed to place each glyph of a font.
-struct FontMetrics {
+pub(crate) struct FontMetrics {
     widths: HashMap<u32, f32>,
     default_width: f32,
-    two_byte_codes: bool,
+    pub(crate) two_byte_codes: bool,
     /// Glyph units to text-space units: 1/1000 except for Type 3 fonts.
-    units_scale: f32,
-    ascent: f32,
-    descent: f32,
+    pub(crate) units_scale: f32,
+    pub(crate) ascent: f32,
+    pub(crate) descent: f32,
 }
 
 impl FontMetrics {
-    fn load(pdf: &Pdf, font: &Dictionary) -> Self {
+    pub(crate) fn load(pdf: &Pdf, font: &Dictionary) -> Self {
         let number_of = |object: &Object| pdf.resolve(object).as_float().ok();
         let subtype = font.get(b"Subtype").ok().and_then(|s| s.as_name().ok()).unwrap_or(b"");
         let descriptor_of = |dict: &Dictionary| dict.get(b"FontDescriptor").ok().and_then(|d| pdf.resolve(d).as_dict().ok()).cloned();
@@ -353,7 +353,7 @@ impl FontMetrics {
         metrics
     }
 
-    fn width(&self, code: u32) -> f32 {
+    pub(crate) fn width(&self, code: u32) -> f32 {
         self.widths.get(&code).copied().unwrap_or(self.default_width) * self.units_scale
     }
 }
