@@ -1261,7 +1261,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 self.command_buttons(ui, "Edit");
             });
             ui.menu_button("View", |ui| {
-                self.command_buttons(ui, "View");
+                // These toggles are the checkboxes below; as commands they stay in the palette.
+                const SHOWN_AS_CHECKBOXES: [&str; 6] = ["Split view (on or off)", "Organize pages (on or off)", "Sidebar (on or off)", "Night reading (on or off)", "Dark interface (on or off)", "Studio or classic look"];
+                self.command_buttons_except(ui, "View", &SHOWN_AS_CHECKBOXES);
                 ui.menu_button("Read out loud", |ui| self.command_buttons(ui, "View ▸ Read out loud"));
                 ui.separator();
                 ui.checkbox(&mut self.organizer, "Organize pages");
@@ -1485,7 +1487,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let Some(tab) = self.tabs.get(self.active) else { return };
         let fields: Vec<String> = tab.fields.iter().filter(|f| !f.read_only && !matches!(f.field_type, forms::FieldType::PushButton | forms::FieldType::Signature)).map(|f| f.name.clone()).collect();
         if fields.is_empty() {
-            self.error("This document has no form fields to fill. Forms ▸ Detect fields automatically can add them.");
+            self.error("This document has no form fields to fill. Tools ▸ Forms ▸ Detect fields automatically can add them.");
             return;
         }
         self.dialogs.push(Dialog::FormMerge(Box::new(dialogs::FormMergeDialog::new(fields))));
@@ -2245,7 +2247,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let name = quintess_core::spelling::language_name(&tag).unwrap_or(&tag).to_string();
                     self.start_job(&ctx, &format!("Downloading the {name} dictionary"), move |_| {
                         quintess_core::spelling::download_dictionary(&tag)?;
-                        Ok(JobOutcome::Message(format!("Added the {name} dictionary. Choose it in Preferences ▸ Spelling.")))
+                        Ok(JobOutcome::Message(format!("Added the {name} dictionary. Choose it under Spelling in Edit ▸ Preferences.")))
                     });
                 }
                 AppRequest::SetMeasureScale(scale) => {
@@ -2439,7 +2441,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 AppRequest::IdentityCreated(path) => {
                     self.settings.signing_identity = Some(path.clone());
                     let _ = self.settings.save();
-                    self.info(format!("Created {}. Keep it private: it holds your signing key. Use Tools ▸ Sign ▸ Sign here.", path.display()));
+                    self.info(format!("Created {}. Keep it private: it holds your signing key. Use Tools ▸ Sign ▸ Sign here (draw a box).", path.display()));
                 }
                 AppRequest::StartPrint(settings) => {
                     let Some((_, bytes, password, title)) = self.job_input() else { continue };

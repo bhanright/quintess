@@ -390,7 +390,7 @@ fn fields(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, ac
         state.drafts_version = (tab.id, tab.version);
     }
     if tab.fields.is_empty() {
-        ui.weak("This document has no form fields. Use Tools ▸ Forms ▸ Detect fields, or the field tools in the toolbar.");
+        ui.weak("This document has no form fields. Use Tools ▸ Forms ▸ Detect fields automatically, or the field tools in the toolbar.");
         return;
     }
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {

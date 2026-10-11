@@ -876,7 +876,7 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
                                 Overflow::Overlap => "Allow overlap",
                             })
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut editing.overflow, Overflow::PushDown, "Push text below down").on_hover_text("If the paragraph grows, move what follows in its column down");
+                                ui.selectable_value(&mut editing.overflow, Overflow::PushDown, "Push text down").on_hover_text("If the paragraph grows, move what follows in its column down");
                                 ui.selectable_value(&mut editing.overflow, Overflow::ShrinkToFit, "Shrink to fit").on_hover_text("Make the text a little smaller to fit the old space");
                                 ui.selectable_value(&mut editing.overflow, Overflow::Overlap, "Allow overlap");
                             })

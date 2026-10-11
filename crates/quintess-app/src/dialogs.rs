@@ -727,7 +727,7 @@ fn redaction_check_body(ui: &mut egui::Ui, check: &quintess_core::redaction_chec
     });
     if check.verdict() == Verdict::Found {
         ui.add_space(4.0);
-        ui.label("Redact ▸ Find and redact removes text from the pages (tick \"Remove document properties and metadata too\" for the properties); the Comments, Fields, Bookmarks and Files panels remove the rest. Run the check again afterwards with Redact ▸ Check for leftover text.");
+        ui.label("Tools ▸ Redact ▸ Find and redact removes text from the pages (tick \"Remove document properties and metadata too\" for the properties); the Comments, Fields, Bookmarks and Files panels remove the rest. Run the check again afterwards with Tools ▸ Redact ▸ Check for leftover text.");
     }
     ui.separator();
     ui.horizontal(|ui| {
@@ -2558,7 +2558,7 @@ impl SignDialog {
         if self.source == SignSource::OwnIdentity {
             ui.horizontal(|ui| {
                 ui.add_space(20.0);
-                ui.label(self.identity_file.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "none yet: create one in Protect ▸ Create signing identity".into()));
+                ui.label(self.identity_file.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "none yet: create one in Tools ▸ Sign ▸ Create signing identity".into()));
                 if ui.button("Choose…").clicked() {
                     if let Some(path) = rfd::FileDialog::new().add_filter("Quintess identity", &["json"]).pick_file() {
                         self.identity_file = Some(path);
