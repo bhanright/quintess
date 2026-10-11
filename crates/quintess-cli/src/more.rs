@@ -830,7 +830,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             save(&mut pdf, &input, &output)?;
         }
         MoreCommand::Identity { name, email, organization, output } => {
-            signatures::SigningIdentity::self_signed(&name, &email, &organization)?.save(&output)?;
+            signatures::SigningIdentity::create(&name, &email, &organization)?.save(&output)?;
             println!("wrote {} — keep this file private; it contains your signing key", output.display());
         }
         MoreCommand::Sign { input, pfx, password_env, cert_store, timestamp, page, rect, field, reason, location, image, output } => {

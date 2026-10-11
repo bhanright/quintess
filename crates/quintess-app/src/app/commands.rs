@@ -180,23 +180,7 @@ pub(super) const COMMANDS: &[Command] = &[
         app.dialogs.push(Dialog::EncryptForCertificates(Box::new(crate::tool_dialogs::CertificateEncryptDialog::new(own))));
     })
     .hint("Only the people whose certificates you add can open the file; no shared password"),
-    command("Tools ▸ Protect", "Remove protection", |app, _| {
-        if app.tabs.get(app.active).is_some_and(|tab| !tab.may_change_security) {
-            app.error("The certificate you opened this file with doesn't allow changing its security.");
-            return;
-        }
-        if let Some(tab) = app.tab() {
-            tab.protection = None;
-            tab.certificate_protection = None;
-            tab.certificate_dictionary = None;
-            tab.original_encryption = None;
-            // Re-writing the bytes stores them without encryption.
-            let result = tab.apply("Remove protection", |_| Ok(()));
-            if app.report(result).is_some() {
-                app.info("Protection removed. Save to write the unprotected file.");
-            }
-        }
-    }),
+    command("Tools ▸ Protect", "Remove protection", |app, _| app.remove_protection(None)),
     command("Tools ▸ Protect", "Remove metadata", |app, _| app.edit_removing_recording("Remove metadata", Step::RemoveMetadata, quintess_core::metadata::strip_metadata)),
     command("Tools ▸ Sign", "Sign here (draw a box)", |app, _| {
         app.tool = Tool::Sign;

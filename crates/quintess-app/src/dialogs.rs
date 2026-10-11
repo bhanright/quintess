@@ -30,6 +30,8 @@ pub enum AppRequest {
     CompleteText(PendingText),
     OpenUrlConfirmed(String),
     UnlockAndOpen { path: PathBuf, bytes: Vec<u8>, password: String },
+    /// Remove the protection, with the permissions password typed for it.
+    RemoveProtection { owner_password: String },
     /// Save these documents (by tab id), then close them, or quit when
     /// `quitting`. Stops at the first one not saved.
     SaveAndClose { tab_ids: Vec<u64>, quitting: bool },
@@ -68,6 +70,8 @@ pub enum AppRequest {
     Convert(Box<ConvertDialog>),
     /// Trust a certificate (DER) from now on, then check the signatures again.
     TrustCertificate(Vec<u8>),
+    /// Stop trusting the certificate with this SHA-256 thumbprint (hex).
+    RemoveTrustedCertificate(String),
     /// Ask the certificates' issuers whether any was revoked (online).
     CheckRevocation,
     /// Store certificates and revocation answers in the document.
@@ -163,6 +167,8 @@ pub enum Dialog {
     Text(PendingText),
     ConfirmLink(String),
     Password { path: PathBuf, bytes: Vec<u8>, password: String, error: String },
+    /// Asks for the permissions (owner) password before protection comes off.
+    PermissionsPassword { password: String, error: String },
     /// Closing a document, or quitting, with changes not saved. Tabs are
     /// named by id, since closing others moves their positions.
     UnsavedChanges { tab_ids: Vec<u64>, titles: Vec<String>, quitting: bool },
@@ -203,6 +209,8 @@ pub enum Dialog {
     FolderSearch { folder: Option<PathBuf>, text: String, use_regex: bool, match_case: bool, whole_words: bool, subfolders: bool },
     FolderResults(Box<FolderResults>),
     QrCode(quintess_core::qr::FoundCode),
+    /// Asks before a certificate is trusted, naming it.
+    ConfirmTrust { certificate_der: Vec<u8>, identity: quintess_core::validation::CertificateIdentity },
     /// Asks before downloading the OCR models, when they weren't installed.
     /// Adding and removing spelling languages.
     Dictionaries { filter: String },
@@ -363,6 +371,8 @@ impl Dialog {
             },
             Dialog::ConfirmLink(_) => "Open link?",
             Dialog::Password { .. } => "Password required",
+            Dialog::ConfirmTrust { .. } => "Trust this certificate?",
+            Dialog::PermissionsPassword { .. } => "Permissions password required",
             Dialog::UnsavedChanges { .. } => "Unsaved changes",
             Dialog::About => "About Quintess",
             Dialog::Preferences(_) => "Preferences",
@@ -934,6 +944,24 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 });
                 ui.end_row();
             });
+            ui.add_space(6.0);
+            ui.label(RichText::new("Trusted certificates").strong());
+            let trusted = quintess_core::validation::list_trusted_certificates(&quintess_core::validation::trusted_certificates_folder());
+            if trusted.is_empty() {
+                ui.weak("None of your own. Signatures are checked against the system's and Mozilla's root certificates; Trust in a signature's results adds one here.");
+            }
+            egui::ScrollArea::vertical().max_height(140.0).id_salt("trusted certificates").show(ui, |ui| {
+                for certificate in &trusted {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Remove").on_hover_text("Stop trusting this certificate (takes effect at once)").clicked() {
+                            outcome.requests.push(AppRequest::RemoveTrustedCertificate(certificate.thumbprint.clone()));
+                        }
+                        ui.label(&certificate.name);
+                        let until = certificate.expires.get(..10).unwrap_or(&certificate.expires);
+                        ui.weak(format!("until {until} · SHA-256 {}…", certificate.thumbprint.get(..16).unwrap_or(&certificate.thumbprint).to_uppercase()));
+                    });
+                }
+            });
             if buttons(ui, "Save", outcome) {
                 outcome.requests.push(AppRequest::SettingsChanged(settings.clone()));
                 outcome.keep_open = false;
@@ -1036,7 +1064,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             return Ok(());
         }
         Dialog::CreateIdentity { name, email, organization } => {
-            ui.label("A self-signed identity lets you sign documents. Readers will show your signature as intact but your identity as unverified, unless they choose to trust it.");
+            ui.label("A self-signed identity lets you sign documents, and receive documents encrypted for your certificate. Readers will show your signature as intact but your identity as unverified, unless they choose to trust it.");
+            ui.colored_label(egui::Color32::from_rgb(200, 90, 30), "The identity file holds your private key, unencrypted. Keep it private: anyone with a copy can sign as you and open documents encrypted for you.");
             egui::Grid::new("identity").num_columns(2).show(ui, |ui| {
                 ui.label("Name");
                 ui.text_edit_singleline(name);
@@ -1053,7 +1082,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     anyhow::bail!("enter your name");
                 }
                 if let Some(path) = rfd::FileDialog::new().add_filter("Quintess identity", &["json"]).set_file_name(format!("{} signing identity.json", name.trim())).save_file() {
-                    quintess_core::signatures::SigningIdentity::self_signed(name.trim(), email.trim(), organization.trim())?.save(&path)?;
+                    // RSA, so the same identity signs and receives encrypted documents.
+                    quintess_core::signatures::SigningIdentity::create(name.trim(), email.trim(), organization.trim())?.save(&path)?;
                     outcome.requests.push(AppRequest::IdentityCreated(path));
                     outcome.keep_open = false;
                 }
@@ -1281,11 +1311,14 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                                 }
                             });
                         }
-                        if !check.trusted {
+                        // Trust can't mend a signature whose bytes changed, so it isn't offered there.
+                        if !check.trusted && check.verdict != SignatureVerdict::Invalid {
                             if let Some(top) = check.chain.last() {
                                 if ui.button(format!("Trust {}…", top.name)).on_hover_text("Trust this certificate from now on, for every document it signs").clicked() {
-                                    outcome.requests.push(AppRequest::TrustCertificate(top.der.clone()));
-                                    outcome.keep_open = false;
+                                    match quintess_core::validation::certificate_identity(&top.der) {
+                                        Ok(identity) => outcome.requests.push(AppRequest::OpenDialog(Box::new(Dialog::ConfirmTrust { certificate_der: top.der.clone(), identity }))),
+                                        Err(error) => outcome.error = Some(format!("{error:#}")),
+                                    }
                                 }
                             }
                         }
@@ -1423,6 +1456,42 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if buttons(ui, "Open", outcome) || pressed_enter {
                 outcome.requests.push(AppRequest::UnlockAndOpen { path: path.clone(), bytes: bytes.clone(), password: password.clone() });
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::ConfirmTrust { certificate_der, identity } => {
+            ui.set_max_width(560.0);
+            ui.label("From now on, every signature made with this certificate, or with a certificate it issued, will show as valid. Trust it only if you know it belongs to who it names, for example by comparing the fingerprint with the signer over the phone.");
+            ui.add_space(4.0);
+            egui::Grid::new("trust certificate").num_columns(2).show(ui, |ui| {
+                ui.strong("Issued to");
+                ui.label(&identity.subject);
+                ui.end_row();
+                ui.strong("Issued by");
+                ui.label(if identity.issuer == identity.subject { "itself (self-signed)".to_string() } else { identity.issuer.clone() });
+                ui.end_row();
+                ui.strong("SHA-256 fingerprint");
+                ui.monospace(&identity.fingerprint);
+                ui.end_row();
+            });
+            ui.weak("Edit ▸ Preferences lists the certificates you trust, and removes them.");
+            if buttons(ui, "Trust", outcome) {
+                outcome.requests.push(AppRequest::TrustCertificate(certificate_der.clone()));
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::PermissionsPassword { password, error } => {
+            ui.label("This file's author restricted what readers may do. Enter its permissions password to remove the protection.");
+            let response = ui.add(egui::TextEdit::singleline(password).password(true).desired_width(f32::INFINITY));
+            response.request_focus();
+            if !error.is_empty() {
+                ui.colored_label(egui::Color32::from_rgb(200, 60, 60), error.as_str());
+            }
+            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if buttons(ui, "Remove protection", outcome) || pressed_enter {
+                outcome.requests.push(AppRequest::RemoveProtection { owner_password: password.clone() });
                 outcome.keep_open = false;
             }
             return Ok(());
@@ -1740,9 +1809,16 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.checkbox(&mut allowed.assemble_pages, "Insert, rotate and delete pages");
             allowed.print_high_quality = allowed.print;
             ui.checkbox(aes128, "Use AES-128 for readers older than Acrobat 9");
+            if tab.certificate_protection.is_some() {
+                ui.colored_label(egui::Color32::from_rgb(200, 90, 30), "This replaces the certificate encryption chosen earlier: a file has one kind of protection, and the last one chosen is used.");
+            } else {
+                ui.weak("A file has one kind of protection: this replaces any certificate encryption.");
+            }
             if buttons(ui, "Protect", outcome) {
                 let owner = if owner_password.is_empty() { security::random_password() } else { owner_password.clone() };
                 tab.protection = Some(ProtectionSettings { user_password: user_password.clone(), owner_password: owner.clone(), cipher: if *aes128 { Cipher::Aes128 } else { Cipher::Aes256 }, allowed: allowed.clone(), leave_metadata_unencrypted: false });
+                // Whichever protection was chosen last wins.
+                tab.certificate_protection = None;
                 tab.dirty = true;
                 outcome.requests.push(AppRequest::Status("Protection will be applied when you save.".into()));
                 if owner_password.is_empty() {

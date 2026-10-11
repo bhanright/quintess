@@ -84,7 +84,8 @@ impl Recipient {
         Self { certificate_der, allowed: AllowedActions::default(), may_change_security: false }
     }
 
-    /// Reads a certificate file, PEM (the first certificate in it) or DER.
+    /// Reads a certificate file, PEM (the first certificate in it) or DER,
+    /// refusing one that can't receive an encrypted document.
     pub fn from_certificate_file(path: &Path) -> Result<Self> {
         let bytes = std::fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
         let certificate_der = match std::str::from_utf8(&bytes).ok().and_then(|text| pem_blocks(text, "CERTIFICATE").into_iter().next()) {
@@ -92,6 +93,14 @@ impl Recipient {
             None => bytes,
         };
         x509_parser::parse_x509_certificate(&certificate_der).map_err(|error| anyhow!("{} is not a certificate (PEM or DER): {error}", path.display()))?;
+        Self::checked(certificate_der)
+    }
+
+    /// A recipient whose certificate is checked now, when it is added, so a
+    /// certificate without an RSA key meant for encryption is refused with
+    /// a clear reason instead of failing when the document is saved.
+    pub fn checked(certificate_der: Vec<u8>) -> Result<Self> {
+        rsa_public_key(&certificate_der)?;
         Ok(Self::new(certificate_der))
     }
 
@@ -569,7 +578,7 @@ pub fn generate_rsa_identity(name: &str, email: &str, organization: &str, key_bi
     if !email.is_empty() {
         params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.try_into().map_err(|_| anyhow!("\"{email}\" is not an email address"))?));
     }
-    params.key_usages = vec![KeyUsagePurpose::DigitalSignature, KeyUsagePurpose::KeyEncipherment, KeyUsagePurpose::DataEncipherment];
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature, KeyUsagePurpose::ContentCommitment, KeyUsagePurpose::KeyEncipherment, KeyUsagePurpose::DataEncipherment];
     let now = chrono::Utc::now();
     let year: i32 = now.format("%Y").to_string().parse()?;
     params.not_before = rcgen::date_time_ymd(year, now.format("%m").to_string().parse()?, now.format("%d").to_string().parse()?);

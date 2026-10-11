@@ -146,6 +146,31 @@ pub fn protect(pdf: &mut Pdf, settings: &ProtectionSettings) -> Result<String> {
     Ok(owner_password)
 }
 
+/// Whether `password` is the owner (permissions) password of the password
+/// protection `encryption` describes. `pdf` is the document as opened (or
+/// edited since): its trailer keeps the file identifier older ciphers mix
+/// into their keys.
+pub fn is_owner_password(pdf: &Pdf, encryption: &EncryptionState, password: &str) -> bool {
+    let Ok(dictionary) = encryption.encode() else { return false };
+    // A stand-in document holding only the protection settings, which is
+    // all the owner password check reads.
+    let mut probe = lopdf::Document::with_version("1.7");
+    let encrypt_id = probe.add_object(dictionary);
+    probe.trailer.set("Encrypt", encrypt_id);
+    if let Ok(file_id) = pdf.doc.trailer.get(b"ID") {
+        probe.trailer.set("ID", file_id.clone());
+    }
+    probe.authenticate_owner_password(password).is_ok()
+}
+
+/// Whether the protection restricts anything an owner password would allow.
+pub fn restricts_permissions(encryption: &EncryptionState) -> bool {
+    let Ok(dictionary) = encryption.encode() else { return true };
+    let bits = dictionary.get(b"P").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
+    let allowed = AllowedActions::from_bits(bits);
+    !(allowed.print && allowed.copy_text_and_images && allowed.edit_content && allowed.add_comments && allowed.fill_forms && allowed.assemble_pages)
+}
+
 /// Older ciphers derive keys from the file identifier, so every encrypted
 /// file needs one.
 fn ensure_document_id(pdf: &mut Pdf) {

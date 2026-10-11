@@ -190,6 +190,26 @@ fn certificates_without_an_rsa_key_or_encryption_use_are_refused() {
 }
 
 #[test]
+fn a_created_identity_signs_and_receives_and_ecdsa_is_refused_when_added() {
+    // What Create signing identity makes: RSA, good for both jobs.
+    let own = SigningIdentity::create("Olive Owner", "", "").unwrap();
+    let recipient = Recipient::checked(certificate_der(&own)).expect("an RSA identity can receive");
+    let bytes = encrypted_for(vec![recipient]);
+    let mut opened = public_key::open_with_identity(&bytes, &own).unwrap();
+    assert!(text_of(&mut opened.pdf).contains("Agreement"), "opens with its own key");
+    let signed = quintess_core::signatures::sign(&sample_document(), &own, &Default::default()).unwrap();
+    assert!(quintess_core::signatures::verify(&signed).unwrap()[0].intact);
+
+    // Identities from before 0.2.0 (ECDSA) still sign, but are refused as
+    // recipients as soon as they are added, not when the file is saved.
+    let old = SigningIdentity::self_signed("Eve Elliptic", "", "").unwrap();
+    let error = Recipient::checked(certificate_der(&old)).err().expect("ECDSA cannot receive");
+    assert!(format!("{error:#}").contains("RSA"), "{error:#}");
+    let signed = quintess_core::signatures::sign(&sample_document(), &old, &Default::default()).unwrap();
+    assert!(quintess_core::signatures::verify(&signed).unwrap()[0].intact);
+}
+
+#[test]
 fn decrypted_bytes_edited_and_saved_stay_encrypted_for_the_same_people() {
     // The app keeps a certificate file's decrypted bytes while it is open,
     // then protects them again on save with the remembered dictionary.

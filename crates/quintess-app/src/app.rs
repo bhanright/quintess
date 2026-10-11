@@ -1504,9 +1504,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let dictionary = opened.pdf.certificate_encryption_dictionary();
         opened.pdf.forget_encryption();
         let Some(plain) = self.report(opened.pdf.to_bytes(&quintess_core::SaveSettings::default())) else { return };
-        if self.settings.signing_certificate_file.is_none() {
-            self.settings.signing_certificate_file = Some(identity_path);
-        }
+        // The key file is not made the signing default: it may be a kind
+        // signing can't read, and opening a file is no choice to sign with it.
         self.settings.remember_file(choice.path.clone());
         let _ = self.settings.save();
         if self.add_tab(Some(choice.path), plain, None) {
@@ -1519,6 +1518,41 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             if !restricted.is_empty() {
                 self.info(format!("Opened with your certificate. The author did not allow: {}.", restricted.join(", ")));
             }
+        }
+    }
+
+    /// Takes the protection off the active document (written when it is
+    /// saved). A file whose permissions are restricted needs its owner
+    /// password first, unless it was opened with that password; otherwise
+    /// anyone allowed to open it could lift its restrictions.
+    pub(super) fn remove_protection(&mut self, owner_password: Option<String>) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if !tab.may_change_security {
+            return self.error("The certificate you opened this file with doesn't allow changing its security.");
+        }
+        let restricted = tab.certificate_dictionary.is_none() && tab.original_encryption.as_ref().is_some_and(quintess_core::security::restricts_permissions);
+        if restricted {
+            let typed = owner_password.is_some();
+            let candidate = owner_password.or_else(|| tab.password.clone()).unwrap_or_default();
+            let is_owner = match (tab.load_pdf(), tab.original_encryption.as_ref()) {
+                (Ok(pdf), Some(encryption)) => quintess_core::security::is_owner_password(&pdf, encryption, &candidate),
+                _ => false,
+            };
+            if !is_owner {
+                let error = if typed { "That isn't the permissions password." } else { "" };
+                self.dialogs.push(Dialog::PermissionsPassword { password: String::new(), error: error.into() });
+                return;
+            }
+        }
+        let Some(tab) = self.tab() else { return };
+        tab.protection = None;
+        tab.certificate_protection = None;
+        tab.certificate_dictionary = None;
+        tab.original_encryption = None;
+        // Re-writing the bytes stores them without encryption.
+        let result = tab.apply("Remove protection", |_| Ok(()));
+        if self.report(result).is_some() {
+            self.info("Protection removed. Save to write the unprotected file.");
         }
     }
 
@@ -2141,6 +2175,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: "That password is not correct.".into() });
                     }
                 }
+                AppRequest::RemoveProtection { owner_password } => self.remove_protection(Some(owner_password)),
                 AppRequest::SaveAndClose { tab_ids, quitting } => self.save_and_close(tab_ids, quitting),
                 AppRequest::CloseDiscarding { tab_ids, quitting } => self.close_discarding(tab_ids, quitting),
                 AppRequest::StartOptimize { settings, step } => {
@@ -2257,13 +2292,22 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let folder = quintess_core::validation::trusted_certificates_folder();
                     let result = quintess_core::validation::add_trusted_certificates(&folder, &certificate);
                     if self.report(result).is_some() {
-                        self.info("Trusted. Signatures by this certificate, or certificates it issued, now show as valid.");
+                        self.info("Trusted. Signatures by this certificate, or certificates it issued, now show as valid. Edit ▸ Preferences can remove it.");
                         if let Some(tab) = self.tabs.get(self.active) {
                             let checks = quintess_core::signatures::verify(&tab.bytes);
                             if let Some(checks) = self.report(checks) {
+                                // The results shown before trusting give way to fresh ones.
+                                self.dialogs.retain(|dialog| !matches!(dialog, Dialog::SignatureResults(_)));
                                 self.dialogs.push(Dialog::SignatureResults(checks));
                             }
                         }
+                    }
+                }
+                AppRequest::RemoveTrustedCertificate(thumbprint) => {
+                    let folder = quintess_core::validation::trusted_certificates_folder();
+                    let result = quintess_core::validation::remove_trusted_certificate(&folder, &thumbprint);
+                    if let Some(removed) = self.report(result) {
+                        self.info(format!("No longer trusting {}.", removed.name));
                     }
                 }
                 AppRequest::CheckRevocation => {

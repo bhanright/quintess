@@ -209,15 +209,24 @@ impl CertificateEncryptDialog {
             }
             if let Some(identity) = self.own_identity.clone() {
                 if ui.button("Add my own").on_hover_text("Your Quintess signing identity, so you can open the file too").clicked() {
-                    let own = quintess_core::public_key::load_identity(&identity, None).and_then(|identity| quintess_core::public_key::identity_certificate_der(&identity));
+                    let own = quintess_core::public_key::load_identity(&identity, None).and_then(|identity| quintess_core::public_key::identity_certificate_der(&identity)).and_then(Recipient::checked);
                     match own {
-                        Ok(der) => self.add(Recipient::new(der)),
-                        Err(error) => self.error = format!("{error:#}"),
+                        Ok(recipient) => {
+                            self.add(recipient);
+                            self.error.clear();
+                        }
+                        // Identities made before 0.2.0 hold ECDSA keys, which sign but can't receive.
+                        Err(error) => self.error = format!("{error:#}. Identities made by Quintess before version 0.2.0 can sign but not receive encrypted documents; create a new one under Tools ▸ Sign ▸ Create signing identity."),
                     }
                 }
             }
         });
         ui.weak("Add your own certificate too, or you won't be able to open the file yourself. RSA certificates only (.cer, .crt or .pem files people send you).");
+        if tab.protection.is_some() {
+            ui.colored_label(egui::Color32::from_rgb(200, 90, 30), "This replaces the password protection chosen earlier: a file has one kind of protection, and the last one chosen is used.");
+        } else {
+            ui.weak("A file has one kind of protection: this replaces any password protection.");
+        }
         if !self.error.is_empty() {
             ui.colored_label(egui::Color32::from_rgb(200, 60, 60), self.error.as_str());
         }

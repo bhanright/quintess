@@ -62,7 +62,16 @@ pub struct SigningIdentity {
 }
 
 impl SigningIdentity {
-    /// A new self-signed identity (ECDSA P-256). Readers will show the
+    /// A new self-signed identity of the kind the app's Create signing
+    /// identity and the CLI's `identity` make: an RSA 2048 key, which signs
+    /// and can also receive certificate-encrypted documents (ECDSA keys
+    /// can't). Generating it takes a moment.
+    pub fn create(name: &str, email: &str, organization: &str) -> Result<Self> {
+        crate::public_key::generate_rsa_identity(name, email, organization, 2048)
+    }
+
+    /// A new self-signed identity (ECDSA P-256), quick to make; it signs
+    /// but can't receive encrypted documents. Readers will show the
     /// signature as valid but the signer as unverified until they trust it.
     pub fn self_signed(name: &str, email: &str, organization: &str) -> Result<Self> {
         let key = KeyPair::generate()?;
