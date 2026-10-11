@@ -111,3 +111,29 @@ fn find_and_replace_finishes_when_the_replacement_still_matches() {
     assert!(output.contains("1 replacements"), "{output}");
     assert!(ok(&["text", path(&edited)]).contains("Notices"));
 }
+
+
+#[test]
+fn create_from_converts_with_the_built_in_converter_and_says_so() {
+    let folder = folder("create_from");
+    let csv = folder.join("samples.csv");
+    std::fs::write(&csv, "Site,Samples\nNorth ridge,14\nRiver delta,41\n").unwrap();
+    let pdf = folder.join("samples.pdf");
+    let output = ok(&["create", "from", path(&csv), "-o", path(&pdf)]);
+    assert!(output.contains("Table export"), "the result is labeled: {output}");
+    assert!(ok(&["text", path(&pdf)]).contains("River delta"));
+    // Office automation is never used without --allow-office.
+    let refused = quintess(&["create", "from", path(&csv), "-o", path(&pdf), "--provider", "office"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--allow-office"), "{}", String::from_utf8_lossy(&refused.stderr));
+}
+
+#[test]
+fn converters_lists_every_provider() {
+    let output = ok(&["converters"]);
+    for name in ["Built-in", "LibreOffice", "Microsoft Office", "Microsoft Edge", "Chrome or Chromium"] {
+        assert!(output.contains(name), "{name} missing from:\n{output}");
+    }
+    let json: serde_json::Value = serde_json::from_str(&ok(&["converters", "--json"])).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 5);
+}

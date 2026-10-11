@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use quintess_core::annotations::{comments_summary, list_annotations, remove_annotations};
 use quintess_core::bookmarks::{BookmarkEntry, flatten_bookmarks, read_bookmarks, set_bookmarks};
+use quintess_core::conversion::{self, Cancellation, ConversionOptions, Provider, ProviderChoice};
 use quintess_core::create::{ImagePageSettings, TextPageSettings, blank_document, images_to_pdf, markdown_to_pdf, text_to_pdf};
 use quintess_core::document::merge_documents;
 use quintess_core::engine::{self, RenderOptions};
@@ -406,7 +407,7 @@ enum Command {
         #[command(flatten)]
         output: Output,
     },
-    /// Make a new PDF from images, text, Markdown, or nothing.
+    /// Make a new PDF from images, text, Markdown, other documents, web pages, or nothing.
     Create {
         #[command(subcommand)]
         source: CreateSource,
@@ -503,6 +504,12 @@ enum Command {
     },
     /// Ask GitHub whether a newer version of Quintess has been released.
     CheckUpdates,
+    /// List the converters `create from` can use on this computer, with versions.
+    Converters {
+        /// Print the list as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Check the spelling of the page text, comments and form fields.
     Spell {
         #[command(flatten)]
@@ -626,6 +633,44 @@ enum CreateSource {
         size: String,
         #[arg(short, long)]
         output: PathBuf,
+    },
+    /// Convert a document: Word, OpenDocument, spreadsheets, CSV, presentations,
+    /// web pages, text, Markdown or pictures (`quintess converters` lists what
+    /// is available).
+    From {
+        file: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// builtin (always available, offline), libreoffice, office,
+        /// browser (Edge, Chrome or Chromium), or best (the most faithful one
+        /// installed; Office only with --allow-office).
+        #[arg(long, default_value = "builtin")]
+        provider: String,
+        /// Allow Microsoft Office automation, which opens the document in Word,
+        /// Excel or PowerPoint invisibly. Don't use it in unattended scripts.
+        #[arg(long)]
+        allow_office: bool,
+        /// Seconds an external converter may run before it is stopped.
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        /// Paper size for built-in simplified documents and table exports.
+        #[arg(long, default_value = "letter")]
+        size: String,
+        /// Print what each converter ran and printed.
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Print a web page to PDF with a browser (Edge, Chrome or Chromium). The
+    /// page is loaded from the network.
+    Url {
+        url: String,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Seconds the browser may run before it is stopped.
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        #[arg(long)]
+        verbose: bool,
     },
 }
 
@@ -1192,6 +1237,7 @@ fn run(cli: Cli) -> Result<()> {
                 std::thread::sleep(std::time::Duration::from_secs_f32(interval.max(0.2)));
             }
         }
+        Command::Converters { json } => list_converters(json)?,
         Command::CheckUpdates => match quintess_core::updates::newer_release()? {
             Some(release) => println!("Quintess {} is available (you have {}): {}", release.version, quintess_core::updates::CURRENT_VERSION, release.page),
             None => println!("Quintess {} is the latest version.", quintess_core::updates::CURRENT_VERSION),
@@ -1362,6 +1408,67 @@ fn create(source: CreateSource) -> Result<()> {
         }
         CreateSource::Blank { pages, size, output } => {
             save_to(&mut blank_document(pages, paper(&size, false)?)?, &output)?;
+        }
+        CreateSource::From { file, output, provider, allow_office, timeout, size, verbose } => {
+            let options = ConversionOptions {
+                provider: provider_choice(&provider)?,
+                allow_office_automation: allow_office,
+                timeout: std::time::Duration::from_secs(timeout.max(1)),
+                page: TextPageSettings { page_size: paper(&size, false)?, ..Default::default() },
+            };
+            let result = conversion::convert_file(&file, &options, &Cancellation::new())?;
+            report_conversion(&result, &output, verbose)?;
+        }
+        CreateSource::Url { url, output, timeout, verbose } => {
+            let options = ConversionOptions { provider: ProviderChoice::AnyBrowser, timeout: std::time::Duration::from_secs(timeout.max(1)), ..Default::default() };
+            let result = conversion::convert_url(&url, &options, &Cancellation::new())?;
+            report_conversion(&result, &output, verbose)?;
+        }
+    }
+    Ok(())
+}
+
+fn provider_choice(name: &str) -> Result<ProviderChoice> {
+    Ok(match name.to_ascii_lowercase().as_str() {
+        "builtin" | "built-in" => ProviderChoice::Use(Provider::BuiltIn),
+        "libreoffice" => ProviderChoice::Use(Provider::LibreOffice),
+        "office" | "microsoft-office" => ProviderChoice::Use(Provider::MicrosoftOffice),
+        "browser" => ProviderChoice::AnyBrowser,
+        "edge" => ProviderChoice::Use(Provider::Edge),
+        "chrome" | "chromium" => ProviderChoice::Use(Provider::Chromium),
+        "best" => ProviderChoice::BestAvailable,
+        other => bail!("unknown provider \"{other}\" (try builtin, libreoffice, office, browser or best)"),
+    })
+}
+
+/// Saves a conversion and says honestly what made it and what it left out.
+fn report_conversion(result: &conversion::ConversionResult, output: &Path, verbose: bool) -> Result<()> {
+    write_file_safely(output, &result.pdf)?;
+    println!("wrote {} ({} page{}) with {} in {:.1} s", output.display(), result.page_count, if result.page_count == 1 { "" } else { "s" }, result.summary(), result.elapsed.as_secs_f32());
+    for warning in &result.warnings {
+        println!("  note: {warning}");
+    }
+    if verbose {
+        for line in &result.diagnostics {
+            println!("  {line}");
+        }
+    }
+    Ok(())
+}
+
+fn list_converters(json: bool) -> Result<()> {
+    let providers = conversion::available_providers();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&providers)?);
+        return Ok(());
+    }
+    for info in &providers {
+        let state = if info.available { "available" } else { "not found" };
+        let version = info.version.as_deref().map(|version| format!(" {version}")).unwrap_or_default();
+        println!("{:<20} {:<10} {}{}", info.provider.name(), state, info.engine, version);
+        println!("{:<20} {}", "", info.note);
+        if let Some(location) = &info.location {
+            println!("{:<20} {}", "", location.display());
         }
     }
     Ok(())

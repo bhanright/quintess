@@ -10,6 +10,7 @@ pub mod attachments;
 pub mod batch;
 pub mod bookmarks;
 pub mod compare;
+pub mod conversion;
 pub mod convert;
 pub mod create;
 pub mod der;

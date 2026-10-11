@@ -35,12 +35,21 @@ rqrr = "0.11.0"
 spellbook = "0.4.2"
 rust_xlsxwriter = "0.99.1"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+quick-xml = "0.41"
+# Word layout for the built-in .docx conversion (MPL-2.0; pinned because its API is still 0.x).
+oxidocs = { version = "=0.8.0", optional = true }
+
+[features]
+default = ["word-layout"]
+# The built-in Word (.docx) converter. It adds about 15 MB to the program
+# (Word font metrics are compiled in); without it, .docx files need
+# LibreOffice or Microsoft Office.
+word-layout = ["dep:oxidocs"]
 
 [dev-dependencies]
 image = "0.25"
 qrcode = "0.14.1"
 regex = "1"
-quick-xml = "0.41"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Storage_Xps"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Storage_FileSystem", "Win32_Storage_Xps", "Win32_System_Registry"] }
