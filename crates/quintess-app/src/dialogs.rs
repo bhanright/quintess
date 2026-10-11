@@ -1534,7 +1534,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let save_label = if titles.len() > 1 { "Save all" } else { "Save" };
-                if ui.button(save_label).clicked() {
+                if crate::theme::primary_button(ui, save_label).clicked() {
                     outcome.requests.push(AppRequest::SaveAndClose { tab_ids: tab_ids.clone(), quitting: *quitting });
                     outcome.keep_open = false;
                 }
@@ -2616,13 +2616,17 @@ impl ConvertDialog {
         dialog
     }
 
-    /// The converter to start with: a higher-fidelity one when installed,
-    /// except Microsoft Office, which is used only when chosen by hand.
+    /// The converter to start with: the most faithful installed one for
+    /// this kind of file (LibreOffice for documents, the built-in one for
+    /// plain text), except Microsoft Office, which is used only when chosen
+    /// by hand.
     fn preferred_provider(&self) -> Option<quintess_core::conversion::Provider> {
         use quintess_core::conversion::Provider;
         let suitable = self.suitable();
-        let without_office = || suitable.iter().filter(|info| info.provider != Provider::MicrosoftOffice);
-        without_office().find(|info| info.provider != Provider::BuiltIn).or_else(|| without_office().next()).or(suitable.first()).map(|info| info.provider)
+        let installed = |provider: Provider| provider != Provider::MicrosoftOffice && suitable.iter().any(|info| info.provider == provider);
+        let by_preference = self.format().and_then(|format| format.preference().iter().copied().find(|provider| installed(*provider)));
+        let any_but_office = || suitable.iter().map(|info| info.provider).filter(|provider| *provider != Provider::MicrosoftOffice);
+        by_preference.or_else(|| any_but_office().find(|provider| *provider != Provider::BuiltIn)).or_else(|| any_but_office().next()).or(suitable.first().map(|info| info.provider))
     }
 
     fn format(&self) -> Option<quintess_core::conversion::InputFormat> {

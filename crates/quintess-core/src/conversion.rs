@@ -154,7 +154,7 @@ impl InputFormat {
 
     /// Providers from most to least faithful for this kind of file; "best
     /// available" takes the first one that is installed (and allowed).
-    fn preference(self) -> &'static [Provider] {
+    pub fn preference(self) -> &'static [Provider] {
         use Provider::*;
         match self {
             InputFormat::WordDocument | InputFormat::LegacyWord | InputFormat::OpenDocumentText | InputFormat::Spreadsheet | InputFormat::Presentation => &[MicrosoftOffice, LibreOffice, BuiltIn],

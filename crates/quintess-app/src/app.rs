@@ -93,7 +93,11 @@ pub struct QuintessApp {
 /// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
 /// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`,
-/// `unsaved` (marks the documents changed and shows the quit question).
+/// `unsaved` (marks the documents changed and shows the quit question),
+/// `close-window` (marks them changed and asks the window to close),
+/// `redact-search=words` (Find and redact with its matches found),
+/// `batch=action.json` (the Run an action dialog with that action),
+/// `confirm-trust` (the question Trust asks), `permissions-password`.
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -292,6 +296,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 "split" => self.split_view = true,
+                "close-window" => {
+                    // Marks every open document changed and closes the window
+                    // as its close button would, to check the close is caught.
+                    for tab in &mut self.tabs {
+                        tab.dirty = true;
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
                 "unsaved" => {
                     // Marks every open document changed and asks as quitting would.
                     for tab in &mut self.tabs {
@@ -362,6 +374,47 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         "tags" => sidebar::SidebarPage::Tags,
                         _ => sidebar::SidebarPage::Thumbnails,
                     }
+                }
+                "batch" => {
+                    // An action file, opened in the Run an action dialog.
+                    let path = PathBuf::from(value);
+                    if let Ok(action) = quintess_core::batch::Action::load(&path) {
+                        let steps = action.steps.iter().map(quintess_core::batch::Step::describe).collect();
+                        let run = dialogs::RunChoices::for_action(&action);
+                        self.dialogs.push(Dialog::Batch { action: Some(path), inputs: Vec::new(), steps, run });
+                    }
+                }
+                "confirm-trust" => {
+                    // The question Trust asks, for the first signature's certificate.
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        if let Ok(checks) = quintess_core::signatures::verify_protected(&tab.bytes, tab.password.as_deref()) {
+                            if let Some(top) = checks.first().and_then(|check| check.chain.last()) {
+                                if let Ok(identity) = quintess_core::validation::certificate_identity(&top.der) {
+                                    self.dialogs.push(Dialog::SignatureResults(checks.clone()));
+                                    self.dialogs.push(Dialog::ConfirmTrust { certificate_der: top.der.clone(), identity });
+                                }
+                            }
+                        }
+                    }
+                }
+                "permissions-password" => self.dialogs.push(Dialog::PermissionsPassword { password: String::new(), error: String::new() }),
+                "redact-search" => {
+                    let mut dialog = Dialog::redact();
+                    if let (Dialog::Redact { query, found, .. }, Some(tab)) = (&mut dialog, self.tabs.get(self.active)) {
+                        *query = value.to_string();
+                        if let (Ok(pattern), Some(document)) = (quintess_core::engine::search_pattern(value, false, false, false), tab.pdfium_document()) {
+                            if let Ok(mut areas) = quintess_core::redact::find_areas(document, &[pattern]) {
+                                if let Ok(pdf) = tab.load_pdf() {
+                                    areas.extend(quintess_core::redact::marked_areas(&pdf));
+                                }
+                                let texts = quintess_core::redaction_check::area_texts(document, &areas).unwrap_or_default();
+                                // The same search the dialog builds, so it isn't cleared at once.
+                                let search = format!("{value}\u{1}false\u{1}false\u{1}true\u{1}");
+                                *found = Some(dialogs::FoundRedactions { areas, texts, search });
+                            }
+                        }
+                    }
+                    self.dialogs.push(dialog);
                 }
                 "dialog" => match value {
                     "watermark" => self.dialogs.push(Dialog::watermark()),
