@@ -19,6 +19,27 @@ pub struct RenderRequest {
     pub dpi: f32,
     /// Invert the page colors for comfortable reading in the dark.
     pub night_mode: bool,
+    /// Pages on screen come first, then quick previews of pages nearby, then
+    /// sharp pages ahead of where the person is scrolling.
+    pub priority: RenderPriority,
+}
+
+/// Previews and pages ahead farther than this from the view are dropped.
+const FARTHEST_USEFUL_PAGES: usize = 120;
+
+/// The error text of a request dropped because it was no longer useful;
+/// not an error to show anyone.
+pub const SKIPPED: &str = "skipped";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum RenderPriority {
+    /// Rendered ahead of time, when nothing else is waiting.
+    Ahead,
+    /// A small picture of a page near the view, shown until the sharp one is ready.
+    Preview,
+    /// On screen now.
+    #[default]
+    Visible,
 }
 
 pub struct RenderResult {
@@ -54,6 +75,7 @@ impl RenderWorker {
 fn run(requests: Receiver<RenderRequest>, results: Sender<RenderResult>, ctx: egui::Context) {
     let mut documents: HashMap<u64, (u64, PdfDocument<'static>)> = HashMap::new();
     let mut queue: Vec<RenderRequest> = Vec::new();
+    let mut focus: HashMap<u64, usize> = HashMap::new();
     loop {
         if queue.is_empty() {
             match requests.recv() {
@@ -64,8 +86,35 @@ fn run(requests: Receiver<RenderRequest>, results: Sender<RenderResult>, ctx: eg
         while let Ok(request) = requests.try_recv() {
             queue.push(request);
         }
-        // Newest first: the pages on screen now matter more than ones scrolled past.
-        let Some(request) = queue.pop() else { continue };
+        // Where each document is being looked at: the page of its newest
+        // on-screen request.
+        for request in queue.iter().filter(|request| request.priority == RenderPriority::Visible) {
+            focus.insert(request.tab_id, request.page_index);
+        }
+        // Work that has fallen far behind the view (pages flipped past)
+        // isn't worth doing any more; say so, so it can be asked for again.
+        queue.retain(|request| {
+            let far = focus.get(&request.tab_id).is_some_and(|page| page.abs_diff(request.page_index) > FARTHEST_USEFUL_PAGES);
+            if far && request.priority != RenderPriority::Visible {
+                let _ = results.send(RenderResult { tab_id: request.tab_id, version: request.version, page_index: request.page_index, dpi: request.dpi, night_mode: request.night_mode, image: Err(SKIPPED.into()) });
+                return false;
+            }
+            true
+        });
+        // Highest priority first; among equals the page nearest the view,
+        // then the newest request.
+        let Some(position) = queue
+            .iter()
+            .enumerate()
+            .max_by_key(|(index, request)| {
+                let distance = focus.get(&request.tab_id).map_or(0, |page| page.abs_diff(request.page_index));
+                (request.priority, std::cmp::Reverse(distance), *index)
+            })
+            .map(|(index, _)| index)
+        else {
+            continue;
+        };
+        let request = queue.remove(position);
         let newest_version = queue.iter().chain(std::iter::once(&request)).filter(|r| r.tab_id == request.tab_id).map(|r| r.version).max().unwrap_or(request.version);
         if request.version < newest_version {
             continue;

@@ -105,11 +105,13 @@ pub struct ToolSettings {
     pub stamp_label: String,
     pub author: String,
     pub measure: crate::measure_tool::MeasureSettings,
+    /// Memory for page pictures (Preferences), in megabytes.
+    pub page_memory_megabytes: u32,
 }
 
 impl Default for ToolSettings {
     fn default() -> Self {
-        Self { color: [0.85, 0.1, 0.1], stroke_width: 2.0, opacity: 1.0, fill: None, font_size: 12.0, stamp_label: "APPROVED".into(), author: quintess_core::annotations::default_author(), measure: Default::default() }
+        Self { color: [0.85, 0.1, 0.1], stroke_width: 2.0, opacity: 1.0, fill: None, font_size: 12.0, stamp_label: "APPROVED".into(), author: quintess_core::annotations::default_author(), measure: Default::default(), page_memory_megabytes: 768 }
     }
 }
 
@@ -191,6 +193,10 @@ pub struct ViewerState {
     last_viewport_height: f32,
     /// Which split-view pane this state was last drawn in.
     pane: usize,
+    /// The page last in view, and which way the person is moving, for
+    /// rendering pages ahead.
+    last_page: usize,
+    pub scrolling_forward: bool,
     /// The Edit pictures and shapes tool's selection and gesture.
     pub objects: crate::object_tool::ObjectToolState,
     /// The Measure tool's points so far.
@@ -483,6 +489,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
     if tool == Tool::Measure {
         crate::measure_tool::bar(ui, &mut state.measure, &settings.measure, output.inner_rect, &mut actions);
     }
+    render_ahead(tab, state, worker, resolution, night_mode, settings.page_memory_megabytes);
 
     // Ctrl+scroll zooms around the current page.
     let zoom_delta = ui.input(|i| i.zoom_delta());
@@ -507,7 +514,55 @@ fn draw_page(ui: &mut egui::Ui, tab: &mut DocumentTab, worker: &RenderWorker, pa
     }
     if !tab.textures.contains_key(&key) && !tab.pending.contains(&key) {
         tab.pending.insert(key);
-        worker.request(RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index, dpi: resolution as f32, night_mode });
+        worker.request(RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index, dpi: resolution as f32, night_mode, priority: crate::render::RenderPriority::Visible });
+    }
+}
+
+/// The resolution of quick previews: a letter page is about 0.2 MB, small
+/// enough to keep for hundreds of pages, and rendered in a few milliseconds.
+pub const PREVIEW_DPI: u32 = 24;
+
+/// Asks for pages near the view ahead of time, so scrolling finds them
+/// ready: quick previews of every page within reach, then sharp pages in
+/// the direction of scrolling, as far as the memory budget allows.
+fn render_ahead(tab: &mut DocumentTab, state: &mut ViewerState, worker: &RenderWorker, resolution: u32, night_mode: bool, memory_megabytes: u32) {
+    let current = tab.current_page;
+    if current != state.last_page {
+        state.scrolling_forward = current >= state.last_page;
+        state.last_page = current;
+    }
+    let budget = memory_megabytes as f32 * 1024.0 * 1024.0;
+    let Some(geometry) = tab.pages.get(current) else { return };
+    let page_bytes = |dpi: u32| (geometry.display_size.0 / 72.0 * dpi as f32) * (geometry.display_size.1 / 72.0 * dpi as f32) * 4.0;
+    // Previews: a quarter of the budget, at most every page.
+    let preview_reach = ((budget * 0.25 / page_bytes(PREVIEW_DPI).max(1.0)) as usize / 2).min(tab.pages.len());
+    // Sharp pages ahead: half the budget, never more than 40 pages.
+    let sharp_ahead = ((budget * 0.5 / page_bytes(resolution).max(1.0)) as usize).clamp(1, 40);
+    let request = |tab: &mut DocumentTab, page: usize, dpi: u32, priority| {
+        let key = (page, dpi);
+        if !tab.textures.contains_key(&key) && !tab.pending.contains(&key) {
+            tab.pending.insert(key);
+            worker.request(RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index: page, dpi: dpi as f32, night_mode, priority });
+        }
+    };
+    let pages = tab.pages.len();
+    for distance in 0..=preview_reach {
+        for page in [current.checked_add(distance), current.checked_sub(distance)].into_iter().flatten().filter(|page| *page < pages) {
+            let has_any = tab.textures.keys().any(|(known, _)| *known == page);
+            if !has_any {
+                request(tab, page, PREVIEW_DPI, crate::render::RenderPriority::Preview);
+            }
+        }
+    }
+    // Sharp pages only once the pages on screen and their neighbors are done.
+    let busy = tab.pending.iter().any(|(page, dpi)| *dpi == resolution && page.abs_diff(current) <= 1);
+    if !busy {
+        for step in 1..=sharp_ahead {
+            let page = if state.scrolling_forward { current + step } else { current.wrapping_sub(step) };
+            if page < pages {
+                request(tab, page, resolution, crate::render::RenderPriority::Ahead);
+            }
+        }
     }
 }
 

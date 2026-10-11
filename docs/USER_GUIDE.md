@@ -22,6 +22,12 @@ This guide covers every feature. Use the list on the left to jump to a topic, or
 - The dock at the bottom of the window shows the page number; click it to go to a page.
 - The sidebar (the left panel) shows page thumbnails, bookmarks, comments, form fields, search results and attached files. Toggle it with the sidebar button in the header.
 
+## Fast scrolling and memory
+
+Quintess keeps pictures of the pages around where you are reading, so flipping through a document doesn't wait. Pages near the view are drawn sharp, pages ahead in the direction you're scrolling are prepared in advance, and every page within reach gets a quick preview that shows instantly until the sharp version is ready.
+
+**Edit ▸ Preferences ▸ Page memory** sets how much memory those pictures may use: **Low** (256 MB) for older computers, **Balanced** (768 MB, the default), **Fast scrolling** (2 GB) for flipping quickly through long documents, or any amount on the slider. More memory keeps more pages ready.
+
 ## Zoom and views
 
 - **Ctrl+plus** and **Ctrl+minus** zoom; **Ctrl+0** fits the page width. Ctrl+scroll zooms with the mouse.

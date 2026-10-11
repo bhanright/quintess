@@ -198,6 +198,19 @@ saves a picture of the window and exits (setup options are documented on
   Windows, speech-dispatcher on Linux), paragraph by paragraph from
   `editable_paragraphs` (page lines as fallback), outline + page turning,
   pause = stop and restart the paragraph (portable), speed and voice in a bar.
+- Performance (2026-10-11, measured against Acrobat 26.2 on this PC: open and
+  settle 0.8 s vs 9 s, 134 MB vs 577 MB on a 624-page document): no redraw
+  loop (the window title is set only when it changes); OpenGL by default with
+  wgpu fallback (`QUINTESS_RENDERER`), halving memory; page pictures within a
+  memory budget (`page_memory_megabytes`, Preferences, default 768 MB),
+  nearest pages kept with scrolled-past pages counted 3x as far; 24 DPI
+  previews around the view and sharp pages ahead in the scroll direction
+  (`viewer::render_ahead`); the render worker takes Visible > Preview > Ahead,
+  nearest the view first, and drops low-priority work over 120 pages away.
+  Developer switches: `QUINTESS_SCROLL_TEST=<pages/s>` (prints sharp/preview/
+  blank frame shares), `QUINTESS_PAGE_MEMORY_MB`, `QUINTESS_DEBUG_REPAINT`.
+  Known limit: flinging through big scans at 40 pages/s outpaces preview
+  decoding on the first pass (the full JPEG is decoded per page).
 - Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
   shown with a searchable topic list (F1, Help ▸ User guide). Keep it in
   step with features. `README.md` is the GitHub front page.

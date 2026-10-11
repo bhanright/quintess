@@ -73,6 +73,7 @@ pub struct QuintessApp {
     read_aloud: Option<read_aloud::ReadAloud>,
     /// The window title last set.
     window_title: String,
+    scroll_test: ScrollTest,
     update_window: Option<updates::UpdateWindow>,
     /// The startup update check (or question) has happened this session.
     update_startup_done: bool,
@@ -136,12 +137,19 @@ impl QuintessApp {
             spelling: None,
             read_aloud: None,
             window_title: String::new(),
+            scroll_test: ScrollTest::default(),
             update_window: None,
             update_startup_done: false,
             watch: None,
         };
         app.tool_settings.author = app.settings.author.clone();
         app.configure_spelling();
+        // A developer aid for measuring: QUINTESS_PAGE_MEMORY_MB overrides the
+        // preference for this run without saving it.
+        if let Some(megabytes) = std::env::var("QUINTESS_PAGE_MEMORY_MB").ok().and_then(|v| v.parse().ok()) {
+            app.settings.page_memory_megabytes = megabytes;
+        }
+        app.tool_settings.page_memory_megabytes = app.settings.page_memory_megabytes;
         if let Err(error) = quintess_core::engine::pdfium() {
             app.error(format!("{error:#}"));
         }
@@ -575,23 +583,83 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let texture = ctx.load_texture(format!("page-{}-{}-{}-{}", tab.id, tab.version, key.0, key.1), image, egui::TextureOptions::LINEAR);
                     tab.textures.insert(key, texture);
                 }
+                Err(error) if error == crate::render::SKIPPED => {}
                 Err(error) => tab.error = Some(error),
             }
         }
-        // Keep memory in check: a sharp render of a full page is 10 to 25 MB,
-        // so only pages near what is on screen keep theirs (thumbnails and
-        // organizer pictures are small and stay). Scrolling back renders
-        // them again, which takes a moment, not a stall.
-        const SHARP_PAGES_KEPT_AROUND_VIEW: usize = 3;
+        // Keep page pictures within the memory budget (Preferences): the
+        // pages nearest the view keep theirs, farther ones are let go first.
+        // Previews and thumbnails are small and count too, so a budget
+        // always means what it says.
+        let budget = self.settings.page_memory_megabytes.max(64) as usize * 1024 * 1024;
         for tab in &mut self.tabs {
-            let sharp = tab.textures.keys().filter(|(_, dpi)| *dpi > ORGANIZER_DPI).count();
-            if sharp > SHARP_PAGES_KEPT_AROUND_VIEW * 4 + 2 {
-                let current = tab.current_page;
-                // In split view, the other pane's pages are in view too.
-                let other = self.other_panes.get(&tab.id).map(|pane| pane.current_page()).unwrap_or(current);
-                let near = |page: usize| page.abs_diff(current) <= SHARP_PAGES_KEPT_AROUND_VIEW || page.abs_diff(other) <= SHARP_PAGES_KEPT_AROUND_VIEW;
-                tab.textures.retain(|(page, dpi), _| *dpi <= ORGANIZER_DPI || near(*page));
+            let bytes_of = |texture: &egui::TextureHandle| texture.size()[0] * texture.size()[1] * 4;
+            let total: usize = tab.textures.values().map(bytes_of).sum();
+            if total <= budget {
+                continue;
             }
+            let current = tab.current_page;
+            // In split view, the other pane's pages are in view too.
+            let other = self.other_panes.get(&tab.id).map(|pane| pane.current_page()).unwrap_or(current);
+            // Pages behind the direction of scrolling count three times as
+            // far, so pages rendered ahead aren't let go as soon as they arrive.
+            let forward = self.viewer_states.get(&tab.id).is_none_or(|state| state.scrolling_forward);
+            let distance = |page: usize| {
+                let behind = if forward { page < current } else { page > current };
+                let steps = page.abs_diff(current).min(page.abs_diff(other));
+                if behind { steps * 3 } else { steps }
+            };
+            // Nearest first; at the same distance small pictures before large,
+            // so a page keeps at least its preview as long as possible.
+            let mut keys: Vec<((usize, u32), usize)> = tab.textures.iter().map(|(key, texture)| (*key, bytes_of(texture))).collect();
+            keys.sort_by_key(|((page, dpi), _)| (distance(*page), *dpi));
+            let mut used = 0;
+            let mut keep = std::collections::HashSet::new();
+            for (key, bytes) in keys {
+                // The pages on screen always stay, whatever the budget.
+                if used + bytes <= budget || distance(key.0) <= 1 {
+                    used += bytes;
+                    keep.insert(key);
+                }
+            }
+            tab.textures.retain(|key, _| keep.contains(key));
+        }
+    }
+
+    /// A developer aid for measuring fast scrolling:
+    /// QUINTESS_SCROLL_TEST=<pages per second> flips through the open
+    /// document at that pace, then prints how often the page in view was
+    /// sharp, only a preview, or blank, and closes.
+    fn run_scroll_test(&mut self, ctx: &egui::Context) {
+        let Some(rate) = std::env::var("QUINTESS_SCROLL_TEST").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        if tab.pages.is_empty() {
+            return;
+        }
+        let started = *self.scroll_test.started.get_or_insert_with(std::time::Instant::now);
+        // Give the window a second to open before flipping.
+        let elapsed = started.elapsed().as_secs_f32() - 1.0;
+        ctx.request_repaint();
+        if elapsed < 0.0 {
+            return;
+        }
+        let page = (elapsed * rate) as usize;
+        if page >= tab.pages.len() {
+            let counts = &self.scroll_test;
+            let total = (counts.sharp + counts.preview + counts.blank).max(1) as f32;
+            eprintln!("scroll test at {rate} pages/s over {} pages: sharp {:.0}%, preview only {:.0}%, blank {:.0}% of {} frames", tab.pages.len(), counts.sharp as f32 / total * 100.0, counts.preview as f32 / total * 100.0, counts.blank as f32 / total * 100.0, total as usize);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if tab.current_page != page {
+            viewer::go_to_page(tab, page);
+        }
+        let shown = tab.current_page;
+        let best = tab.textures.keys().filter(|(known, _)| *known == shown).map(|(_, dpi)| *dpi).max();
+        match best {
+            Some(dpi) if dpi > viewer::PREVIEW_DPI => self.scroll_test.sharp += 1,
+            Some(_) => self.scroll_test.preview += 1,
+            None => self.scroll_test.blank += 1,
         }
     }
 
@@ -1419,7 +1487,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                             painter.image(texture.id(), page_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
                         } else if !tab.pending.contains(&key) {
                             tab.pending.insert(key);
-                            self.worker.request(crate::render::RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index: index, dpi: ORGANIZER_DPI as f32, night_mode: false });
+                            self.worker.request(crate::render::RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index: index, dpi: ORGANIZER_DPI as f32, night_mode: false, priority: crate::render::RenderPriority::Visible });
                         }
                         if is_selected {
                             painter.rect_stroke(page_rect.expand(3.0), 3.0, egui::Stroke::new(3.0, crate::theme::highlight()), egui::StrokeKind::Outside);
@@ -1840,6 +1908,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let ctx = self.worker_context.clone();
                     self.set_theme(&ctx, look, dark);
                     self.configure_spelling();
+                    self.tool_settings.page_memory_megabytes = self.settings.page_memory_megabytes;
                     let result = self.settings.save();
                     if self.report(result).is_some() {
                         self.info("Preferences saved.");
@@ -1944,6 +2013,15 @@ fn annotation_label(kind: &quintess_core::annotations::AnnotationKind) -> &'stat
     }
 }
 
+/// Counts kept by the scroll test (see `run_scroll_test`).
+#[derive(Default)]
+struct ScrollTest {
+    started: Option<std::time::Instant>,
+    sharp: u32,
+    preview: u32,
+    blank: u32,
+}
+
 /// Writes an exported file safely and says where it went.
 fn write_export(path: &std::path::Path, bytes: Vec<u8>) -> anyhow::Result<JobOutcome> {
     quintess_core::document::write_file_safely(path, &bytes)?;
@@ -1961,6 +2039,7 @@ impl eframe::App for QuintessApp {
             }
         }
         self.receive_rendered_pages(&ctx);
+        self.run_scroll_test(&ctx);
         self.receive_watch_events();
         crate::crash::note_unsaved(self.tabs.iter().filter(|t| t.dirty).map(|t| (t.title.clone(), t.bytes.clone())).collect());
         self.run_self_check(&ctx);

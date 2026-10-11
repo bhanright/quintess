@@ -33,6 +33,9 @@ pub struct Settings {
     pub check_spelling: bool,
     /// The spelling dictionary, such as "en-GB"; empty follows the system.
     pub spelling_language: String,
+    /// Memory for page pictures, in megabytes: more keeps more pages ready,
+    /// so scrolling quickly through a long document doesn't wait.
+    pub page_memory_megabytes: u32,
 }
 
 /// The page a file was left at, and its zoom (`None` when it was fitted to
@@ -63,6 +66,7 @@ impl Default for Settings {
             skipped_version: None,
             check_spelling: true,
             spelling_language: String::new(),
+            page_memory_megabytes: 768,
         }
     }
 }

@@ -132,7 +132,7 @@ fn thumbnails(ui: &mut egui::Ui, tab: &mut DocumentTab, worker: &RenderWorker, n
                     painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
                 } else if !tab.pending.contains(&key) {
                     tab.pending.insert(key);
-                    worker.request(RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index, dpi: THUMBNAIL_DPI as f32, night_mode });
+                    worker.request(RenderRequest { tab_id: tab.id, version: tab.version, bytes: tab.bytes.clone(), password: tab.password.clone(), page_index, dpi: THUMBNAIL_DPI as f32, night_mode, priority: crate::render::RenderPriority::Preview });
                 }
                 let current = page_index == tab.current_page;
                 painter.rect_stroke(rect, 0.0, Stroke::new(if current { 2.5 } else { 0.5 }, if current { crate::theme::highlight() } else { Color32::GRAY }), StrokeKind::Outside);

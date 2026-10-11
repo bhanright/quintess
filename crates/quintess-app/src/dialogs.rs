@@ -733,6 +733,18 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     }
                 });
                 ui.end_row();
+                ui.label("Page memory");
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        for (label, megabytes, hint) in [("Low", 256, "Least memory; pages farther away render again when you come back"), ("Balanced", 768, "Keeps a good stretch of pages ready"), ("Fast scrolling", 2048, "Keeps many pages ready, for flipping quickly through long documents")] {
+                            if ui.selectable_label(settings.page_memory_megabytes == megabytes, label).on_hover_text(hint).clicked() {
+                                settings.page_memory_megabytes = megabytes;
+                            }
+                        }
+                    });
+                    ui.add(egui::Slider::new(&mut settings.page_memory_megabytes, 128..=8192).logarithmic(true).suffix(" MB").text("for page pictures"));
+                });
+                ui.end_row();
                 ui.label("Updates");
                 let mut automatic = settings.check_for_updates == Some(true);
                 if ui.checkbox(&mut automatic, "Check GitHub for new versions once a day").changed() {
