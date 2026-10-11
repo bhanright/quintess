@@ -4663,7 +4663,7 @@ dependencies = [
 
 [[package]]
 name = "quintess-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4683,7 +4683,7 @@ dependencies = [
 
 [[package]]
 name = "quintess-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -4696,7 +4696,7 @@ dependencies = [
 
 [[package]]
 name = "quintess-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
