@@ -132,6 +132,14 @@ The **Measure** tool (in the dock's More tools, or **Tools ▸ Measure**) measur
 
 **The scale.** **Set scale…** takes a scale such as `1 in = 10 ft`, `1 cm = 2 m` or `1:100 m` (with presets). To match a drawing, choose **Calibrate**, click both ends of a length you know, and type its real length. Drawings exported from CAD programs often carry their own scale; Quintess uses it automatically inside the drawing's area.
 
+# Reading aloud
+
+**View ▸ Read out loud** reads the document with your computer's own voices (Windows' built-in voices, or the system speech service on Linux). Nothing is sent anywhere.
+
+- **Read this page** (Ctrl+Shift+V) or **Read to the end** (Ctrl+Shift+B). The paragraph being read is outlined, and pages turn as reading moves on.
+- The bar at the bottom pauses and resumes (Ctrl+Shift+C), skips to the next paragraph, stops (Ctrl+Shift+E), changes the speed, and picks a voice. More voices can be added in Windows Settings ▸ Time & language ▸ Speech.
+- Scanned pages have no text to read until Tools ▸ Recognize text (OCR) adds it.
+
 # Comments and markup
 
 The dock holds the common markup tools; **⋯** in the dock (or Tools ▸ Comment) has the rest.

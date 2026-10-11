@@ -194,6 +194,10 @@ saves a picture of the window and exits (setup options are documented on
   pptx (page pictures, or editable text boxes/images/lines, hand-written OOXML
   via `zip`), CSV per table. CLI `export -f xlsx|pptx|csv`, `tables`. Not done:
   text color in editable slides, European number formats, grids in Form XObjects.
+- Read out loud (`app/read_aloud.rs`): `tts` crate (WinRT/SAPI voices on
+  Windows, speech-dispatcher on Linux), paragraph by paragraph from
+  `editable_paragraphs` (page lines as fallback), outline + page turning,
+  pause = stop and restart the paragraph (portable), speed and voice in a bar.
 - Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
   shown with a searchable topic list (F1, Help ▸ User guide). Keep it in
   step with features. `README.md` is the GitHub front page.

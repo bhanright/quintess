@@ -202,6 +202,10 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Edit", "Edit pictures and shapes", |app, _| app.tool = Tool::EditObjects).hint("Move, resize, rotate, crop, replace or delete the pictures and drawings on a page"),
     command("Edit", "Add picture…", |app, _| app.add_picture()).hint("Place a picture from a file on the current page"),
     command("Tools", "Measure", |app, _| app.tool = Tool::Measure).hint("Measure distances, perimeters and areas at the drawing's scale"),
+    command("View ▸ Read out loud", "Read this page", |app, _| app.start_reading(false)).shortcut("Ctrl+Shift+V"),
+    command("View ▸ Read out loud", "Read to the end", |app, _| app.start_reading(true)).shortcut("Ctrl+Shift+B"),
+    command("View ▸ Read out loud", "Pause or resume reading", |app, _| app.toggle_reading_pause()).shortcut("Ctrl+Shift+C"),
+    command("View ▸ Read out loud", "Stop reading", |app, _| app.stop_reading()).shortcut("Ctrl+Shift+E"),
     command("Tools", "Check spelling…", |app, ctx| app.start_spell_check(ctx)).shortcut("F7").hint("Go through misspelled words in the page text, comments and form fields"),
     command("Tools", "Find QR codes", |app, ctx| app.start_qr_scan(ctx)).hint("Read the QR codes printed on the pages, to open or copy what they hold"),
     command("Tools", "Recognize text (OCR)", |app, ctx| {

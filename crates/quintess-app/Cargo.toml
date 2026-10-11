@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 chrono = "0.4.45"
+tts = "0.26.3"
 
 [build-dependencies]
 winresource = "0.1.31"

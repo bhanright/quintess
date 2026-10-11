@@ -30,6 +30,7 @@ mod recording;
 mod watching;
 mod split;
 mod spelling;
+mod read_aloud;
 
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
 /// never collides with the viewer's resolutions).
@@ -69,6 +70,7 @@ pub struct QuintessApp {
     /// The user guide window, while open (F1).
     help: Option<help::Help>,
     spelling: Option<spelling::SpellingPanel>,
+    read_aloud: Option<read_aloud::ReadAloud>,
     update_window: Option<updates::UpdateWindow>,
     /// The startup update check (or question) has happened this session.
     update_startup_done: bool,
@@ -130,6 +132,7 @@ impl QuintessApp {
             recording: None,
             help: None,
             spelling: None,
+            read_aloud: None,
             update_window: None,
             update_startup_done: false,
             watch: None,
@@ -274,6 +277,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
                 "split" => self.split_view = true,
                 "spelling" => self.start_spell_check(ctx),
+                "read-aloud" => self.start_reading(false),
                 "inspect" => {
                     // x;y on the current page
                     let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
@@ -586,6 +590,19 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let shortcut = |modifiers: Modifiers, key: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, key)));
         if shortcut(Modifiers::NONE, Key::F1) {
             self.open_help("");
+        }
+        // Read out loud, with Acrobat's shortcuts.
+        if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::V) {
+            self.start_reading(false);
+        }
+        if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::B) {
+            self.start_reading(true);
+        }
+        if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::C) {
+            self.toggle_reading_pause();
+        }
+        if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::E) {
+            self.stop_reading();
         }
         if shortcut(Modifiers::NONE, Key::F7) && !self.tabs.is_empty() {
             self.start_spell_check(ctx);
@@ -2029,6 +2046,7 @@ impl eframe::App for QuintessApp {
 
         self.show_help(&ctx);
         self.show_spelling(&ctx);
+        self.update_reading(&ctx);
         self.show_update_window(&ctx);
 
         if let Some(mut dialog) = self.dialogs.pop() {
