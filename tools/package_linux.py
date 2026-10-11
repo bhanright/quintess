@@ -61,6 +61,8 @@ RUNTIME_OPENED_PACKAGES = [
     "libgl1",
     "libegl1",
     "libxkbcommon0",
+    # X11 sessions need the X11 half of xkbcommon too; without it the app stops at start.
+    "libxkbcommon-x11-0",
     "libx11-6",
     "libx11-xcb1",
     "libxcursor1",
@@ -89,6 +91,7 @@ RECOMMENDS = [
     "xdg-utils",  # opening links, folders and reports
     "zenity | xdg-desktop-portal-gtk | xdg-desktop-portal-kde",  # file dialogs
     "fonts-liberation",  # stand-ins for Arial, Times New Roman and Courier New when editing text
+    "fonts-noto-cjk",  # Chinese, Japanese and Korean text in stamps, comments and fields
     "fonts-dejavu-core",
 ]
 

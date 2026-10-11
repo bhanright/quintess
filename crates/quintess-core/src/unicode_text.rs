@@ -381,7 +381,10 @@ impl UnicodeFonts {
                 let id = used.remapper.remap(shaped.glyph);
                 let default_width = Self::advance(all[run.face_index], shaped.glyph);
                 used.widths.insert(id, default_width);
-                if !shaped.text.is_empty() {
+                // Glyph 0 is the missing-glyph box every uncovered character
+                // shares; giving it the first such character's text would make
+                // all of them copy out as that one, so it gets none.
+                if !shaped.text.is_empty() && shaped.glyph != 0 {
                     used.unicode.entry(id).or_insert(shaped.text);
                 }
                 glyphs.push(PlacedGlyph { id, default_width, advance: shaped.advance, x_offset: shaped.x_offset, y_offset: shaped.y_offset });

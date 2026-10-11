@@ -108,8 +108,8 @@ if command -v ldd >/dev/null 2>&1; then
     missing=$(ldd "$program_folder/quintess-app" "$program_folder/quintess" 2>/dev/null | awk '/not found/ { print $1 }' | sort -u)
     if [ -n "$missing" ]; then
         echo "Warning: these libraries are missing: $(echo $missing)"
-        echo "  On Debian and Ubuntu: sudo apt install libspeechd2 libgl1 libegl1 libxkbcommon0"
-        echo "  On Fedora: sudo dnf install speech-dispatcher-libs mesa-libGL mesa-libEGL libxkbcommon"
+        echo "  On Debian and Ubuntu: sudo apt install libspeechd2 libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0"
+        echo "  On Fedora: sudo dnf install speech-dispatcher-libs mesa-libGL mesa-libEGL libxkbcommon libxkbcommon-x11"
     fi
 fi
 
