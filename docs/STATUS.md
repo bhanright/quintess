@@ -179,6 +179,46 @@ saves a picture of the window and exits (setup options are documented on
   runtime; OCR models bundled by the installer and verified by SHA-256
   (asking before any download); LICENSE-MIT, LICENSE-APACHE and
   `tools/third_party_notices.py`; `docs/BUILDING.md`.
+- Fixes before 0.2.0 (2026-10-11, from a code read of 21 problems):
+  quitting or closing with unsaved changes asks (one dialog listing them,
+  Save / Save all, Close without saving, Cancel; the window's close request
+  is cancelled with `ViewportCommand::CancelClose` and sent again after the
+  choice, `QuintessApp::close_confirmed`); every edit of a signed document
+  reports what became of its signatures whatever path made it
+  (`DocumentTab::signature_notice`, announced once a frame); bytes that are
+  already an incremental update of the current ones (a new signature) are
+  kept as they are, so a second signature stays valid; Find and redact lists
+  its matches, clears them when the search changes and warns on signed
+  files; flattened redacted pages keep the box label; the redaction check's
+  headline counts unchecked places (`RedactionCheck::headline`); batch runs
+  and spreadsheet fills choose what to do with taken names
+  (`document::ExistingFiles`, default add a number; CLI `--overwrite`,
+  `--skip-existing`), Protect steps take passwords at run time
+  (`batch::RunOptions`, never serialized; CLI `--owner-password` or
+  `QUINTESS_OWNER_PASSWORD`), batch OCR downloads models only when allowed
+  (`--download-models`), and OCR, optimize, accessibility fixes and PDF/A
+  are recorded only on success (`Job::record_on_success`); Remove
+  protection on a restricted file checks the owner password
+  (`security::is_owner_password`); password and certificate protection
+  replace each other; Create signing identity makes RSA 2048
+  (`SigningIdentity::create`; `self_signed` stays ECDSA for quick tests),
+  and recipients are checked when added (`Recipient::checked`); Trust asks
+  with subject, issuer and fingerprint (`validation::certificate_identity`),
+  isn't offered on INVALID, and Preferences lists trusted certificates;
+  signature values are read from the file's own bytes and protected files
+  are verified with their password (`verify_protected`); the converter
+  choice follows `InputFormat::preference` (never Office unasked); Standards
+  reads back whether the level is declared (`declares_pdfa_level`,
+  `declares_pdfx_level`); read-aloud actions wait while paused; measuring
+  shows the scale it saves (`DocumentTab::measuring_scale`); hidden-layer
+  objects can't be picked and the objects list honors locks; bookmarks can
+  be renamed, moved and deleted (`bookmarks::insert_by_page`,
+  `remove_bookmark`, `rename_bookmark`, `move_bookmark`); and smaller fixes
+  (auto-tag language, comment kinds, print message, exports through a
+  temporary file, OCR skipped pages, update retry, Compare asks for a
+  protected file's password, menu paths in messages, View menu
+  duplicates). Not tested: verifying a signed file that is also encrypted
+  (no such fixture); the read-aloud fix (needs a voice).
 - Known limitations: signature checks do not validate every certificate
   chain or the freshness of OCSP answers (self-signed is flagged).
 - Spelling (`spelling.rs`, `spell.rs`, `app/spelling.rs`): Hunspell dictionaries through

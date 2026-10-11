@@ -82,6 +82,9 @@ pub struct QuintessApp {
     /// The person chose to quit despite unsaved changes (or saved them), so
     /// the window's next close request is let through.
     close_confirmed: bool,
+    /// The status line as the frame began, to tell whether this frame's
+    /// edit wrote its own message (see `announce_signature_changes`).
+    status_at_frame_start: String,
 }
 
 /// A developer aid: with `QUINTESS_SCREENSHOT=<file.png>` the app sets itself
@@ -150,6 +153,7 @@ impl QuintessApp {
             update_startup_done: false,
             watch: None,
             close_confirmed: false,
+            status_at_frame_start: String::new(),
         };
         app.tool_settings.author = app.settings.author.clone();
         app.configure_spelling();
@@ -1138,7 +1142,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let notices: Vec<(String, crate::tab::SignatureNotice)> = self.tabs.iter_mut().filter_map(|tab| tab.take_signature_notice().map(|notice| (tab.title.clone(), notice))).collect();
         for (title, notice) in notices {
             let sentence = if self.tabs.len() > 1 { format!("{title}: {}", notice.sentence()) } else { notice.sentence().to_string() };
-            let message = if self.status.is_empty() { sentence } else { format!("{} {sentence}", self.status) };
+            // Joined to this frame's own message about the edit, never to an older one.
+            let edit_wrote_a_message = self.status != self.status_at_frame_start && !self.status.is_empty();
+            let message = if edit_wrote_a_message { format!("{} {sentence}", self.status) } else { sentence };
             if notice.invalidated() {
                 self.error(message);
             } else {
@@ -2629,6 +2635,7 @@ impl eframe::App for QuintessApp {
                 eprintln!("frame {}: {:?}", ctx.cumulative_pass_nr(), causes);
             }
         }
+        self.status_at_frame_start = self.status.clone();
         self.receive_rendered_pages(&ctx);
         self.run_scroll_test(&ctx);
         self.receive_watch_events();
