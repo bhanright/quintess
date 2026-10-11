@@ -578,13 +578,19 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 Err(error) => tab.error = Some(error),
             }
         }
-        // Keep memory in check: drop sharp renders of pages far from view.
+        // Keep memory in check: a sharp render of a full page is 10 to 25 MB,
+        // so only pages near what is on screen keep theirs (thumbnails and
+        // organizer pictures are small and stay). Scrolling back renders
+        // them again, which takes a moment, not a stall.
+        const SHARP_PAGES_KEPT_AROUND_VIEW: usize = 3;
         for tab in &mut self.tabs {
-            if tab.textures.len() > 80 {
+            let sharp = tab.textures.keys().filter(|(_, dpi)| *dpi > ORGANIZER_DPI).count();
+            if sharp > SHARP_PAGES_KEPT_AROUND_VIEW * 4 + 2 {
                 let current = tab.current_page;
                 // In split view, the other pane's pages are in view too.
                 let other = self.other_panes.get(&tab.id).map(|pane| pane.current_page()).unwrap_or(current);
-                tab.textures.retain(|(page, dpi), _| *dpi <= ORGANIZER_DPI || page.abs_diff(current) <= 6 || page.abs_diff(other) <= 6);
+                let near = |page: usize| page.abs_diff(current) <= SHARP_PAGES_KEPT_AROUND_VIEW || page.abs_diff(other) <= SHARP_PAGES_KEPT_AROUND_VIEW;
+                tab.textures.retain(|(page, dpi), _| *dpi <= ORGANIZER_DPI || near(*page));
             }
         }
     }
