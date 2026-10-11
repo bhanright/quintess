@@ -245,8 +245,18 @@ pub fn file_name_for(pattern: &str, table: &Table, row: usize) -> String {
 
 /// Fills a copy of `template` for each row, handing each to `deliver` as
 /// soon as it is ready (so thousands of rows need not fit in memory).
-/// Copies whose file names collide get " (2)", " (3)" and so on.
-pub fn fill_rows(template: &[u8], password: Option<&str>, table: &Table, plan: &MergePlan, settings: &MergeSettings, progress: &dyn Fn(u32, u32), mut deliver: impl FnMut(FilledCopy) -> Result<()>) -> Result<usize> {
+/// Copies whose file names collide get " (2)", " (3)" and so on. The form's
+/// scripts run on each copy, so totals and formatted amounts are filled in
+/// (see [`fill_rows_with`] to leave them out).
+pub fn fill_rows(template: &[u8], password: Option<&str>, table: &Table, plan: &MergePlan, settings: &MergeSettings, progress: &dyn Fn(u32, u32), deliver: impl FnMut(FilledCopy) -> Result<()>) -> Result<usize> {
+    fill_rows_with(template, password, table, plan, settings, true, progress, deliver)
+}
+
+/// [`fill_rows`], choosing whether the form's calculation and format
+/// scripts run on each copy. Their messages and failures are listed with
+/// the copy's problems.
+#[allow(clippy::too_many_arguments)]
+pub fn fill_rows_with(template: &[u8], password: Option<&str>, table: &Table, plan: &MergePlan, settings: &MergeSettings, run_form_scripts: bool, progress: &dyn Fn(u32, u32), mut deliver: impl FnMut(FilledCopy) -> Result<()>) -> Result<usize> {
     check_name_pattern(&settings.name_pattern, &table.columns)?;
     if plan.matched_count() == 0 {
         bail!("no column matches a field in this form");
@@ -275,7 +285,13 @@ pub fn fill_rows(template: &[u8], password: Option<&str>, table: &Table, plan: &
                 problems.push(format!("the required field {} is empty", field.name));
             }
         }
-        forms::fill_fields(&mut pdf, &values)?;
+        if run_form_scripts {
+            let (_, outcome) = crate::form_scripts::fill_fields_and_calculate(&mut pdf, &values)?;
+            problems.extend(outcome.alerts.iter().map(|alert| format!("the form says: {alert}")));
+            problems.extend(outcome.script_errors.iter().map(|error| format!("a form script failed: {error}")));
+        } else {
+            forms::fill_fields(&mut pdf, &values)?;
+        }
         if settings.flatten {
             forms::flatten(&mut pdf, true)?;
         }
