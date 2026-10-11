@@ -1,430 +1,24 @@
 # Welcome to Quintess
 
-Quintess reads, edits, signs, redacts and automates PDF files. Everything runs on your computer: no account, no uploads, and it works offline.
+Quintess reads, edits, signs, redacts and automates PDF documents on Windows and Linux. It runs on your computer, needs no account, and works offline. The few features that use the internet are listed under **Privacy and updates**.
 
-This guide covers every feature. Use the list on the left to jump to a topic, or type in the search box above it. Press **F1** at any time to come back here.
+This guide explains Quintess's tools and common workflows. Use the list on the left to jump to a topic, or type in the search box above it. Press **F1** at any time to come back here.
 
-**The fastest way to do anything:** press **Ctrl+K** and type what you want, such as "rotate", "watermark" or "redact". The command palette finds every command, tool, recent file and page number.
+## Finding a command
 
-# Getting around
+Press **Ctrl+K** and type what you want, such as "rotate", "watermark" or "redact". The command palette finds menu commands, tools, recent files and page numbers.
 
-## Opening files
+## How this guide names things
 
-- **File ▸ Open** (Ctrl+O), or drop PDF files anywhere on the window. Dropped pictures become new PDFs.
-- Each document opens in its own tab. A violet dot on a tab means unsaved changes.
-- Files reopen at the page and zoom where you left them.
-- Password-protected files ask for their password when opened.
-
-## Moving through a document
-
-- Scroll, or use **Page Up** / **Page Down**, **Home** and **End**.
-- **Ctrl+G** goes to a page by number or by its label (such as "iv").
-- The dock at the bottom of the window shows the page number; click it to go to a page.
-- The sidebar (the left panel) shows page thumbnails, bookmarks, comments, form fields, search results and attached files. Toggle it with the sidebar button in the header.
-
-## Fast scrolling and memory
-
-Quintess keeps pictures of the pages around where you are reading, so flipping through a document doesn't wait. Pages near the view are drawn sharp, pages ahead in the direction you're scrolling are prepared in advance, and every page within reach gets a quick preview that shows instantly until the sharp version is ready.
-
-**Edit ▸ Preferences ▸ Page memory** sets how much memory those pictures may use: **Low** (256 MB) for older computers, **Balanced** (768 MB, the default), **Fast scrolling** (2 GB) for flipping quickly through long documents, or any amount on the slider. More memory keeps more pages ready.
-
-## Zoom and views
-
-- **Ctrl+plus** and **Ctrl+minus** zoom; **Ctrl+0** fits the page width. Ctrl+scroll zooms with the mouse.
-- **Split view** (the split button in the header, or View ▸ Split view) shows the document twice, side by side. Each side has its own page and zoom; click a side to make the zoom and page keys act on it.
-- **Night reading** inverts page colors for reading in the dark. **Dark interface** switches the app between dark and light.
-- **Full screen**: F11.
-
-## Looks: Studio and Classic
-
-Quintess has two looks. **Studio** (the default) has a slim header with a command field, a floating dock of tools at the bottom, and dark and light modes. **Classic** has a traditional menu bar and toolbar. Switch in **Edit ▸ Preferences** or **View ▸ Studio look**.
-
-## Searching
-
-- **Ctrl+F** searches the open document. Matches are highlighted; **F3** and **Shift+F3** step through them.
-- **Search a folder** (Ctrl+Shift+F) searches every PDF in a folder and its subfolders. Click a result to open that file at the page.
-
-## The command palette
-
-Press **Ctrl+K** (or Ctrl+Shift+P), type a few letters, and press Enter. Arrow keys move through the matches. Type a number to jump to that page.
-
-# Editing text
-
-## Editing a line or paragraph
-
-1. Choose the **Edit text** tool (the "A|" button in the dock, or Edit ▸ Edit page text).
-2. Click any text. The whole paragraph opens for editing; for tables and lists, press **Line only** to edit just the clicked line.
-3. Type your changes. In a paragraph, **Enter** starts a new line and **Ctrl+Enter** applies; **Esc** cancels.
-
-The paragraph re-wraps at its original width, line spacing and alignment, and justified text stays justified.
-
-## Styles: bold, italic, underline, color
-
-Select words in the editor, then use **B**, **I**, **U** (underline), **S** (strikethrough), the color button or the font menu. With nothing selected they apply to the whole paragraph. Each word keeps its style as you edit; letters typed onto a styled word continue its style.
-
-## When a paragraph grows
-
-The menu in the editing bar chooses what happens when new text needs more lines:
-
-- **Push text down** (the default) moves what follows in the same column down, keeping it exactly as it was. If there's no room before the page's footer, the paragraph shrinks slightly instead.
-- **Shrink to fit** makes the text a little smaller to fit its old space.
-- **Allow overlap** lets it run over what follows.
-
-## The edit preview
-
-While you type, Quintess works out the result and shows it on the page: where the paragraph will end, which text below will move and where it lands, anything it would overlap, and the footer zone. The bar names any font that stands in for an original one. Press **Result** to see the finished page before applying.
-
-## Fonts
-
-Quintess draws new text in the document's own font whenever that font already contains the letters you typed, so edits match the text around them. When a needed letter isn't in the document's font, a similar font stands in, and the edit preview says which.
-
-## Moving and adding text
-
-- With the Edit text tool, **drag** a paragraph to move it. It keeps its exact look.
-- Click **empty space** to add new text there.
-- The trash button in the editing bar deletes the line or paragraph.
-
-## Find and replace
-
-**Ctrl+H** replaces words or phrases throughout the document, line by line. A match split across two lines isn't replaced.
-
-# Spelling
-
-Quintess checks spelling as you type and can go through a whole document. It uses Hunspell dictionaries, the same kind LibreOffice and Firefox use. English (US, UK, Canada, Australia), Spanish, French, German, Portuguese (Brazil) and Italian come with Quintess, and about 50 more languages can be added.
-
-## While typing
-
-- Misspelled words are underlined in red while you edit page text, write a comment or a text box, or fill in a form field.
-- **Right-click** an underlined word for suggestions, **Add to dictionary** or **Ignore**.
-- A repeated word ("the the") is underlined too; right-click it to delete the repeat.
-
-## Checking a whole document
-
-1. Choose **Tools ▸ Check spelling** (F7).
-2. Quintess looks through the page text, comments and form fields, and shows the first misspelled word on its page.
-3. Pick a suggestion (or type the right spelling) and choose **Change**, or **Change all** for every occurrence. **Skip** moves on, **Ignore all** ignores the word until Quintess closes, and **Add to dictionary** remembers it.
-
-Each change is an ordinary edit you can undo. Changing page text rewrites the line in its own font, as text editing does.
-
-## Languages and your dictionary
-
-- **Edit ▸ Preferences ▸ Spelling** turns checking while typing on or off and picks the dictionary. "System language" follows your computer's setting.
-- **Add a language…** (beside the dictionary choice in Preferences) downloads one of about 50 languages from the open-source wooorm/dictionaries collection, or installs any Hunspell dictionary you have (pick its `.dic` file; the `.aff` file must be beside it). Added languages can be removed there too.
-- Dictionaries can also be copied by hand into the `dictionaries` folder in Quintess's settings folder. On Linux, dictionaries installed with the system (`/usr/share/hunspell`) are found automatically.
-- Words you add are kept in `personal-dictionary.txt` in the settings folder, one per line; you can edit it.
-- Words with digits, ALL-CAPS abbreviations, web and email addresses and file names are not checked.
-
-From the command line: `quintess spell file.pdf` lists misspelled words with suggestions (`--language en-GB`, `--json`, `--languages`, `--download pt-PT`, `--install fr_FR.dic`).
-# Pictures and shapes
-
-The **Edit pictures and shapes** tool (the picture button in the dock, or **Edit ▸ Edit pictures and shapes**) changes the pictures, drawings and grouped artwork already on a page. The text around them is not touched.
-
-- **Click** a picture or drawing to select it; **Shift+click** adds to the selection, and **dragging a box** over empty space selects everything inside it.
-- **Drag** the selection to move it, or use the **arrow keys** (with Shift for bigger steps).
-- **Drag a handle** to resize. Corner handles keep the proportions; hold **Shift** to stretch freely.
-- The toolbar above the selection rotates left or right, flips, **crops** (choose Crop, then drag over the part to keep), **replaces** a picture with another file (fitted into the same space), brings to the front or sends to the back, and deletes. **Delete** on the keyboard deletes too.
-- **Edit ▸ Add picture…** places a picture from a file on the current page, ready to move and resize.
-- **Opacity** in the toolbar makes the selection see-through (0 to 100%) and sets its **blend mode** (Multiply, Screen, Overlay and the rest, as in image editors).
-
-Every change is a normal edit you can undo. Cropping hides the rest of the picture without removing it from the file; to remove content for good, use redaction.
-
-## Text wrap
-
-Select one picture and choose **Wrap text** in its toolbar: the paragraphs beside it are laid out again so their lines flow around the picture, keeping a small gap, and the text below moves down to make room. From then on the text follows the picture: move it, resize it or delete it, and the paragraphs are laid out again. Choose **Wrap text** again to stop, and the lines go back to full width.
-
-Lines use the wider side of the picture. Text you edit by other means afterward is left as it is, as ordinary text.
-
-# Measuring
-
-The **Measure** tool (in the dock's More tools, or **Tools ▸ Measure**) measures on the page at a drawing's scale.
-
-1. Choose **Distance**, **Perimeter** or **Area** in the bar above the page.
-2. Click points on the page. A distance needs two clicks; for a perimeter or area, double-click or press **Enter** to finish. **Backspace** removes the last point and **Escape** starts over.
-3. The value shows beside the pointer while you measure, and the finished measurement is added to the page as a comment labeled with the result, which Acrobat and other readers also recognize.
-
-**The scale.** **Set scale…** takes a scale such as `1 in = 10 ft`, `1 cm = 2 m` or `1:100 m` (with presets). To match a drawing, choose **Calibrate**, click both ends of a length you know, and type its real length. Drawings exported from CAD programs often carry their own scale; Quintess uses it automatically inside the drawing's area.
-
-# Reading aloud
-
-**View ▸ Read out loud** reads the document with your computer's own voices (Windows' built-in voices, or the system speech service on Linux). Nothing is sent anywhere.
-
-- **Read this page** (Ctrl+Shift+V) or **Read to the end** (Ctrl+Shift+B). The paragraph being read is outlined, and pages turn as reading moves on.
-- The bar at the bottom pauses and resumes (Ctrl+Shift+C), skips to the next paragraph, stops (Ctrl+Shift+E), changes the speed, and picks a voice. More voices can be added in Windows Settings ▸ Time & language ▸ Speech. On Linux, reading aloud needs the speech-dispatcher package; its voices come from the speech engines installed for it (such as espeak-ng).
-- Scanned pages have no text to read until Tools ▸ Recognize text (OCR) adds it.
-
-# Comments and markup
-
-The dock holds the common markup tools; **⋯** in the dock (or Tools ▸ Comment) has the rest.
-
-- **Highlight**, **Underline**, **Strikethrough** and **Squiggly**: drag across text.
-- **Note**: click to place a sticky note.
-- **Text box**, **Rectangle**, **Ellipse**, **Line**, **Arrow**: drag to draw.
-- **Draw**: freehand ink.
-- **Stamp**: places a stamp; set its label under Tools ▸ Stamp and number.
-- **Link**: drag a box, then enter a web address or page.
-
-The color and line width appear in the dock while a markup tool is selected. Comments are listed in the sidebar, where you can reply to, edit or delete them. **Tools ▸ Comment** can also flatten comments into the page, remove them all, or copy a summary.
-
-# Pages
-
-## Organizing pages
-
-Press the **Organize** button in the dock (or Tools ▸ Pages ▸ Organize pages) to see every page as a thumbnail. Drag pages to reorder them, and select pages to rotate, duplicate, delete or extract them.
-
-## Page tools
-
-Under **Tools ▸ Pages**:
-
-- **Rotate**, **Delete**, **Extract** (to a new document).
-- **Insert blank pages** and **Insert from file**.
-- **Split**: every N pages, by page ranges, or by top-level bookmarks (the command line can also split by size).
-- **Crop**, **Resize to paper size**, **Several pages per sheet** (2-up, 4-up and so on).
-- **Page labels** (such as roman numerals for front matter), **Reverse order**, **Remove blank pages**.
-
-Page ranges accept forms like `1-3, 7, odd, even, 10-end`.
-
-## Combining files
-
-**File ▸ Create ▸ Combine files** merges several PDFs into one, with a bookmark for each.
-
-## Creating documents
-
-**File ▸ Create** makes a blank document, or a PDF from pictures or from a text or Markdown file.
-
-**From a scanner** lists the scanners on your computer (on Windows through its own scanner support; on Linux through SANE, from the `sane-utils` package). Choose the resolution (300 dpi suits OCR and printing), color, gray or black and white, and whether to take every sheet in the document feeder. **Make the text searchable** runs OCR on the new pages as soon as they arrive.
-
-## Portfolios
-
-A portfolio is one PDF that holds several files of any type, each kept exactly as it is. **File ▸ Create ▸ Portfolio** collects the files, the order or sort (name, size or date), whether readers show them as a list or tiles, and the file that opens first. Acrobat and other portfolio-aware readers show the file list; readers without portfolio support show a cover page that lists the files and says where to find them, and every file is in the attachments panel either way.
-
-**Tools ▸ Portfolio files** opens, adds, removes and reorders the files in a portfolio (or turns any PDF into one), and extracts them all to a folder. A PDF inside opens in its own tab; other files open in the program your computer uses for them.
-
-## Audio, video and 3D
-
-**Tools ▸ Audio, video and 3D** lists the media embedded in a document, with its page and size. **Play** opens it in your computer's player; **Save** keeps a copy. **Edit ▸ Add video** places an MP4 on the current page with a poster picture you choose, which readers that can't play video show instead.
-
-## Article threads
-
-Magazines and newspapers sometimes define the reading order of a story that jumps between columns and pages. **Tools ▸ Article threads** lists these stories: go to where one starts, copy its whole text in reading order, or delete the thread.
-
-# Forms
-
-## Filling forms
-
-Click a field to type in it; checkboxes and radio buttons toggle with a click. Fields are listed in the sidebar.
-
-## Forms that calculate
-
-Many forms (tax forms, invoices, order forms) add up totals, check what you type and show amounts as currency or dates in a set pattern. Quintess runs these form scripts as Acrobat does. As you type, a field that takes only numbers or a set pattern refuses other characters, and a mask can add its dashes and parentheses. When you finish typing in a field, totals update and amounts show formatted ("$1,234.50"). A value the form won't accept (out of range, a date that doesn't exist, letters in a phone number) is refused with the form's own message, and the field keeps its old value. Importing data, filling from a spreadsheet and **Clear all fields** recalculate too.
-
-Only the calculation, checking and formatting scripts attached to fields ever run. Scripts a PDF asks to run when it opens, when a page is shown or when a link is clicked are never run. Form scripts can't read or write files, reach the internet or start programs, and a script that runs too long is stopped.
-
-## Making forms
-
-- **Tools ▸ Forms ▸ Detect fields automatically** turns blank lines (____) and boxes into fields.
-- Add fields by hand with the text field, checkbox and signature field tools.
-
-## Form data
-
-- **Import data** fills the form from a JSON or XFDF file; **File ▸ Export ▸ Form data** saves the values as JSON, XFDF or CSV. XFDF keeps nested field names (such as `address.street`), list boxes with several choices, and styled text.
-- **Clear all fields** empties the form; **Flatten fields into the page** makes the values permanent.
-
-## Filling from a spreadsheet
-
-**Tools ▸ Forms ▸ Fill from spreadsheet** makes one filled copy of the form for every row of a CSV, Excel, OpenDocument or JSON file. Columns fill the fields with the same name (capitalization and punctuation don't matter, and a field's tooltip counts too). You can reassign any column. File names come from a pattern such as `{Last name}, {First name}` or `{row}`. Choose a folder of separate files, or one combined PDF with a bookmark per copy.
-
-# Stamps, headers and numbering
-
-Under **Tools ▸ Stamp and number**:
-
-- **Watermark**: text across pages, with font, size, color, opacity, rotation and position. Tokens such as `{page}`, `{pages}`, `{date}` and `{file}` are filled in.
-- **Header and footer**: text in six positions, with the same tokens.
-- **Bates numbering**: legal numbering with a prefix, suffix and number of digits.
-- **Image stamp**: a logo or seal on pages.
-- **Background color**.
-
-# Redaction
-
-Redaction removes content from the file for good, not just covers it.
-
-1. Mark what to remove: drag across text with **Mark text for redaction**, draw boxes with **Mark area for redaction**, or use **Tools ▸ Redact ▸ Find and redact** to find words, patterns and personal information (email addresses, phone numbers, Social Security and card numbers, dates and more).
-2. Apply the redaction. Text, pictures and shapes under the boxes are removed; a label such as "REDACTED" can be drawn in each box.
-
-After redacting, Quintess checks the whole file for the removed text: under the boxes, elsewhere on the pages, in document properties, comments, form fields, bookmarks, attachments, hidden entries and earlier versions saved inside the file. It reports what it found and what it couldn't check.
-
-**Tools ▸ Redact ▸ Check for leftover text** runs the same check on any file for words you enter, for example one redacted in another program.
-
-Notes:
-
-- Pages with content that can't be cut out precisely (such as a scanned picture in an unusual format) are turned into a picture with the boxes painted in.
-- Redacting a signed document rewrites the file so nothing removed stays in it. This invalidates its signatures, and Quintess says so.
-
-# Security
-
-- **Tools ▸ Protect ▸ Protect with password** encrypts the file (AES-256 or AES-128). A password to open it is optional; you can also restrict printing, copying, editing, comments and form filling.
-- **Tools ▸ Protect ▸ Encrypt for certificates** lets only chosen people open the file, by their digital certificates (the .cer, .crt or .pem files they send you), with no shared password. Each person can have their own permissions, and one can be allowed to change the security later. Add your own certificate too (**Add my own** uses your Quintess signing identity), or you won't be able to open the file yourself. RSA certificates only.
-- To open a file encrypted for you, choose your certificate with its private key: a .pfx or .p12 file (with its password, which is never saved), or a .pem holding both. Certificates in the Windows store can't open these files.
-- Files keep their protection when you edit and save them, whether it is a password or certificates. **Remove protection** takes it off (for a certificate file, only if your certificate allows it).
-- **Remove metadata** clears the document properties and hidden metadata.
-
-# Digital signatures
-
-## Signing
-
-**Sign here**: drag a box where the signature should appear, then choose what to sign with:
-
-- **A certificate file** (.pfx or .p12) from a certificate authority, with its password. The password is used for this signature only and never saved.
-- **A certificate installed in Windows**, including smart cards and keys that can't be copied (Windows may ask for your PIN). This choice appears only on Windows; on Linux, sign with a certificate file.
-- **Your own Quintess identity** (**Tools ▸ Sign ▸ Create signing identity** makes one). Other programs show it as unverified, since no authority vouches for it.
-
-Tick **Add a trusted timestamp** to have a timestamp server vouch for when you signed, so the signature stays provably on time even after your certificate expires. Only a fingerprint of the signature is sent.
-
-Edits after signing are added after the signature, which stays valid; readers show that the document changed after signing. Redacting or removing content rewrites the file and invalidates the signature.
-
-## Checking signatures
-
-**Check signatures** shows each signature as:
-
-- **Valid**: the document is unchanged and the signer's certificate leads to an authority you trust.
-- **Intact, but the signer isn't trusted**: unchanged, but no trusted authority vouches for the signer, or the certificate had expired or wasn't meant for signing when the signature was made. The reasons are listed.
-- **INVALID**: the document or signature was altered, or the certificate was revoked.
-
-Quintess trusts the same authorities as Firefox and, on Windows, the system's. **Trust…** under a signature trusts its certificate from then on. Checking never uses the network; **Check for revocation** asks the issuers online whether a certificate was revoked, and **Add long-term validation** stores the certificates and those answers in the document, so the signatures can still be checked years from now without a network.
-
-# Scanned documents (OCR)
-
-**Tools ▸ Recognize text (OCR)** reads the text in scanned pages and lays it invisibly over the page, so you can search, select and copy it while the page looks exactly as before. Recognition runs on your computer. Pages that already have text are skipped.
-
-# QR codes
-
-**Tools ▸ Find QR codes** reads the QR codes printed on the pages and outlines each one. Click a code to see what it holds:
-
-- **Web address**: the site's name is shown large, with warnings for tricks (a name before "@", a bare number address, look-alike letters, unencrypted links). Open it only if it's what you expect.
-- **Wi-Fi network**: the network name and password, ready to copy.
-- **Email**, **phone number**, **text message**, **map location**, **contact card** (save it as a .vcf file) or plain text.
-
-# Converting documents to PDF
-
-**File ▸ Create ▸ From a file** turns Word, OpenDocument, spreadsheets, CSV, presentations, web pages, text and Markdown into PDFs; **From a web page** prints a page from the internet. The dialog lists the converters on your computer and how faithful each is:
-
-- **Built-in** is always there and never uses the network. Word documents get a built-in page layout (approximate; fonts you don't have are replaced). OpenDocument text, simple web pages and Markdown become a simplified document; spreadsheets and CSV become a table of their values.
-- **LibreOffice** (free to install), **Microsoft Office** and **a browser** (Edge or Chrome) give higher fidelity when installed. Office opens the document invisibly in Word, Excel or PowerPoint, and asks your permission each time. Microsoft Office is used only on Windows; on Linux, install LibreOffice (and Chromium or Chrome for web pages).
-
-Converters run with the network blocked for files on your computer and are stopped after two minutes. Quintess always says which converter it used and what it left out.
-
-# Compare, convert and export
-
-- **Tools ▸ Compare with another version** lists the text changes and shows a visual overlay report.
-- **File ▸ Export as** saves a Word document, Markdown or a web page; **File ▸ Export** saves text, pictures of the pages, the pictures embedded in the document, form data or a comment summary.
-
-## Tables, Excel and PowerPoint
-
-Quintess finds tables on its own: from ruling lines where the page has them, and from how the text lines up where it doesn't. Ordinary paragraphs, bullet lists and empty grids are left alone.
-
-- **File ▸ Export as ▸ Excel workbook** makes one sheet per page: text lines in rows, tables in their columns. Numbers such as `1,234.50`, `(45)`, `12%` and `$3.00` become real numbers that display as they did on the page. **Excel, tables only** writes just the tables, one per sheet ("Page 3 table 1").
-- **Tables as CSV** writes one CSV file per table into a folder you choose.
-- **PowerPoint, page pictures** makes one slide per page that looks exactly like the PDF. **PowerPoint, editable** builds real text boxes, pictures and lines instead, which you can edit but which may differ slightly from the original.
-
-From the command line: `quintess tables report.pdf` lists the tables found (`--json` for positions and spans); `quintess export report.pdf -f xlsx` (`--tables-only`), `-f csv` (`--table 2` for one table) and `-f pptx` (`--editable`, `--dpi`).
-
-# File size, accessibility and archiving
-
-- **File ▸ Reduce file size**: *Keep quality* compresses without changing anything visible; *Balanced* and *Smallest* also resample pictures (Smallest removes metadata, attachments and scripts too). *Custom* sets resolution and quality.
-- **Tools ▸ Accessibility** checks the document (title, language, tags, alternate text and more) and fixes what it can automatically. When nothing fails and you have reviewed the items only a person can judge (marked ?, such as alternate text and contrast), **Declare PDF/UA-1** marks the document as meeting the PDF/UA standard.
-
-## Tags and reading order
-
-Screen readers use a PDF's tags to know what each part of a page is (a heading, a paragraph, a list, a picture) and in what order to read it. The **Tags** panel in the sidebar (or **Tools ▸ Accessibility ▸ Tags and reading order**) shows them.
-
-- **Add tags to document** tags a file that has none, from its layout: headings by size and weight, paragraphs, bulleted and numbered lists, pictures, simple ruled tables, links and form fields. Repeated headers, footers and page numbers become decoration that screen readers skip. Check the result, and write alternate text for each picture it flags (shown in orange).
-- Select an element in the tree to change its type, its **alternate text** (describe each picture), its actual text or its language. **↑** and **↓** move it earlier or later in the reading order; **Unwrap** removes the tag but keeps what it holds; **Mark as decoration** makes screen readers skip it.
-- **Show the reading order on the page** numbers the tagged regions in the order they will be read, and lists them in the panel, where you can move them up and down.
-- **Tag an area**: drag a box around untagged text or a picture and choose what it is.
-
-Tagging never changes how the page looks.
-
-## PDF/A and PDF/X
-
-**Tools ▸ Standards ▸ PDF/A** checks a document for long-term archiving and converts it. Choose the level:
-
-- **PDF/A-1b**: the strictest, with no transparency.
-- **PDF/A-2b**: the usual choice. **2u** also needs every font to map its text to Unicode.
-- **PDF/A-3b** and **3u**: like 2b and 2u, and files of any type may be attached.
-- **PDF/A-4** (based on PDF 2.0) and **4f** (with attached files).
-
-**Tools ▸ Standards ▸ PDF/X** prepares a file for a print shop: **PDF/X-1a** (CMYK and spot colors only, no transparency) or **PDF/X-4** (transparency and RGB allowed). Choose your printer's ICC profile; PDF/X-1a needs a CMYK one, and PDF/X-4 falls back to sRGB without one. For PDF/X-1a, Quintess can convert RGB colors and pictures to CMYK with a simple formula; use your layout program for color-critical work.
-
-Converting fixes what Quintess can (color profile, identification, trim box, scripts, compression) and lists plainly what it can't, such as fonts that aren't embedded or transparency under PDF/A-1b. A file is marked as PDF/A or PDF/X only when nothing unfixable remains. These checks are not a certified validator: use veraPDF, or your print shop's preflight, for a final word.
-
-# Attachments
-
-Files attached to a PDF are listed in the sidebar's **Files** section, where you can save or remove them. **Tools ▸ Attach a file** adds one.
-
-# Printing
-
-**File ▸ Print** (Ctrl+P) chooses the printer, pages, copies, scaling (fit or actual size), automatic rotation, grayscale, two-sided printing and whether to print comments. **Properties…** opens the printer's own settings (paper, tray, quality).
-
-On Linux, Quintess prints through CUPS (the cups-client package): it sends the chosen pages as a PDF, and CUPS fits them to the paper. There is no Properties button; choose the **Paper** size in the dialog, and set trays and quality in your system's printer settings.
-
-## Print production
-
-- **Make a booklet** (Tools ▸ Print production) lays the pages out two to a sheet, so that printed double-sided and folded they read in order. Choose the paper (it is used sideways: letter paper makes half-letter pages, tabloid makes letter pages), the binding side, how many sheets nest in each stack for thick booklets, creep (how far inner sheets move toward the fold) and a gutter. Print the result double-sided, flipping on the short edge, at actual size.
-- **Make a poster** splits each page into tiles on smaller paper, to print and join into a large poster. Choose a scale or a size to fit (such as 24 × 36 inches), the overlap for gluing, trim marks and row-and-column labels.
-- **Output preview** lists the inks the document prints with (cyan, magenta, yellow, black and spot colors, with their pages), shows any one ink as a gray plate where dark means more ink, and warns where the four process inks add up to more than a limit such as 300%. It is an approximation without color profiles or overprint.
-- **Convert to grayscale** and **Convert RGB to CMYK** change the document's colors and pictures with simple formulas, without ICC profiles. Spot colors stay as they are, and Quintess says how many pictures it couldn't convert.
-
-# Automation
-
-## Actions
-
-An action is a list of steps (OCR, redaction, watermark, page changes, reducing file size and more) run on many files at once. **Tools ▸ Run an action on files** runs one.
-
-## Recording an action
-
-**Tools ▸ Record an action** starts recording. Apply the steps you want to the open document; a red bar lists them. **Stop and save** writes the action and offers to run it on other files. Text edits, comments, signing and form filling aren't recorded, since they belong to one document. Bates numbers continue from file to file when an action runs on several.
-
-## Watching a folder
-
-**Tools ▸ Watch a folder** runs an action on every PDF dropped into a folder while Quintess is open. Results go to a "Done" folder; originals move to "Processed", or to "Failed" with a note saying why.
-
-# The object inspector
-
-Choose the **Inspect** tool (the ⓘ button in the dock) and click anything on a page to see what it is: a text's font, size, embedding and whether editing can reuse it; a picture's pixel size, resolution and compression; a shape's colors and line width. The chosen object is outlined on the page.
-
-# The command line
-
-The `quintess` command does nearly everything the app does, for scripts and batch work. Run `quintess --help` for the list, and `quintess <command> --help` for each one. A few examples:
-
-- `quintess merge a.pdf b.pdf -o both.pdf`
-- `quintess redact contract.pdf --text "Jane Roe" -o redacted.pdf`
-- `quintess form merge form.pdf --data people.xlsx --name "{Last}"`
-- `quintess search-folder C:\Contracts "termination"`
-- `quintess qr flyer.pdf`
-- `quintess watch C:\Inbox --action stamp.json`
-
-Commands overwrite the input unless you give `-o`; they write safely, so a crash never leaves a broken file. Set the `QUINTESS_PASSWORD` environment variable to open protected files without typing the password on the command line.
-
-# Keyboard shortcuts
-
-- **Ctrl+K** or **Ctrl+Shift+P**: command palette
-- **Ctrl+O**: open; **Ctrl+S**: save; **Ctrl+Shift+S**: save as; **Ctrl+W**: close
-- **Ctrl+P**: print
-- **Ctrl+Z**: undo; **Ctrl+Y** or **Ctrl+Shift+Z**: redo
-- **Ctrl+F**: find; **F3** / **Shift+F3**: next / previous match
-- **Ctrl+Shift+F**: search a folder
-- **Ctrl+H**: find and replace text
-- **Ctrl+G**: go to page
-- **Ctrl+plus** / **Ctrl+minus**: zoom; **Ctrl+0**: fit width
-- **Page Up**, **Page Down**, **Home**, **End**: move through pages
-- **F11**: full screen
-- **F1**: this guide
-- **Esc**: back to the Select tool
+- Menu paths are written like **Tools ▸ Pages ▸ Rotate…**: open the Tools menu, then Pages, then choose Rotate.
+- "Document" means the PDF you have open. "File" means a file on disk.
+- Buttons are named by their label, or by the tooltip that appears when you hover over them.
 
 # Installing
 
 ## Installing on Windows
 
-Download the installer (`Quintess-<version>-setup.exe`) from the releases page at github.com/bhanright/quintess/releases and run it. It installs for your user account only, with no administrator rights needed, and offers Quintess for opening PDFs without changing your default. Remove it from Windows Settings ▸ Apps.
+Download the installer (`Quintess-<version>-setup.exe`) from the releases page at github.com/bhanright/quintess/releases and run it. It installs for your user account only, with no administrator rights needed, and offers Quintess for opening PDFs without changing your default. The installer isn't code-signed yet, so Windows may show a SmartScreen warning. Remove Quintess from Windows Settings ▸ Apps.
 
 ## Installing on Linux
 
@@ -448,23 +42,741 @@ Each download has a `.sha256` file beside it; `sha256sum -c quintess_<version>_a
 
 On apt systems the first ones are installed with Quintess unless you turned off recommended packages.
 
-**What differs from Windows**: there is no certificate store to sign from (use a .pfx or .p12 file), Microsoft Office can't convert documents (LibreOffice can), printing has no driver Properties dialog (choose the paper size in the Print dialog), and Quintess doesn't update itself. Settings are in `~/.config/quintess`, recovered documents and downloaded models in `~/.local/share/quintess`, and extra spelling dictionaries are also found in `/usr/share/hunspell`.
+**What differs from Windows**: there is no certificate store to sign from (use a .pfx or .p12 file), Microsoft Office can't convert documents (LibreOffice can), printing has no printer Properties dialog (choose the paper size in the Print dialog), and Quintess doesn't update itself.
+
+# Getting started
+
+## Opening documents
+
+- **File ▸ Open…** (Ctrl+O), or drop PDF files anywhere on the window. Dropped pictures become new PDFs.
+- **File ▸ Open recent** lists the files you opened before; the command palette finds them too.
+- Each document opens in its own tab. A dot on a tab (in the Classic look, a • after the name) means unsaved changes.
+- A file you opened before reopens at the page where you left it, and at the zoom if you set one by hand.
+- Password-protected files ask for their password. Files encrypted for certificates ask for your certificate (see **Protecting documents**).
+
+## Saving and keeping an original
+
+Edits change the open document only. Nothing is written to disk until you save.
+
+- **File ▸ Save** (Ctrl+S) writes over the file you opened.
+- **File ▸ Save as…** (Ctrl+Shift+S) writes a new file. The tab then shows the new file, and the original stays as it was.
+- **File ▸ Save compressed copy…** writes a separate, losslessly compressed copy. The open document doesn't change.
+- **File ▸ Export as** and **File ▸ Export** write other formats (Word, Excel, text, pictures and more). They don't change the open document.
+
+Quintess saves through a temporary file that replaces the old one at the end, which reduces the risk of a broken file if the save is interrupted.
+
+**Keep a copy of the original** before work that removes content for good: redaction, flattening, replacing tags, **Smallest** compression and recorded actions run on many files. The safest habit is **Save as…** under a new name before you start.
+
+Closing a tab with unsaved changes asks first. Quitting Quintess (File ▸ Quit or the window's close button) does not ask, so save your documents before you quit.
+
+## Studio and Classic
+
+Quintess has two looks. **Studio** (the default) has a slim header with the menus and a command field, and a floating dock of tools at the bottom of the page. **Classic** has a traditional menu bar and toolbar. Switch in **Edit ▸ Preferences…** under **Look**, or with **View ▸ Studio or classic look**. Both looks have dark and light modes (**View ▸ Dark interface**).
+
+In Studio, the dock holds the common tools. **More tools** (the ⋯ button) holds the rest, and **Organize pages** is at its right end.
+
+## The sidebar
+
+The sidebar on the left has eight sections: **Pages** (thumbnails), **Bookmarks**, **Comments**, **Fields**, **Search**, **Files** (attachments), **Layers** and **Tags**. In Classic they are tabs; in Studio they are icons, and hovering shows each name. Show or hide the sidebar with the **Sidebar** button in the header, or **View ▸ Sidebar**.
+
+## The command palette
+
+Press **Ctrl+K** (or Ctrl+Shift+P), or click the **Search or run a command** field in the Studio header. Type a few letters and press **Enter**. The arrow keys move through the matches, and **Esc** closes the palette. Type a number to jump to that page.
+
+## Undo and redo
+
+**Ctrl+Z** undoes up to 60 recent edits in the open document; **Ctrl+Y** or **Ctrl+Shift+Z** redoes them. The **Edit** menu names the edit it will undo. The history lasts while the document is open, including after you save, and is gone once you close it.
+
+# Reading and searching
+
+## Moving through a document
+
+- Scroll, or use **Page Up**, **Page Down**, **Home** and **End**.
+- **Ctrl+G** goes to a page by number or by its label (such as "iv"). In Studio, the page number in the dock does the same when clicked.
+- Click a thumbnail in the sidebar's **Pages** section to go to that page.
+
+## Zoom and split view
+
+- **Ctrl+plus** and **Ctrl+minus** zoom; **Ctrl+0** fits the page width. Ctrl+scroll zooms with the mouse. **View ▸ Fit page** and **View ▸ Actual size** are in the menu.
+- **Split view** (the **Split view** button in the header, or **View ▸ Split view**) shows the document twice, side by side. Each side has its own page and zoom; click a side to make the zoom and page keys act on it.
+- **View ▸ Night reading** inverts the page colors for reading in the dark.
+- **View ▸ Full screen**: F11.
+
+## Page memory
+
+Quintess prepares nearby pages to make scrolling faster, and pages ahead in the direction you scroll are prepared first. Nearby pages may show a low-resolution preview while the full rendering loads.
+
+In **Edit ▸ Preferences…**, **Page memory** sets how much memory those page pictures may use: **Low** (256 MB) for older computers, **Balanced** (768 MB, the default), **Fast scrolling** (2 GB) for long documents, or any amount on the slider. More memory keeps more pages ready.
+
+## Selecting and copying text
+
+With the **Select** tool, drag across text to select it, then press **Ctrl+C** (or **Edit ▸ Copy selected text**). **Edit ▸ Copy text of this page** copies the whole page. Scanned pages have no text to select until you run OCR (see **Scanned documents and OCR**).
+
+## Bookmarks
+
+The sidebar's **Bookmarks** section lists the document's bookmarks; click one to go to its page.
+
+- To add one, go to the page, type a title in the **New bookmark title** field and click **Add**. New bookmarks go at the top level, in page order.
+- To delete one, right-click it and choose **Delete bookmark**. A bookmark that has others nested under it can't be deleted this way.
+
+Quintess can't rename, move or nest bookmarks yet.
+
+## Searching
+
+- **Ctrl+F** opens the sidebar's **Search** section. Type and press **Enter**. **Match case**, **Whole words** and **Regular expression** refine the search. Results are grouped by page; click one to go to it, or use **F3** and **Shift+F3** to step through the matches.
+- **Edit ▸ Search a folder…** (Ctrl+Shift+F) searches every PDF in a folder. Choose the folder, then set **Include subfolders**, **Whole words**, **Match case** and **Regular expression**. Click a result to open that file at the page.
+
+## Reading aloud
+
+**View ▸ Read out loud** reads the document with your computer's own voices. Nothing is sent anywhere.
+
+- **Read this page** (Ctrl+Shift+V) or **Read to the end** (Ctrl+Shift+B). The paragraph being read is outlined, and pages turn as reading moves on.
+- The bar at the bottom has **Pause** and **Resume** (Ctrl+Shift+C), **Skip** to the next paragraph, **Stop** (Ctrl+Shift+E), a speed slider and a voice list. **Resume** starts the current paragraph again from its beginning.
+- On Windows, more voices can be added in Windows Settings ▸ Time & language ▸ Speech. On Linux, reading aloud needs the `speech-dispatcher` package, and its voices come from the speech engines installed for it (such as `espeak-ng`).
+- Scanned pages have no text to read until **Tools ▸ Recognize text (OCR)** adds it.
+
+## QR codes
+
+**Tools ▸ Find QR codes** reads the QR codes printed on the pages and outlines each one. Click a code to see what it holds:
+
+- **Web address**: the site's name is shown large, with warnings for common tricks (text before "@", a bare number address, non-Latin letters that can imitate a familiar name, and unencrypted http links). **Open in browser** only if it's what you expect.
+- **Wi-Fi network**: the network name and password, ready to copy.
+- **Email**, **phone number**, **text message**, **map location** (opens OpenStreetMap), **contact card** (**Save contact…** writes a .vcf file) or plain text.
+
+## Article threads
+
+Magazines and newspapers sometimes define the reading order of a story that jumps between columns and pages. **Tools ▸ Article threads…** lists these stories: **Go to start**, **Copy text** (the story's text in reading order) or **Delete** the thread.
+
+# Creating PDFs
+
+All of these are under **File ▸ Create**. Each new PDF opens in a new tab, unsaved, so choose **Save as…** to keep it.
+
+## Blank documents, pictures and text
+
+- **Blank document**: one empty letter-size page.
+- **From images…**: one page per picture (PNG, JPEG, GIF, BMP, WebP or TIFF), sized to the picture.
+- **From text or Markdown…**: a plain text file or a Markdown file, typeset with simple styles.
+
+## Office documents and web pages
+
+**From a file (Word, Excel, PowerPoint, web page…)…** turns Word, OpenDocument, RTF, spreadsheets, CSV, presentations, web pages, text and Markdown into PDFs. Choose the file, then pick a converter from the list. The list shows the converters on your computer and how faithful each is. **Built-in** is selected first; choose another if it's installed and you want higher fidelity.
+
+- **Built-in** is always there and never uses the network. Word documents (.docx) get a built-in page layout: approximate, and fonts you don't have are replaced. OpenDocument text, simple web pages and Markdown become a simplified document. Spreadsheets and CSV become a table of their values: formulas show their last saved results, and colors, merged cells, charts and pictures are left out. It can't convert presentations, .doc or .rtf files.
+- **LibreOffice** (free to install) handles Word, OpenDocument, RTF, spreadsheets, presentations and web pages with higher fidelity. It runs with macros off and the network blocked, so pictures the document links to on the web are missing.
+- **Microsoft Office** (on Windows only) opens the document invisibly in Word, Excel or PowerPoint. You must tick **Let Quintess open this document in Microsoft Office to convert it** each time. Quintess turns macros off and opens a read-only copy, but it doesn't block Office from the network.
+- **Microsoft Edge** or **Chrome or Chromium** print web pages. Local web pages are printed with the network blocked, so pictures, fonts and styles from the web are missing.
+
+On Linux, install LibreOffice for Office documents and presentations, and Chromium or Chrome for web pages.
+
+External converters are stopped after two minutes. When conversion finishes, the status bar names the converter and lists what it left out.
+
+**From a web page…** prints a page from the internet with Edge, Chrome or Chromium. Enter an address starting with http:// or https://. This loads the page over the network.
+
+## Scanning
+
+**From a scanner…** lists the scanners on your computer: on Windows through Windows' own scanner support (WIA), on Linux through SANE (the `sane-utils` package and your scanner's driver). Choose the **Resolution** (300 dpi suits OCR and printing), **Color**, **Gray** or **Black and white**, and whether to **Take every sheet in the document feeder**. **Make the text searchable (OCR)** recognizes the text as soon as the pages arrive.
+
+## Combining PDFs
+
+**Combine files…** asks for the PDFs in the order you want them and merges them into one document, with a bookmark for the start of each file.
+
+# Pages
+
+## Organizing pages
+
+Click **Organize pages** in the dock (or **Tools ▸ Pages ▸ Organize pages**) to see every page as a thumbnail. Drag pages to reorder them. Click to select a page, Shift+click to select a range, or **Select all**. The buttons above the pages rotate, delete, duplicate or extract the selected pages, move them earlier or later, or add a blank page after them. Click **Done** to go back to reading.
+
+## Page tools
+
+Under **Tools ▸ Pages**:
+
+- **Rotate…**, **Delete…**, and **Extract…** (copies pages into a new document).
+- **Insert blank pages…** and **Insert from file…**.
+- **Split…**: every N pages, by page ranges (separated by semicolons, such as `1-3; 4-10; 11-end`), or at each top-level bookmark. The parts are saved next to the document unless you choose an **Output folder…**. Files with the same names there are replaced.
+- **Crop…** sets margins to hide. The hidden content stays in the file; to remove content for good, use redaction.
+- **Resize to paper size…** and **Several pages per sheet…** (2-up, 4-up and so on).
+- **Page labels…** (such as roman numerals for front matter) and **Reverse order**.
+- **Remove blank pages** removes pages that draw nothing at all. A scanned page that looks blank still holds a picture, so it is kept.
+
+Page ranges accept forms like `1-3, 7, odd, even, 10-end`. `!4` leaves out page 4 from what came before, as in `all, !4`.
+
+# Editing text
+
+## Editing a paragraph or line
+
+1. Choose the **Edit text** tool in the dock (or **Edit ▸ Edit page text**). Each paragraph Quintess detects gets a faint outline.
+2. Click text to edit the paragraph Quintess detects. If the grouping is wrong, as in tables and lists, click **Line only** to edit just the clicked line.
+3. Type your changes. In a paragraph, **Enter** starts a new line and **Ctrl+Enter** applies; in a single line, **Enter** applies. **Esc** cancels.
+
+The paragraph re-wraps at its original width, line spacing and alignment. The bar above the text also has the alignment buttons, **Apply**, **Cancel**, and **Delete this paragraph** (or line). Applying empty text deletes it too.
+
+## Styles
+
+Select words in the editor, then use **Bold**, **Italic**, **Underline**, **Strikethrough** or **Color** in the bar. With nothing selected they apply to the whole paragraph. The size box sets the size of the whole paragraph. The font menu (**Sans**, **Serif** or **Mono**) replaces the paragraph's font with a standard one. Each word keeps its style as you edit, and letters typed onto a styled word continue its style.
+
+## When a paragraph grows
+
+The menu in the editing bar (**What happens when the paragraph grows**) chooses what happens when new text needs more lines:
+
+- **Push text down** (the default) moves what follows in the same column down by as much as the paragraph grew. The bottom 6% of the page is treated as the footer and is never moved into. If there's no room above it, the paragraph shrinks instead, as with Shrink to fit.
+- **Shrink to fit** makes the text smaller, down to 75% of its size, to fit its old space. If it still doesn't fit, it overlaps what follows.
+- **Allow overlap** lets it run over what follows.
+
+## The edit preview
+
+While you type, Quintess shows the result on the page: where the paragraph will end, which text below will move and where it lands, anything it would overlap, and the footer zone. The bar says how far text moves, whether the paragraph shrinks, and which font stands in for an original one. Click **Result** to see the finished page before applying, especially after adding a lot of text.
+
+## Fonts
+
+Quintess reuses the document's own font when the document already shows every letter you typed in that font, so edits match the text around them. Otherwise it embeds the original font again if it can, and if not, a similar font stands in (on Windows, Arial, Times New Roman or Courier New; on Linux, Liberation fonts if installed). The edit preview names any stand-in.
+
+## Moving, adding and deleting text
+
+- With the **Edit text** tool, drag a paragraph to move it. It keeps its look.
+- Click empty space to add new text there. Type it in the **Add text to the page** box; it is added in black Helvetica.
+- **Delete this paragraph** (the trash button in the editing bar) deletes the paragraph or line.
+
+## Find and replace
+
+**Edit ▸ Find and replace text…** (Ctrl+H) replaces words or phrases throughout the page text, line by line, keeping each line's style. **Match case** and **Regular expression** refine the search. A match split across two lines isn't replaced.
+
+# Spelling
+
+Quintess checks spelling as you type and can go through a whole document. It uses Hunspell dictionaries, the same kind LibreOffice and Firefox use. English (US, UK, Canada, Australia), Spanish, French, German, Portuguese (Brazil) and Italian come with Quintess, and about 50 more languages can be added.
+
+## While typing
+
+- Misspelled words are underlined in red while you edit page text, write a comment or a text box, or fill in a form field.
+- Right-click an underlined word for suggestions, **Add to dictionary** or **Ignore**.
+- A repeated word ("the the") is underlined too; right-click it to delete the repeat.
+
+## Checking a whole document
+
+1. Choose **Tools ▸ Check spelling…** (F7).
+2. Quintess looks through the page text, comments and form fields, and shows the first misspelled word on its page.
+3. Pick a suggestion (or type the right spelling) and choose **Change**, or **Change all** for every occurrence. **Skip** moves on, **Ignore all** ignores the word until Quintess closes, and **Add to dictionary** remembers it.
+
+Each change is an ordinary edit you can undo. Changing page text rewrites the line in its own font, as text editing does.
+
+## Languages and your dictionary
+
+- In **Edit ▸ Preferences…**, **Spelling** turns checking while typing on or off and picks the dictionary. "System language" follows your computer's setting.
+- **Add a language…** (beside the dictionary choice) downloads one of about 50 languages from the open-source wooorm/dictionaries collection, or installs any Hunspell dictionary you have (pick its `.dic` file; the `.aff` file must be beside it). Added languages can be removed there too.
+- Dictionaries can also be copied by hand into the `dictionaries` folder in Quintess's settings folder (see **Preferences and troubleshooting**). On Linux, dictionaries installed with the system (`/usr/share/hunspell`) are found automatically.
+- Words you add are kept in `personal-dictionary.txt` in the settings folder, one per line; you can edit it.
+- Words with digits, ALL-CAPS abbreviations, web and email addresses and file names are not checked.
+
+From the command line: `quintess spell file.pdf` lists misspelled words with suggestions (`--language en-GB`, `--json`, `--languages`, `--download pt-PT`, `--install fr_FR.dic`).
+
+# Pictures, shapes and layers
+
+The **Edit pictures and shapes** tool (in the dock, or **Edit ▸ Edit pictures and shapes**) changes the pictures, drawings and grouped artwork already on a page. Other page content stays unchanged unless you turn on **Wrap text**.
+
+## Selecting and changing objects
+
+- Click a picture or drawing to select it. Shift+click adds to or removes from the selection, and dragging a box over empty space selects everything inside it.
+- Drag the selection to move it, or use the arrow keys (1 point at a time, 10 with Shift).
+- Drag a handle to resize. Corner handles keep the proportions; hold **Shift** to stretch freely.
+- The toolbar above the selection has **Rotate left**, **Rotate right**, **Flip left to right**, **Flip top to bottom**, **Bring forward one step**, **Send backward one step**, **Front**, **Back** and **Delete**. The **Delete** key deletes too, and **Esc** clears the selection.
+- **Opacity** makes the selection see-through (0 to 100%) and sets its blend mode (Multiply, Screen, Overlay and the rest, as in image editors). Click **Apply**.
+- **Edit ▸ Add picture…** places a picture from a file in the middle of the current page, selected and ready to move and resize.
+
+Every change is a normal edit you can undo.
+
+## Cropping and replacing pictures
+
+- **Crop**: click it, then drag over the part of the picture to keep. Cropping hides the rest of the picture; the full picture stays in the file. To remove content for good, use redaction.
+- **Replace…** puts another picture in its place, fitted inside the same space with its proportions kept. It appears when only pictures are selected.
+
+## Text wrap
+
+Select one picture and choose **Wrap text** in its toolbar: the paragraphs beside it are laid out again so their lines flow around the picture, keeping a small gap, and the text below moves down to make room. From then on the text follows the picture: move it, resize it or delete it, and the paragraphs are laid out again. Choose **Wrap text** again to stop, and the lines go back to full width.
+
+Lines use the wider side of the picture. Text you edit by other means afterward is left as it is, as ordinary text.
+
+## Layers
+
+Some documents group their content into layers, such as one for each language or one for dimensions on a drawing. The sidebar's **Layers** section lists them.
+
+- The eye button shows or hides a layer, and the printer button chooses whether it prints. The visibility you set is what readers see when they open the document.
+- The lock button stops the layer's pictures and shapes from being picked on the page with **Edit pictures and shapes**. It is a convenience while editing, not protection: anyone can unlock it, and a locked object can still be selected from the list below.
+- Double-click a name to rename the layer. The up and down arrows change the order of the layer list; they don't change which objects are drawn on top.
+- **New layer** adds an empty layer. To fill it, select pictures or shapes with **Edit pictures and shapes**, then choose the layer under **Move selection to**.
+- The ⋯ menu on a layer has **Delete, keeping its drawing** (the content stays on the page, outside any layer), **Delete with its drawing** (the content is removed), and **Merge into** another layer.
+
+Below the layers, **Objects on page** lists the current page's pictures and drawings, top of the stack first, with each one's layer. Click one to select it; **Bring forward** and **Send backward** change the stacking.
+
+## The object inspector
+
+Choose the **Inspect** tool (in the dock, or **Tools ▸ Inspect objects**) and click anything on a page to see what it is: the text's font, size, embedding and whether editing can reuse it; a picture's pixel size, resolution, color space and compression; a shape's colors and outline. The chosen object is outlined on the page, and **Copy details** copies the information.
+
+# Comments and measuring
+
+## Markup tools
+
+The dock holds the common markup tools; **More tools** in the dock, or **Tools ▸ Comment**, has the rest.
+
+- **Highlight**, **Underline**, **Strikethrough** and **Squiggly**: drag across text.
+- **Note**: click to place a sticky note.
+- **Text box**, **Rectangle**, **Ellipse**, **Line**, **Arrow**: drag to draw.
+- **Draw**: freehand ink.
+
+The **Color** and **Line width** controls appear in the dock while a markup tool is selected. To delete a comment on the page, click it and press **Delete**.
+
+## Reviewing comments
+
+The sidebar's **Comments** section lists comments by page. Each has **Go to**, **Edit** and **Delete**. Select a comment to **Reply**. **Tools ▸ Comment ▸ Copy comment summary** copies all comments as text, and **File ▸ Export ▸ Comment summary…** saves them to a file.
+
+## Stamps and links
+
+- **Stamp**: click to place a stamp. Set its text in **Tools ▸ Stamp and number**, in the **Stamp tool label** field.
+- **Link**: drag a box, then enter a web address or a page.
+
+## Measuring
+
+The **Measure** tool (in **More tools**, or **Tools ▸ Measure**) measures on the page at a drawing's scale.
+
+1. Choose **Distance**, **Perimeter** or **Area** in the bar above the page.
+2. Click points on the page. A distance needs two clicks; for a perimeter or area, double-click or press **Enter** to finish. **Backspace** removes the last point and **Esc** starts over.
+3. The value shows beside the pointer while you measure, and the finished measurement is added to the page as a comment labeled with the result, which Acrobat and other readers also recognize.
+
+**The scale.** **Set scale…** takes a scale such as `1 in = 10 ft`, `1 cm = 2 m` or `1:100 m`, or one of the presets. To match a drawing, choose **Calibrate**, click both ends of a length you know, and type its real length. Drawings exported from CAD programs often carry their own scale; inside the drawing's area, Quintess uses it for the saved measurement.
+
+## Flattening and removing comments
+
+**Keep a copy of the original** before flattening or removing comments.
+
+- **Tools ▸ Comment ▸ Flatten comments and form fields into the page** draws every comment and form field into the page as ordinary content, then removes them. Links stay. The comments can no longer be edited, and the form fields can no longer be filled. Hidden comments, and any without a drawn appearance, are removed rather than drawn.
+- **Tools ▸ Comment ▸ Remove all comments** deletes them.
+
+# Forms
+
+## Filling forms
+
+Click a field to type in it; checkboxes and radio buttons toggle with a click. The sidebar's **Fields** section lists the fields, with required ones marked by a red asterisk, and you can fill them there too.
+
+## Forms that calculate
+
+Many forms (tax forms, invoices, order forms) add up totals, check what you type and show amounts as currency or dates in a set pattern. Quintess supports common Acrobat form calculations, validation and formatting.
+
+- As you type, a field that takes only numbers or a set pattern refuses other characters, and a mask can add its dashes and parentheses.
+- When you finish typing in a field, totals update and amounts show formatted ("$1,234.50").
+- A value the form won't accept (out of range, a date that doesn't exist, letters in a phone number) is refused with the form's own message, and the field keeps its old value.
+- Importing data, filling from a spreadsheet and **Clear all fields** recalculate too.
+
+Quintess runs a field's keystroke, checking, calculation and formatting scripts, and the document's shared script functions they use. It doesn't run scripts a PDF asks to run when it opens, when a page is shown, or when a link or button is clicked. Form scripts can't read or write files, reach the internet or start programs, and Quintess stops waiting for a script that runs longer than a few seconds. Quintess supports a subset of Acrobat's scripting, so an unusual form may not calculate as it does in Acrobat.
+
+## Creating fields
+
+1. Choose **Tools ▸ Forms ▸ Add text field**, **Add checkbox** or **Add signature field** (text field and checkbox are also in the dock's **More tools**).
+2. Drag a rectangle where the field goes. A checkbox can also be placed with a single click.
+3. Type a name for the field, such as `first_name`, and click **Add**. A text field taller than about half an inch accepts several lines.
+
+**Tools ▸ Forms ▸ Detect fields automatically** turns blank lines (____) into text fields, named from the label before them, and box characters (☐) into checkboxes. It adds them all at once; check them in the **Fields** section and undo if the result is wrong.
+
+Quintess can't yet create radio buttons, drop-down lists or list boxes, or change a field's name or options after it is added.
+
+## Importing and exporting data
+
+- **Tools ▸ Forms ▸ Import data…** fills the form from a JSON or XFDF file, then reports any names that matched no field.
+- **File ▸ Export ▸ Form data** saves the values as JSON, XFDF or CSV.
+- XFDF keeps nested field names (such as `address.street`), list boxes with several choices, and styled text.
+
+## Filling from a spreadsheet
+
+**Tools ▸ Forms ▸ Fill from spreadsheet…** makes one filled copy of the form for every row of a CSV, Excel, OpenDocument or JSON file.
+
+1. Click **Choose spreadsheet…**. The first row holds the column names. In a workbook, only the first sheet is used.
+2. Check which field each column fills. Columns match the field with the same name (capitalization, spaces and punctuation don't matter, and a field's tooltip counts too). Reassign any column, or set it to **(not used)**. Fields no column fills are listed.
+3. Under **File names**, write a pattern such as `{Last name}, {First name}` or `{row}`.
+4. Choose **A folder of separate PDFs** (optionally flattened, so the values can't be changed) or **One combined PDF, a bookmark per copy**. The combined PDF is always flattened.
+5. Click **Fill N copies…**.
+
+For example, a spreadsheet with the columns `First name`, `Last name` and `Total` fills fields named `first_name`, `last_name` and `total`, and the pattern `{Last name}, {First name}` names one copy "Roe, Jane.pdf".
+
+Values that need a look (a choice the field doesn't offer, a required field left empty, a value the form refuses) are listed by row afterward. They are still filled in, so check those copies. Files in the folder with the same names as new copies are replaced.
+
+## Clearing and flattening fields
+
+- **Tools ▸ Forms ▸ Clear all fields** empties the form and recalculates it.
+- **Tools ▸ Forms ▸ Flatten fields into the page** draws the current values into the page and removes the fields, so they can't be changed. Comments stay. **Keep a copy of the original** first.
+
+# Stamps, headers and numbering
+
+Under **Tools ▸ Stamp and number**:
+
+- **Watermark…**: text across pages, with font, size, color, opacity, rotation and position, in front of or behind the page content. The tokens `{page}`, `{pages}`, `{date}`, `{file}` and `{title}` are filled in.
+- **Header and footer…**: text in six positions (left, center and right, at the top and bottom), with the same tokens plus `{label}`, `{time}` and `{bates}`.
+- **Bates numbering…**: legal numbering with a prefix, suffix, starting number and number of digits.
+- **Image stamp…**: a logo or seal on pages, with its width, opacity and position.
+- **Background color…**.
+
+Each dialog has a pages field that takes page ranges (see **Pages**).
+
+# Redaction
+
+Redaction removes content from the document for good, rather than just covering it. **Keep a copy of the original**: once you save, the removed content can't be brought back.
+
+## Marking, finding and applying
+
+Placing marks doesn't remove anything. Content is removed only when you apply the redaction with **Find and redact**.
+
+1. Mark what to remove. Drag across text with **Mark text for redaction** (in the dock) or draw boxes with **Mark area for redaction** (in **More tools**). Both are also under **Tools ▸ Redact**.
+2. Choose **Tools ▸ Redact ▸ Find and redact…**.
+3. To find more, type words or a pattern in **Text or pattern to remove**, and tick any of the kinds under **Also find**: email addresses, US phone numbers, Social Security numbers, credit card numbers, dates, IP addresses, US ZIP codes and web addresses.
+4. Keep **Apply redaction marks already placed in the document** ticked to include your marks. (If you untick it, marks on pages that have matches are deleted without being applied.)
+5. Optionally type a **Label in each box**, such as "REDACTED", and tick **Remove document properties and metadata too**.
+6. Click **Find matches**. Quintess says how many areas on how many pages will be removed. The kinds under **Also find** can match more than you expect (a ZIP code is any five-digit number), so check the count. If you change the search, click **Find matches** again.
+7. Click **Redact**. Text, pictures and shapes under the boxes are removed. Comments, links and form fields that touch a box are removed too, and a form field there loses its value.
+8. Read the check that follows (see below), look over the pages, then save.
+
+Notes:
+
+- A page whose content can't be cut out precisely (such as a picture in an unusual format, or a complex drawing crossing a box) is turned into a picture with the boxes painted in. Such a page loses its selectable text, links and comments, and no label is drawn on it. The message after redacting lists these pages.
+- Redacting a signed document rewrites the file so nothing removed stays in it. This invalidates its signatures.
+- Bookmarks, attachments and tags are not changed by redaction. The check below tells you if the removed text still appears there.
+
+## Checking the result
+
+After redacting, Quintess looks for the text that was under the boxes everywhere else in the document: elsewhere on the pages, in document properties, comments, form fields, bookmarks, attachments, hidden entries such as tags and scripts, and earlier versions saved inside the file. Each place is marked clear, needs review, found or not checked. You can save or copy the report.
+
+**Tools ▸ Redact ▸ Check for leftover text…** runs the same check for words you enter, one per line, for example on a document redacted in another program.
+
+## What the check can't see
+
+- Text inside pictures can't be read, so pictures under the boxes are always "not checked". For a scanned document, run **Tools ▸ Recognize text (OCR)** before searching, so the words can be found and checked.
+- Attachments are searched only if they are PDFs or plain-text kinds (such as .txt, .csv, .html or .xml). Other attachments are marked "not checked"; open them to check.
+- The check looks for each removed passage as a whole, not for parts of it.
+- The headline doesn't count places marked "not checked", so read the whole list, and look at the pages yourself before you share the document.
+
+# Protecting documents
+
+## Password protection
+
+**Tools ▸ Protect ▸ Protect with password…** encrypts the document with AES-256 (or AES-128, for readers older than Acrobat 9). Protection is applied when you save.
+
+- **Password to open** is optional. Without it, anyone can open the file, with the restrictions you choose.
+- **Allow readers to** lists what readers may do: print, copy, change the document, add comments, fill in forms, and insert, rotate and delete pages.
+- The **Permissions password** lifts the restrictions. If you leave it empty, Quintess makes one and shows it once; keep it somewhere safe.
+
+Restrictions depend on the reader program honoring them. Many readers do, but some don't, and Quintess itself doesn't enforce them. Only a password to open, or encryption for certificates, controls who can read the document.
+
+## Encrypting for certificates
+
+**Tools ▸ Protect ▸ Encrypt for certificates…** lets only chosen people open the file, by their digital certificates (the .cer, .crt or .pem files they send you), with no shared password. Only RSA certificates work.
+
+- Click **Add a certificate…** for each person. Each person has their own **What they may do** permissions, including **Change or remove the protection later**.
+- Add your own certificate too, or you won't be able to open the file yourself. **Add my own** uses your signing identity, but it needs an RSA key; identities made with **Create signing identity…** use a different kind of key, so add an RSA certificate of your own with **Add a certificate…** instead.
+- Encryption for certificates hasn't been tested with Adobe Acrobat yet.
+
+To open a file encrypted for you, choose your certificate with its private key: a .pfx or .p12 file (with its password, which is never saved), or a .pem file holding both. Certificates in the Windows certificate store can't open these files.
+
+## Keeping and removing protection
+
+- Files keep their protection when you edit and save them, whether it is a password or certificates.
+- **Tools ▸ Protect ▸ Remove protection** takes it off when you save. For a certificate file, it works only if your certificate allows changing the protection.
+- **Tools ▸ Protect ▸ Remove metadata** clears the document properties (title, author and so on) and the document's and pages' XMP metadata. Metadata inside pictures, comment authors, attachments and bookmarks are not changed.
+- **File ▸ Properties…** shows and edits the title, author, subject, keywords and creator, and shows the security in use.
+
+# Digital signatures
+
+## Signing
+
+Choose **Tools ▸ Sign ▸ Sign here (draw a box)**, or the **Sign here** tool, and drag a box where the signature should appear. Then choose what to sign with:
+
+- **A certificate file (.pfx or .p12) from a certificate authority**, with its password. The password is used for this signature only and never saved.
+- **A certificate installed in Windows (including smart cards)**: on Windows, when you have certificates with private keys. Windows may ask for your PIN. On Linux, sign with a certificate file.
+- **My own Quintess identity**. **Tools ▸ Sign ▸ Create signing identity…** makes one and saves it as a file. Keep that file private: it holds your signing key and isn't password-protected. Other programs show such signatures as not verified, since no authority vouches for them.
+
+Add a **Reason** and an optional **Location**. The signature shows your name from the certificate, the date, the reason and the location.
+
+Tick **Add a trusted timestamp** to have a timestamp server vouch for when you signed, so the signature can be shown to be on time even after your certificate expires. Only a fingerprint of the signature is sent. The server's address is shown and can be changed.
+
+## Editing after signing
+
+Quintess tries to save later edits as an update after the signed version, which keeps the signature valid, and readers show that the document changed after signing. Edits that remove content (redaction, deleting pages, removing comments, metadata or attachments, reducing file size) rewrite the whole file instead and invalidate the signature. An encrypted signed file is also rewritten when saved. Sign last, after all other changes.
+
+## Checking signatures
+
+**Tools ▸ Sign ▸ Check signatures** shows each signature as:
+
+- **Valid**: the signed version is unchanged and the signer's certificate leads to an authority you trust.
+- **Intact, but the signer isn't trusted**: the signed version is unchanged, but no trusted authority vouches for the signer, or the certificate had expired or wasn't meant for signing when the signature was made. The reasons are listed.
+- **INVALID**: the signed version or the signature was altered, the certificate was revoked, or the signature uses a method Quintess can't check (such as SHA-1, RSA-PSS or short RSA keys).
+
+A signature covers the document as it was when signed. If content was added afterward, the signature can still be **Valid**, and the reasons say "content was added after this signature". Read the reasons for each signature, not only the headline.
+
+Quintess trusts the authorities that Firefox trusts for websites and, on Windows, the system's trusted authorities. Checking never uses the network. Quintess doesn't check every rule a certificate chain can carry (name constraints and path lengths), or how fresh a stored revocation answer is. Adobe's list of approved signing authorities (AATL) isn't included.
+
+## Trusting a certificate
+
+When a signer isn't trusted, the result offers **Trust** with the certificate's name. It trusts the top certificate of the chain shown, which may be the authority that issued the signer's certificate rather than the signer; every signature from that authority then shows as trusted. Check the certificate in the **Certificates** section before you click, since it applies right away and to future documents.
+
+Trusted certificates are kept in the `trusted-certificates` folder in the settings folder. To remove one, run `quintess trust list` and `quintess trust remove <thumbprint>`, or delete its file there.
+
+## Revocation and long-term validation
+
+- **Check for revocation…** asks the certificates' issuers online whether any certificate was revoked.
+- **Add long-term validation** stores the certificates and those answers in the document, so the signatures can still be checked years from now without a network.
+
+# Scanned documents and OCR
+
+**Tools ▸ Recognize text (OCR)** reads the text in scanned pages and lays it invisibly over the page, so you can search, select and copy it while the page looks as before. Recognition runs on your computer and works best on Latin-script text.
+
+- Pages that already have text are skipped. If every page has text, Quintess says so and changes nothing.
+- The OCR models are included with the installer and the Linux packages. A copy built from source asks before downloading them once (about 12 MB).
+- Check recognized text before relying on it, especially for redaction: OCR can misread words.
+
+# Comparing and exporting
+
+## Comparing versions
+
+**Tools ▸ Compare with another version…** asks for the other file and lists the text added and removed on each page, and the pages that look different. **Open visual report** opens an overlay report in your browser.
+
+## Text, Word, Markdown and web pages
+
+- **File ▸ Export as ▸ Word document (.docx)…**, **Markdown (.md)…** and **Web page (.html)…** rebuild the text into headings, paragraphs and lists from the page layout, with the pictures. The result is meant for reuse, not an exact copy of the pages. Markdown puts its pictures in a folder beside the file.
+- **File ▸ Export ▸ Text…** saves the plain text.
+
+## Pictures
+
+- **File ▸ Export ▸ Pages as images…** saves each page as a PNG at 150 dpi in a folder.
+- **File ▸ Export ▸ Embedded images…** saves the pictures in the document as PNG files, skipping very small ones.
+
+## Tables, Excel and CSV
+
+Quintess finds tables on its own: from ruling lines where the page has them, and from how the text lines up where it doesn't. Ordinary paragraphs, bullet lists and empty grids are left alone.
+
+- **File ▸ Export as ▸ Excel workbook (.xlsx)…** makes one sheet per page: text lines in rows, tables in their columns. Numbers such as `1,234.50`, `(45)`, `12%` and `$3.00` become real numbers that display as they did on the page.
+- **Excel, tables only (.xlsx)…** writes just the tables, one per sheet ("Page 3 table 1").
+- **Tables as CSV…** writes one CSV file per table into a folder you choose, replacing files with the same names.
+
+Limits: numbers in European formats (`1.234,56`) stay as text, and `1.234` meaning one thousand two hundred thirty-four becomes 1.234, so check such numbers. Tables drawn inside grouped artwork aren't found.
+
+## PowerPoint
+
+- **PowerPoint, page pictures (.pptx)…** makes one slide per page, each a picture of the page at 150 dpi.
+- **PowerPoint, editable (.pptx)…** builds real text boxes, pictures and lines instead, which you can edit but which may differ from the original. Text color isn't kept: all text is black.
+
+From the command line: `quintess tables report.pdf` lists the tables found (`--json` for positions and spans); `quintess export report.pdf -f xlsx` (`--tables-only`), `-f csv` (`--table 2` for one table) and `-f pptx` (`--editable`, `--dpi`).
+
+# Attachments, portfolios and media
+
+## Attached files
+
+The sidebar's **Files** section lists the files attached to the document, whether to the document or to a page. **Save as…** saves any of them; **Remove** removes those attached to the document. **Attach a file…** there, or **Tools ▸ Attach a file…**, adds files.
+
+## Portfolios
+
+A portfolio is one PDF that holds several files of any type, each kept as it is.
+
+- **File ▸ Create ▸ Portfolio…** collects the files and sets their order (or sorts by name, size or date), whether readers show them as a list or tiles, the file that opens first, and an optional cover page text. Acrobat and other portfolio-aware readers show the file list. Readers without portfolio support show a cover page that lists the files and says where to find them, and every file is in the attachments panel either way.
+- **Tools ▸ Portfolio files…** opens, adds, removes and reorders the files in a portfolio (or turns any PDF into one), and extracts them all to a folder. A PDF inside opens in its own tab; other files open in the program your computer uses for them.
+
+## Audio, video and 3D
+
+**Tools ▸ Audio, video and 3D…** lists the media embedded in a document, with its page and size. **Play** opens it in your computer's player; **Save…** keeps a copy. **Edit ▸ Add video…** places an MP4 video on the current page, with an optional poster picture that readers which can't play video show instead.
+
+# Accessibility
+
+Screen readers use a PDF's tags to know what each part of a page is (a heading, a paragraph, a list, a picture) and in what order to read it. Quintess can check a document, add and correct its tags, and declare it as meeting PDF/UA-1.
+
+## Checking and fixing
+
+1. Choose **Tools ▸ Accessibility ▸ Check accessibility**. Each item is marked ✔ (passed), ✘ (failed), ? (needs a person to judge, such as alternate text and color contrast) or – (doesn't apply).
+2. Click **Fix automatically** (also **Tools ▸ Accessibility ▸ Fix automatically**) to fix what Quintess can: a missing title (from the file name), a missing language (from **Document language** in Preferences), showing the title in the window, tab order, field descriptions and link descriptions.
+3. If the document has no tags, add them (below), then correct them in the **Tags** panel.
+4. Write alternate text for each picture, then check again.
+
+## Adding tags
+
+**Tools ▸ Accessibility ▸ Add tags to document**, or **Add tags to document** in the **Tags** panel, tags an untagged document from its layout: headings by size and weight, paragraphs, bulleted and numbered lists, pictures, simple ruled tables, links and form fields. Repeated headers, footers and page numbers become decoration that screen readers skip. Check the result, and write alternate text for each picture it flags (shown in orange).
+
+Automatic tagging has limits: it reads text in the order the file draws it, so columns may be read in the wrong order; it makes tables only from ruled grids; and it doesn't tag artwork grouped inside other artwork, or comments.
+
+If the document already has tags, this command leaves them alone. To replace them, **keep a copy of the original**, then choose **More ▸ Replace all tags automatically…** in the Tags panel. It removes every tag, including any corrected by hand, and asks before it does.
+
+## Tags and reading order
+
+The **Tags** panel in the sidebar (or **Tools ▸ Accessibility ▸ Tags and reading order**) shows the tag tree.
+
+- Select an element to change its **Type**, its **Alternate text** (a description of a picture, read instead of it), its **Actual text** (the exact text a screen reader should read for the element, such as a word drawn as a picture) or its **Language** (a code such as `en-US`). Text changes take effect when you click elsewhere.
+- **Read earlier** and **Read later** move the element in the reading order. **Unwrap** removes the tag but keeps what it holds. **Mark as decoration** makes screen readers skip it.
+- **Show the reading order on the page** numbers the tagged regions in the order they will be read, and lists them in the panel, where you can move them up and down.
+- **Tag an area**: drag a box around untagged text or a picture and choose what it is. New tags go at the end of the reading order.
+- **More** also has **Tab order follows the tags**, **Show the title, not the file name** and **Repair the tag tree**.
+
+Tagging doesn't change how the page looks.
+
+## Declaring PDF/UA-1
+
+When the check shows no failures and you have reviewed the items marked ?, tick **I reviewed the items marked ?** and click **Declare PDF/UA-1**. This writes a statement into the document that it meets PDF/UA-1, based on Quintess's checks and your review; it isn't an independent certification. Save to keep it.
+
+# File size and PDF standards
+
+## Reducing file size
+
+**File ▸ Reduce file size…** shrinks the open document as one edit you can undo; save afterward, or use **Save as…** to keep the original.
+
+- **Keep quality** removes clutter and compresses without changing anything visible.
+- **Balanced** (the default) also resamples large pictures to 150 dpi at JPEG quality 80.
+- **Smallest** resamples pictures to 100 dpi at quality 65, and removes metadata, attachments and scripts. Without scripts, form calculations stop working. **Keep a copy of the original** first.
+- **Custom** sets the resolution and quality, and can turn pictures gray and remove metadata.
+
+Reducing file size rewrites the file, which invalidates any signatures.
+
+## PDF/A
+
+**Tools ▸ Standards ▸ PDF/A (archiving)…** checks a document for long-term archiving and converts it. Choose the level:
+
+- **PDF/A-1b**: an older archival format that doesn't allow transparency.
+- **PDF/A-2b**: the usual choice. **2u** also needs every font to map its text to Unicode.
+- **PDF/A-3b** and **3u**: like 2b and 2u, and files of any type may be attached.
+- **PDF/A-4** (based on PDF 2.0) and **4f** (with attached files).
+
+**Check** lists the problems; **Convert** fixes what Quintess can (color profile, identification, scripts and forbidden actions, compression) and lists plainly what it can't, such as fonts that aren't embedded or transparency under PDF/A-1b. Converting removes scripts, so form calculations stop working. **Tools ▸ Standards ▸ Convert to PDF/A-2b** converts in one step and shows what remains.
+
+## PDF/X
+
+**Tools ▸ Standards ▸ PDF/X (printing)…** prepares a document for a print shop: **PDF/X-1a** (CMYK and spot colors only, no transparency) or **PDF/X-4** (transparency and RGB allowed). Choose your printer's ICC profile with **Choose…**; PDF/X-1a needs a CMYK one, and PDF/X-4 uses sRGB without one and says so. For PDF/X-1a, Quintess can convert RGB colors and pictures to CMYK with a simple formula; use your layout program for color-critical work.
+
+## What the checks mean
+
+A document is marked as PDF/A or PDF/X only when nothing unfixable remains. These checks are not a certified validator: use veraPDF, or your print shop's preflight, for a final word.
+
+# Printing
+
+## Printing a document
+
+**File ▸ Print…** (Ctrl+P) chooses:
+
+- The **Printer**, and the **Pages**: all, the current page, or a range.
+- **Copies**, with **Collate**.
+- **Size**: **Fit to the paper**, **Shrink oversized pages** or **Actual size**.
+- **Two-sided**: the printer's setting, one-sided, or flipping on the long or short edge.
+- **Turn pages to match the paper**, **Print in grayscale** and **Include comments and form fields**.
+
+On Windows, **Properties…** opens the printer's own settings (paper, tray, quality).
+
+On Linux, Quintess prints through CUPS (the `cups-client` package): it sends the chosen pages as a PDF, and CUPS fits them to the paper. There is no Properties button; choose the **Paper** size in the dialog, and set trays and quality in your system's printer settings.
+
+## Booklets and posters
+
+Under **Tools ▸ Print production**. Both make a new document and leave the original unchanged.
+
+- **Make a booklet…** lays the pages out two to a sheet, so that printed double-sided and folded they read in order. Choose the paper (it is used sideways: letter paper makes half-letter pages, tabloid makes letter pages), the binding side, how many sheets nest in each stack for thick booklets, creep (how far inner sheets move toward the fold) and a gutter. Print the result double-sided, flipping on the short edge, at actual size.
+- **Make a poster…** splits each page into tiles on smaller paper, to print and join into a large poster. Choose a scale or a size to fit (such as 24 × 36 inches), the overlap for gluing, trim marks and row-and-column labels. Print the tiles at actual size.
+
+## Output preview and color conversion
+
+- **Tools ▸ Print production ▸ Output preview…** lists the inks the document prints with (cyan, magenta, yellow, black and spot colors, with their pages), shows any one ink as a gray plate where dark means more ink, and warns where the four process inks add up to more than a limit (300% unless you change it). It is an approximation, without color profiles or overprint.
+- **Convert to grayscale** and **Convert RGB to CMYK** change the open document's colors and pictures with simple formulas, without ICC profiles. Spot colors stay as they are, and Quintess says how many pictures it couldn't convert.
+
+# Automation
+
+An action is a list of steps (OCR, redaction, watermarks, page changes, reducing file size and more) saved as a file and run on many documents at once.
+
+## Recording an action
+
+Recording makes real edits: each step is applied to the open document as you go. Record on a copy, or don't save the document afterward.
+
+1. Choose **Tools ▸ Record an action (start or stop)**. A red bar shows **Recording an action** and lists the steps.
+2. Apply the steps you want: page, stamp, redaction, cleanup and conversion steps. Text edits, comments, signing and form filling aren't recorded, since they belong to one document. **Forget last step** leaves the last step out of the action (the document keeps it).
+3. Click **Stop and save…** and choose where to save the action file. Quintess then offers to run it on other files.
+
+## Running an action on files
+
+Choose **Tools ▸ Run an action on files…**, then **Choose action…** and **Choose files…**, and click **Run**.
+
+- Each result is saved next to its original as `name-processed.pdf`. **Keep a copy of the original** anyway: an existing `-processed.pdf` file with the same name is replaced without asking.
+- The results window lists each file with its result or error. A failure doesn't stop the other files.
+- Bates numbers continue from file to file.
+
+## Watching a folder
+
+**Tools ▸ Watch a folder…** runs an action on every PDF that arrives in a folder, while Quintess is open.
+
+1. Choose the **Folder to watch…**, the **Action…**, and optionally a **Results folder…** (by default a "Done" folder inside the watched one).
+2. Click **Start watching**. PDFs already in the folder are processed too; subfolders are not watched.
+3. Results go to the results folder, never replacing a file there. Originals move to a "Processed" folder inside the watched folder, or to "Failed" with a note saying why.
+
+The status bar shows the count and a **Stop** button; **Tools ▸ Stop watching the folder** also stops it.
+
+## The command line
+
+The `quintess` command does most of what the app does, for scripts and batch work. Run `quintess --help` for the list, and `quintess <command> --help` for each one. A few examples:
+
+- `quintess merge a.pdf b.pdf -o both.pdf`
+- `quintess redact contract.pdf --text "Jane Roe" -o redacted.pdf`
+- `quintess form merge form.pdf --data people.xlsx --name "{Last}"`
+- `quintess search-folder ./Contracts "termination"`
+- `quintess qr flyer.pdf`
+- `quintess watch ./Inbox --action stamp.json`
+
+Commands that edit a PDF usually overwrite the input. Use `-o` to save a separate copy, and check each command's `--help`. Set the `QUINTESS_PASSWORD` environment variable to open protected files without typing the password on the command line.
+
+# Preferences and troubleshooting
+
+## Preferences
+
+**Edit ▸ Preferences…** has:
+
+- **Your name**, used as the author of comments and in a new signing identity.
+- **Document language**, which **Fix automatically** uses for documents with no language.
+- **Look**: Studio or Classic, and dark or light.
+- **Spelling**: checking while typing, the dictionary, and **Add a language…**.
+- **Page memory** (see **Reading and searching**).
+- **Graphics**: **Automatic** (OpenGL, which uses about half the memory, or DirectX or Vulkan if OpenGL can't start) or **DirectX / Vulkan**. Change it if pages draw wrongly; it takes effect when Quintess next starts.
+- **Updates**: whether to check GitHub for new versions once a day.
+- **Signing identity**: the identity file used for signing and **Add my own**.
+
+## Where Quintess keeps its files
+
+- Settings, the personal dictionary, added dictionaries and trusted certificates: on Windows, `%APPDATA%\Quintess`; on Linux, `~/.config/quintess` by default (`$XDG_CONFIG_HOME/quintess` if that is set). Preferences are in `settings.json` there.
+- Recovered documents, the crash log and downloaded OCR models: on Windows, `%LOCALAPPDATA%\Quintess`; on Linux, `~/.local/share/quintess` by default (`$XDG_DATA_HOME/quintess` if that is set).
+
+## If Quintess crashes
+
+If Quintess hits an internal error it can't recover from, it tries to save your unsaved documents to the `Recovered` folder in its data folder, writes the details to `crash.log` there, and tells you before closing. This doesn't help after a power failure or if Quintess is ended by force, so save often.
+
+## If something looks wrong
+
+- Pages draw wrongly or not at all: try the other **Graphics** choice in Preferences, then restart Quintess.
+- An edit went wrong: **Ctrl+Z** undoes up to 60 recent edits.
+- A converter, scanner, printer or voice is missing on Linux: install the optional program listed under **Installing on Linux**.
+
+# Keyboard shortcuts
+
+- **Ctrl+K** or **Ctrl+Shift+P**: command palette
+- **Ctrl+O**: open; **Ctrl+S**: save; **Ctrl+Shift+S**: save as; **Ctrl+W**: close the tab
+- **Ctrl+P**: print
+- **Ctrl+Z**: undo; **Ctrl+Y** or **Ctrl+Shift+Z**: redo
+- **Ctrl+C**: copy the selected text
+- **Ctrl+F**: search the document; **F3** / **Shift+F3**: next / previous match
+- **Ctrl+Shift+F**: search a folder
+- **Ctrl+H**: find and replace text
+- **Ctrl+G**: go to page
+- **Ctrl+plus** / **Ctrl+minus**: zoom; **Ctrl+0**: fit width
+- **Page Up**, **Page Down**, **Home**, **End**: move through pages
+- **F7**: check spelling
+- **Ctrl+Shift+V**: read this page aloud; **Ctrl+Shift+B**: read to the end; **Ctrl+Shift+C**: pause or resume; **Ctrl+Shift+E**: stop reading
+- **Delete**: delete the selected comment, or the selected pictures and shapes
+- **Ctrl+Enter**: apply a paragraph edit
+- **F11**: full screen
+- **F1**: this guide
+- **Esc**: back to the Select tool
 
 # Privacy and updates
 
-Quintess never sends your documents anywhere. It contacts the internet only if you ask it to:
+Quintess doesn't send your documents anywhere. It contacts the internet only for these features:
 
-- **Check for updates** (Help menu) asks GitHub whether a newer version exists. If you turn on automatic checks, it does this at most once a day. Nothing about you or your documents is sent.
-- Opening a link or QR code opens your browser, after showing you where it goes.
+- **Checking for updates.** On first run, Quintess asks whether to check automatically; if you agree, it asks GitHub at most once a day whether a newer version exists. **Help ▸ Check for updates…** checks at any time. The request names the Quintess version and nothing about you or your documents, though GitHub sees your network address, as with any website.
+- **Downloading an update** (on Windows), when you choose to. Quintess checks it against the checksum published with the release, when there is one.
 - **Downloading a spelling dictionary** fetches it from the open-source dictionaries project on GitHub.
-- **Creating a PDF from a web page** loads that page.
+- **Creating a PDF from a web page** loads that page. On Windows, **Microsoft Office** conversion isn't blocked from the network.
 - **Trusted timestamps** send a fingerprint of the signature (not the document) to the timestamp server, and **checking revocation** or **adding long-term validation** asks the certificates' issuers whether they were revoked.
-- A copy of Quintess built from source may ask to download the OCR models once; the installer and the Linux packages include them.
+- A copy of Quintess built from source asks before downloading the OCR models once; the installer and the Linux packages include them.
+
+Opening a link or QR code opens your browser, after showing you where it goes.
 
 On Linux, Quintess doesn't update itself: when a new version is out, it opens the release page, and you install the new package the same way you installed the old one.
-
-# If something goes wrong
-
-- If Quintess hits a problem it can't recover from, it saves your unsaved documents to `%LOCALAPPDATA%\Quintess\Recovered` and the details to `%LOCALAPPDATA%\Quintess\crash.log` (on Linux, `~/.local/share/quintess/Recovered` and `~/.local/share/quintess/crash.log`), and tells you before closing.
-- **Ctrl+Z** undoes edits one at a time, back to when you opened the file.
-- Preferences are in `%APPDATA%\Quintess\settings.json` (on Linux, `~/.config/quintess/settings.json`).
