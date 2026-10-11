@@ -47,6 +47,7 @@ pub mod ranges;
 pub mod redact;
 pub mod redaction_check;
 pub mod revocation;
+pub mod scan;
 pub mod rich_text;
 pub mod security;
 pub mod settings;
