@@ -22,8 +22,9 @@ William asked for them to be removed on 2026-10-10, so do not add any.
   docs/BUILDING.md, "Windows console").
 
 Toolchain: rustup stable (1.99, MSVC) installed by winget. Add
-`%USERPROFILE%\.cargo\bin` to PATH in a fresh shell. **C: is almost full on
-this machine**, so `target` is a directory junction to `E:\QuintessBuild`.
+`%USERPROFILE%\.cargo\bin` to PATH in a fresh shell. `target` is a directory junction to
+`E:\QuintessBuild`; agents' worktree builds go to `E:\QuintessBuild-<name>`,
+which fill E: quickly, so delete them once their work is merged.
 The website is in `site/` (see `site/README.md`).
 Build with `cargo build -j 6`: this PC has intermittent memory faults under
 heavy load, so treat a one-off compiler crash as hardware and rerun it.
