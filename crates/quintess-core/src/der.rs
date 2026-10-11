@@ -8,6 +8,9 @@ pub const SET: u8 = 0x31;
 pub const INTEGER: u8 = 0x02;
 pub const OCTET_STRING: u8 = 0x04;
 pub const NULL: u8 = 0x05;
+pub const BOOLEAN: u8 = 0x01;
+pub const BIT_STRING: u8 = 0x03;
+pub const ENUMERATED: u8 = 0x0A;
 pub const OBJECT_IDENTIFIER: u8 = 0x06;
 pub const UTC_TIME: u8 = 0x17;
 pub const GENERALIZED_TIME: u8 = 0x18;
@@ -94,6 +97,40 @@ pub fn oid_to_string(content: &[u8]) -> String {
 
 pub fn utc_time(moment: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
     tlv(UTC_TIME, moment.format("%y%m%d%H%M%SZ").to_string().as_bytes())
+}
+
+pub fn boolean(value: bool) -> Vec<u8> {
+    vec![BOOLEAN, 1, if value { 0xFF } else { 0 }]
+}
+
+pub fn generalized_time(moment: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
+    tlv(GENERALIZED_TIME, moment.format("%Y%m%d%H%M%SZ").to_string().as_bytes())
+}
+
+/// Reads a UTCTime or GeneralizedTime element (`YYMMDDhhmmssZ` or
+/// `YYYYMMDDhhmmssZ`, seconds optional for UTCTime).
+pub fn parse_time(element: &Element) -> Option<chrono::DateTime<chrono::Utc>> {
+    let text = std::str::from_utf8(element.content).ok()?.trim_end_matches('Z');
+    // GeneralizedTime may carry fractions of a second, which are irrelevant here.
+    let text = text.split('.').next()?;
+    let naive = match element.tag {
+        UTC_TIME => {
+            let (year_digits, rest) = text.split_at(2.min(text.len()));
+            let year: i32 = year_digits.parse().ok()?;
+            // RFC 5280: two-digit years 50 and above are 19xx.
+            let full_year = if year >= 50 { 1900 + year } else { 2000 + year };
+            let padded = if rest.len() == 8 { format!("{rest}00") } else { rest.to_string() };
+            chrono::NaiveDateTime::parse_from_str(&format!("{full_year}{padded}"), "%Y%m%d%H%M%S").ok()?
+        }
+        GENERALIZED_TIME => chrono::NaiveDateTime::parse_from_str(text, "%Y%m%d%H%M%S").ok()?,
+        _ => return None,
+    };
+    Some(naive.and_utc())
+}
+
+/// The bytes of a BIT STRING without its leading unused-bits count.
+pub fn bit_string_bytes<'a>(element: &Element<'a>) -> &'a [u8] {
+    element.content.get(1..).unwrap_or(&[])
 }
 
 /// One decoded element: its tag, its content, and the whole encoding.

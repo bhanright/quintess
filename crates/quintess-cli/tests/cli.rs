@@ -111,3 +111,49 @@ fn find_and_replace_finishes_when_the_replacement_still_matches() {
     assert!(output.contains("1 replacements"), "{output}");
     assert!(ok(&["text", path(&edited)]).contains("Notices"));
 }
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../quintess-core/tests/fixtures").join(name)
+}
+
+/// Like `ok`, with environment variables set for the run.
+fn ok_with_env(arguments: &[&str], environment: &[(&str, &str)]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_quintess")).args(arguments).envs(environment.iter().copied()).output().unwrap();
+    assert!(output.status.success(), "quintess {arguments:?} failed: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn signing_with_a_pfx_and_trusting_its_root() {
+    let folder = folder("pfx");
+    let pdf = letter(&folder);
+    let signed = folder.join("signed.pdf");
+    let settings = folder.join("settings");
+    let environment = [("QUINTESS_PFX_PASSWORD", "quintess-test"), ("APPDATA", settings.to_str().unwrap()), ("XDG_CONFIG_HOME", settings.to_str().unwrap())];
+    let output = ok_with_env(&["sign", path(&pdf), "--pfx", path(&fixture("rsa-chain-aes.pfx")), "-o", path(&signed)], &environment);
+    assert!(output.contains("signed by Rita RSA Signer"), "{output}");
+
+    // The password is never taken from the command line.
+    let rejected = quintess(&["sign", path(&pdf), "--pfx", path(&fixture("rsa-chain-aes.pfx")), "--password", "quintess-test"]);
+    assert!(!rejected.status.success());
+
+    let before = ok_with_env(&["verify", path(&signed)], &environment);
+    assert!(before.starts_with("VALID, SIGNER NOT TRUSTED"), "{before}");
+    assert!(before.contains("Quintess Test RSA Root") && before.contains("Rita RSA Signer"), "the chain is printed: {before}");
+
+    let added = ok_with_env(&["trust", "add", path(&fixture("rsa-root.pem"))], &environment);
+    assert!(added.contains("now trusting Quintess Test RSA Root"), "{added}");
+    let listed = ok_with_env(&["trust", "list"], &environment);
+    assert!(listed.contains("Quintess Test RSA Root"), "{listed}");
+    let after = ok_with_env(&["verify", path(&signed)], &environment);
+    assert!(after.starts_with("VALID  "), "{after}");
+    assert!(after.contains("trusted: a certificate you chose to trust"), "{after}");
+
+    let thumbprint = listed.split_whitespace().next().unwrap().to_string();
+    ok_with_env(&["trust", "remove", &thumbprint[..16]], &environment);
+    assert!(ok_with_env(&["verify", path(&signed)], &environment).starts_with("VALID, SIGNER NOT TRUSTED"));
+
+    // Verification as data for scripts.
+    let json = ok_with_env(&["verify", path(&signed), "--json"], &environment);
+    assert!(json.contains("\"verdict\": \"ValidButUntrusted\""), "{json}");
+}
