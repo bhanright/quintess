@@ -188,3 +188,31 @@ fn certificates_without_an_rsa_key_or_encryption_use_are_refused() {
     let error = public_key::protect_with_certificates(&mut pdf, &CertificateProtection::default()).err().expect("someone must be named");
     assert!(format!("{error:#}").contains("recipient"));
 }
+
+#[test]
+fn decrypted_bytes_edited_and_saved_stay_encrypted_for_the_same_people() {
+    // The app keeps a certificate file's decrypted bytes while it is open,
+    // then protects them again on save with the remembered dictionary.
+    let [alice, bob, mallory] = people();
+    let bytes = encrypted_for(vec![recipient(alice), recipient(bob)]);
+    let mut opened = public_key::open_with_identity(&bytes, alice).unwrap();
+    let encryption = opened.pdf.original_encryption().expect("the file was encrypted");
+    let dictionary = opened.pdf.certificate_encryption_dictionary().expect("the Adobe.PubSec dictionary is remembered");
+    opened.pdf.forget_encryption();
+    let plain = opened.pdf.to_bytes(&SaveSettings::default()).unwrap();
+    assert!(!security::inspect_security(&plain).encrypted, "the open copy is plain");
+
+    // An edit made to the plain copy, as the app's edits are.
+    let mut edited = Pdf::from_bytes(&plain, None).unwrap();
+    quintess_core::metadata::write_info(&mut edited, &quintess_core::metadata::DocumentInfo { title: Some("Edited while open".into()), ..Default::default() }).unwrap();
+    let edited = edited.to_bytes(&SaveSettings::default()).unwrap();
+
+    let saved = quintess_core::document::encrypt_for_certificates_as_before(&edited, &encryption, dictionary).unwrap();
+    assert!(public_key::is_certificate_encrypted(&saved));
+    assert_eq!(public_key::list_recipients(&saved).unwrap().len(), 2);
+    for person in [alice, bob] {
+        let reopened = public_key::open_with_identity(&saved, person).unwrap();
+        assert_eq!(quintess_core::metadata::read_info(&reopened.pdf).title.as_deref(), Some("Edited while open"));
+    }
+    assert!(public_key::open_with_identity(&saved, mallory).is_err());
+}

@@ -21,6 +21,8 @@ pub enum JobOutcome {
     Signatures(Vec<quintess_core::signatures::SignatureCheck>),
     /// A document made from another kind of file, and what the converter said.
     Converted { title: String, bytes: Vec<u8>, note: String },
+    /// Pages from the scanner, made into a PDF; OCR follows if asked for.
+    Scanned { bytes: Vec<u8>, pages: usize, recognize_text: bool },
     /// `manual` checks report even when nothing is new.
     UpdateChecked { found: Option<quintess_core::updates::Release>, manual: bool },
     UpdateDownloaded { path: std::path::PathBuf, verified: bool, version: String },

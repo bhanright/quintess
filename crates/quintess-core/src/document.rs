@@ -183,6 +183,13 @@ impl Pdf {
     }
 
     /// Forgets the encryption the file was opened with, so it saves unprotected.
+    /// The Adobe.PubSec `/Encrypt` dictionary of a file opened with a
+    /// certificate, so a front end that keeps the decrypted bytes can protect
+    /// them again on save ([`encrypt_for_certificates_as_before`]).
+    pub fn certificate_encryption_dictionary(&self) -> Option<Dictionary> {
+        self.doc.trailer.get(crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes()).ok().and_then(|object| object.as_dict().ok()).cloned()
+    }
+
     pub fn forget_encryption(&mut self) {
         self.doc.encryption_state = None;
         self.doc.trailer.remove(crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes());
@@ -549,6 +556,12 @@ pub fn write_file_safely(path: &Path, bytes: &[u8]) -> Result<()> {
 /// permissions as an earlier version of it had.
 pub fn encrypt_as_before(plain: &[u8], encryption: &lopdf::EncryptionState) -> Result<Vec<u8>> {
     encrypt_again(plain, encryption, None)
+}
+
+/// [`encrypt_as_before`] for a file opened with a certificate: the same
+/// recipients can open the result, with the permissions they had.
+pub fn encrypt_for_certificates_as_before(plain: &[u8], encryption: &lopdf::EncryptionState, certificate_dictionary: Dictionary) -> Result<Vec<u8>> {
+    encrypt_again(plain, encryption, Some(certificate_dictionary))
 }
 
 /// [`encrypt_as_before`] for a file that was protected for certificates:

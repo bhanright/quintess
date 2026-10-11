@@ -416,6 +416,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             Err(error) => return self.error(format!("Could not read {}: {error}", path.display())),
         };
         let report = quintess_core::security::inspect_security(&bytes);
+        if report.uses_certificates {
+            let remembered = self.settings.signing_certificate_file.clone();
+            self.dialogs.push(Dialog::OpenWithCertificate(Box::new(crate::tool_dialogs::CertificateOpenDialog::new(path, bytes, remembered))));
+            return;
+        }
         if report.needs_password_to_open {
             self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: String::new() });
             return;
@@ -1028,6 +1033,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 self.open_new_document(title, bytes);
                 self.info(note);
             }
+            JobOutcome::Scanned { bytes, pages, recognize_text } => {
+                self.open_new_document("Scan.pdf".into(), bytes);
+                self.info(format!("Scanned {pages} page{}.", if pages == 1 { "" } else { "s" }));
+                if recognize_text {
+                    let ctx = self.worker_context.clone();
+                    self.start_ocr(&ctx);
+                }
+            }
             JobOutcome::QrCodes { tab_id, version, codes } => {
                 let count = codes.len();
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -1335,23 +1348,118 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         self.dialogs.push(Dialog::FormMerge(Box::new(dialogs::FormMergeDialog::new(fields))));
     }
 
+    /// Lays out again the paragraphs wrapped around a picture that moved
+    /// from `old_bounds` to `new_bounds`, or stopped wrapping (`None`).
+    fn reflow_around(&mut self, page_index: usize, old_bounds: [f32; 4], new_bounds: Option<[f32; 4]>) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        match quintess_core::text_wrap::obstacle_changed(&tab.bytes, tab.password.as_deref(), page_index, old_bounds, new_bounds) {
+            Ok(Some((bytes, _))) => {
+                let label = if new_bounds.is_some() { "Reflow text around the picture" } else { "Stop wrapping text" };
+                self.edit_page_text(label, move |_, _| Ok(bytes));
+            }
+            Ok(None) => {}
+            Err(error) => self.error(format!("The text couldn't follow the picture: {error:#}")),
+        }
+    }
+
+    /// Opens a file encrypted for certificates with the identity chosen,
+    /// keeping its decrypted bytes and its protection for saving.
+    fn open_with_certificate(&mut self, choice: crate::tool_dialogs::CertificateOpenDialog) {
+        let identity_path = choice.identity.clone().unwrap_or_default();
+        let password = Some(choice.password.as_str()).filter(|p| !p.is_empty());
+        let opened = quintess_core::public_key::load_identity(&identity_path, password).and_then(|identity| quintess_core::public_key::open_with_identity(&choice.bytes, &identity));
+        let mut opened = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                let mut retry = choice;
+                retry.error = format!("{error:#}");
+                retry.password.clear();
+                self.dialogs.push(Dialog::OpenWithCertificate(Box::new(retry)));
+                return;
+            }
+        };
+        let encryption = opened.pdf.original_encryption();
+        let dictionary = opened.pdf.certificate_encryption_dictionary();
+        opened.pdf.forget_encryption();
+        let Some(plain) = self.report(opened.pdf.to_bytes(&quintess_core::SaveSettings::default())) else { return };
+        if self.settings.signing_certificate_file.is_none() {
+            self.settings.signing_certificate_file = Some(identity_path);
+        }
+        self.settings.remember_file(choice.path.clone());
+        let _ = self.settings.save();
+        if self.add_tab(Some(choice.path), plain, None) {
+            if let Some(tab) = self.tabs.last_mut() {
+                tab.original_encryption = encryption;
+                tab.certificate_dictionary = dictionary;
+                tab.may_change_security = opened.may_change_security;
+            }
+            let restricted = crate::tool_dialogs::restrictions(&opened.allowed);
+            if !restricted.is_empty() {
+                self.info(format!("Opened with your certificate. The author did not allow: {}.", restricted.join(", ")));
+            }
+        }
+    }
+
+    /// Converts the document's colors to gray, or its RGB to CMYK, saying
+    /// what could not be converted.
+    pub(super) fn convert_colors(&mut self, to_cmyk: bool) {
+        let mut report = None;
+        let label = if to_cmyk { "Convert RGB to CMYK" } else { "Convert to grayscale" };
+        self.edit(label, |pdf| {
+            report = Some(if to_cmyk { quintess_core::color_convert::convert_rgb_to_cmyk(pdf)? } else { quintess_core::color_convert::convert_to_grayscale(pdf)? });
+            Ok(())
+        });
+        if let Some(report) = report {
+            let mut message = format!("{} color settings and {} pictures converted.", report.color_operations_changed, report.images_converted);
+            if report.images_left_alone > 0 {
+                message.push_str(&format!(" {} pictures were left as they are (a kind Quintess can't convert).", report.images_left_alone));
+            }
+            self.info(message);
+        }
+    }
+
+    /// Places a video on the current page, centered, with an optional poster picture.
+    pub(super) fn add_video(&mut self) {
+        let Some(video) = rfd::FileDialog::new().add_filter("MP4 video", &["mp4", "m4v"]).pick_file() else { return };
+        let poster = rfd::FileDialog::new().set_title("Poster picture (optional; cancel for none)").add_filter("Picture", &["png", "jpg", "jpeg"]).pick_file();
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let page_index = tab.current_page;
+        let [left, bottom, right, top] = tab.pages.get(page_index).map_or([0.0, 0.0, 612.0, 792.0], |page| page.bounds);
+        // 16:9, half the page wide.
+        let width = (right - left) / 2.0;
+        let height = width * 9.0 / 16.0;
+        let (center_x, center_y) = ((left + right) / 2.0, (bottom + top) / 2.0);
+        let rect = [center_x - width / 2.0, center_y - height / 2.0, center_x + width / 2.0, center_y + height / 2.0];
+        self.edit("Add video", |pdf| quintess_core::media::add_video(pdf, page_index as u32 + 1, rect, &video, poster.as_deref()).map(|_| ()));
+    }
+
     fn import_form_data(&mut self) {
         let Some(path) = rfd::FileDialog::new().add_filter("Form data", &["json", "xfdf", "xml"]).pick_file() else { return };
         let result = std::fs::read_to_string(&path).map_err(anyhow::Error::from).and_then(|text| {
             if text.trim_start().starts_with('<') {
-                Ok(forms::parse_xfdf(&text))
+                Ok(FormData::Xfdf(text))
             } else {
                 let parsed: std::collections::BTreeMap<String, serde_json::Value> = serde_json::from_str(&text)?;
-                Ok(parsed.into_iter().map(|(k, v)| (k, v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))).collect())
+                Ok(FormData::Values(parsed.into_iter().map(|(k, v)| (k, v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))).collect()))
             }
         });
-        if let Some(values) = self.report(result) {
+        if let Some(data) = self.report(result) {
             let mut unmatched = Vec::new();
             let mut script_notes: Vec<String> = Vec::new();
             self.edit("Import form data", |pdf| {
                 // The form's own calculations run on the imported values.
-                let (missing, outcome) = quintess_core::form_scripts::fill_fields_and_calculate(pdf, &values)?;
-                unmatched = missing;
+                let outcome = match &data {
+                    // XFDF keeps nested fields, list-box choices and styled text.
+                    FormData::Xfdf(xml) => {
+                        unmatched = forms::apply_xfdf(pdf, xml)?;
+                        quintess_core::form_scripts::recalculate(pdf)?
+                    }
+                    FormData::Values(values) => {
+                        let (missing, outcome) = quintess_core::form_scripts::fill_fields_and_calculate(pdf, values)?;
+                        unmatched = missing;
+                        outcome
+                    }
+                };
                 script_notes = outcome.alerts.into_iter().chain(outcome.script_errors).collect();
                 Ok(())
             });
@@ -1725,9 +1833,28 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 ViewerAction::DeleteParagraph(paragraph) => self.edit_page_text("Delete paragraph", |bytes, password| quintess_core::edit_text::delete_paragraph(bytes, password, &paragraph)),
                 ViewerAction::ChangeObjects { page_index, objects, change, label, expected } => {
                     let page = page_index as u32 + 1;
+                    // Text wrapped around a picture follows it when it moves, is resized or goes.
+                    let wrapped_at = match objects.as_slice() {
+                        [object] if self.tabs.get(self.active).is_some_and(|tab| tab.text_wraps_around(page_index, object.bounds)) => Some(object.bounds),
+                        _ => None,
+                    };
+                    let deleted = matches!(change, quintess_core::objects::Change::Delete);
                     if self.try_edit(&label, |pdf| quintess_core::objects::change_objects(pdf, page, &objects, &change)) {
+                        if let Some(old_bounds) = wrapped_at {
+                            let new_bounds = if deleted { None } else { expected.first().map(|(_, bounds)| *bounds) };
+                            self.reflow_around(page_index, old_bounds, new_bounds);
+                        }
                         self.reselect_objects(page_index, &expected);
                     }
+                }
+                ViewerAction::SetTextWrap { page_index, bounds, on } => {
+                    if on {
+                        let options = quintess_core::text_wrap::WrapOptions::default();
+                        self.edit_page_text("Wrap text around the picture", |bytes, password| quintess_core::text_wrap::wrap_around(bytes, password, page_index, bounds, options).map(|(bytes, _)| bytes));
+                    } else {
+                        self.reflow_around(page_index, bounds, None);
+                    }
+                    self.reselect_objects(page_index, &[(quintess_core::objects::ObjectKind::Image, bounds)]);
                 }
                 ViewerAction::ReplacePicture { page_index, objects } => {
                     let Some(path) = rfd::FileDialog::new().add_filter("Picture", &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp"]).pick_file() else { continue };
@@ -1937,6 +2064,42 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         }
                         Ok(JobOutcome::Converted { title, bytes: result.pdf, note })
                     });
+                }
+                AppRequest::OpenWithCertificate(choice) => self.open_with_certificate(*choice),
+                AppRequest::Scan(choice) => {
+                    let ctx = self.worker_context.clone();
+                    let choice = *choice;
+                    let Some(scanner) = choice.scanner() else { continue };
+                    let options = quintess_core::scan::ScanOptions { resolution_dpi: choice.resolution_dpi, color: choice.color, use_feeder: choice.use_feeder, ..Default::default() };
+                    let recognize_text = choice.recognize_text;
+                    self.start_job(&ctx, "Scanning", move |_| {
+                        let pictures = quintess_core::scan::scan(&scanner, &options)?;
+                        let pages = pictures.len();
+                        let bytes = quintess_core::scan::pictures_to_pdf(&pictures, options.resolution_dpi)?.to_bytes(&quintess_core::SaveSettings::default())?;
+                        Ok(JobOutcome::Scanned { bytes, pages, recognize_text })
+                    });
+                }
+                AppRequest::OpenWithSystem { name, bytes } => {
+                    // A private folder, so the name can be kept for the program that opens it.
+                    let folder = std::env::temp_dir().join(format!("quintess-open-{}", std::process::id()));
+                    let safe_name: String = name.chars().map(|c| if c.is_alphanumeric() || " .-_()".contains(c) { c } else { '_' }).collect();
+                    let path = folder.join(safe_name);
+                    let written = std::fs::create_dir_all(&folder).and_then(|_| std::fs::write(&path, &bytes));
+                    if self.report(written.map_err(anyhow::Error::from)).is_some() {
+                        let _ = std::process::Command::new("explorer").arg(&path).spawn();
+                    }
+                }
+                AppRequest::DeclarePdfUa { checks, reviewed } => {
+                    let mut blockers = Vec::new();
+                    self.edit("Declare PDF/UA-1", |pdf| {
+                        blockers = quintess_core::accessibility::identify_pdfua(pdf, &checks, reviewed)?;
+                        Ok(())
+                    });
+                    if blockers.is_empty() {
+                        self.info("The document is now marked as PDF/UA-1. Save to keep it.");
+                    } else {
+                        self.error(format!("Not marked as PDF/UA-1: {}", blockers.join("; ")));
+                    }
                 }
                 AppRequest::Sign(choice) => {
                     let ctx = self.worker_context.clone();
@@ -2325,4 +2488,10 @@ impl eframe::App for QuintessApp {
             self.apply_app_requests(outcome.requests);
         }
     }
+}
+
+/// Form data read from a file to import.
+enum FormData {
+    Xfdf(String),
+    Values(std::collections::BTreeMap<String, String>),
 }

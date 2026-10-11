@@ -49,6 +49,14 @@ pub enum AppRequest {
     DownloadDictionary(String),
     /// Sign with the choices made in the Sign dialog.
     Sign(Box<SignDialog>),
+    /// Open a certificate-encrypted file with the identity chosen.
+    OpenWithCertificate(Box<crate::tool_dialogs::CertificateOpenDialog>),
+    /// Scan with the scanner and options chosen.
+    Scan(Box<crate::tool_dialogs::ScanDialog>),
+    /// Open a file that isn't a PDF (from a portfolio or a video) in the program the system uses for it.
+    OpenWithSystem { name: String, bytes: Vec<u8> },
+    /// Mark the document as PDF/UA-1, given the accessibility check's results.
+    DeclarePdfUa { checks: Vec<quintess_core::accessibility::Check>, reviewed: bool },
     /// Convert with the choices made in the Convert dialog.
     Convert(Box<ConvertDialog>),
     /// Trust a certificate (DER) from now on, then check the signatures again.
@@ -156,6 +164,17 @@ pub enum Dialog {
     SignatureResults(Vec<quintess_core::signatures::SignatureCheck>),
     /// Choosing how to sign, before signing in a drawn box.
     Sign(Box<SignDialog>),
+    OpenWithCertificate(Box<crate::tool_dialogs::CertificateOpenDialog>),
+    EncryptForCertificates(Box<crate::tool_dialogs::CertificateEncryptDialog>),
+    Standards(Box<crate::tool_dialogs::StandardsDialog>),
+    Booklet(Box<crate::tool_dialogs::BookletDialog>),
+    Poster(Box<crate::tool_dialogs::PosterDialog>),
+    OutputPreview(Box<crate::tool_dialogs::OutputPreviewDialog>),
+    Scan(Box<crate::tool_dialogs::ScanDialog>),
+    CreatePortfolio(Box<crate::tool_dialogs::PortfolioCreateDialog>),
+    Portfolio(Box<crate::tool_dialogs::PortfolioDialog>),
+    Media(Box<crate::tool_dialogs::MediaDialog>),
+    Threads(Box<crate::tool_dialogs::ThreadsDialog>),
     /// Making a PDF from another kind of file, or a web page.
     Convert(Box<ConvertDialog>),
     AccessibilityResults(Vec<quintess_core::accessibility::Check>),
@@ -243,6 +262,17 @@ impl Dialog {
             Dialog::TextResult { title, .. } => title,
             Dialog::SignatureResults(_) => "Signatures",
             Dialog::Sign(_) => "Sign",
+            Dialog::OpenWithCertificate(_) => "Certificate required",
+            Dialog::EncryptForCertificates(_) => "Encrypt for certificates",
+            Dialog::Standards(standards) => standards.title(),
+            Dialog::Booklet(_) => "Make a booklet",
+            Dialog::Poster(_) => "Make a poster",
+            Dialog::OutputPreview(_) => "Output preview",
+            Dialog::Scan(_) => "Scan to PDF",
+            Dialog::CreatePortfolio(_) => "Create a portfolio",
+            Dialog::Portfolio(_) => "Portfolio files",
+            Dialog::Media(_) => "Audio, video and 3D",
+            Dialog::Threads(_) => "Article threads",
             Dialog::Convert(convert) if convert.web_page => "Create a PDF from a web page",
             Dialog::Convert(_) => "Create a PDF from a file",
             Dialog::AccessibilityResults(_) => "Accessibility check",
@@ -674,7 +704,7 @@ fn form_merge_body(ui: &mut egui::Ui, merge: &mut FormMergeDialog, tab: &mut Doc
 }
 
 /// Standard OK / Cancel row; returns true when OK was pressed.
-fn buttons(ui: &mut egui::Ui, ok_label: &str, outcome: &mut DialogOutcome) -> bool {
+pub(crate) fn buttons(ui: &mut egui::Ui, ok_label: &str, outcome: &mut DialogOutcome) -> bool {
     ui.separator();
     let mut ok = false;
     ui.horizontal(|ui| {
@@ -1197,6 +1227,19 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     outcome.requests.push(AppRequest::ApplyAccessibilityFixes);
                     outcome.keep_open = false;
                 }
+                // PDF/UA-1 is declared only with no failures and a person's
+                // review of what the check can't judge (alt text, contrast).
+                let reviewed_id = ui.id().with("pdfua reviewed");
+                let mut reviewed = ui.ctx().data(|data| data.get_temp::<bool>(reviewed_id)).unwrap_or(false);
+                ui.checkbox(&mut reviewed, "I reviewed the items marked ?");
+                ui.ctx().data_mut(|data| data.insert_temp(reviewed_id, reviewed));
+                let blockers = quintess_core::accessibility::pdfua_blockers(checks, reviewed);
+                let declare = ui.add_enabled(blockers.is_empty(), egui::Button::new("Declare PDF/UA-1"));
+                let declare = if blockers.is_empty() { declare.on_hover_text("Mark the document as meeting PDF/UA-1") } else { declare.on_disabled_hover_text(format!("Not yet: {}", blockers.join("; "))) };
+                if declare.clicked() {
+                    outcome.requests.push(AppRequest::DeclarePdfUa { checks: checks.clone(), reviewed });
+                    outcome.keep_open = false;
+                }
                 if ui.button("Close").clicked() {
                     outcome.keep_open = false;
                 }
@@ -1299,6 +1342,19 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         _ => {}
     }
 
+    match dialog {
+        Dialog::OpenWithCertificate(opening) => {
+            opening.show(ui, outcome);
+            return Ok(());
+        }
+        Dialog::Scan(scan) => {
+            scan.show(ui, outcome);
+            return Ok(());
+        }
+        Dialog::CreatePortfolio(create) => return create.show(ui, outcome),
+        _ => {}
+    }
+
     let Some(tab) = tab else {
         ui.label("Open a document first.");
         if ui.button("Close").clicked() {
@@ -1306,6 +1362,18 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         }
         return Ok(());
     };
+
+    match dialog {
+        Dialog::EncryptForCertificates(encrypt) => return encrypt.show(ui, tab, outcome),
+        Dialog::Standards(standards) => return standards.show(ui, tab, outcome),
+        Dialog::Booklet(booklet) => return booklet.show(ui, tab, outcome),
+        Dialog::Poster(poster) => return poster.show(ui, tab, outcome),
+        Dialog::OutputPreview(preview) => return preview.show(ui, tab, outcome),
+        Dialog::Portfolio(portfolio) => return portfolio.show(ui, tab, outcome),
+        Dialog::Media(media) => return media.show(ui, tab, outcome),
+        Dialog::Threads(threads) => return threads.show(ui, tab, outcome),
+        _ => {}
+    }
 
     match dialog {
         Dialog::Watermark { stamp, pages } => {

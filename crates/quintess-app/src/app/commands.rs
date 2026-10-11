@@ -175,9 +175,20 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools ▸ Redact", "Find and redact…", |app, _| app.dialogs.push(Dialog::redact())),
     command("Tools ▸ Redact", "Check for leftover text…", |app, _| app.dialogs.push(Dialog::CheckForText { texts: String::new() })).hint("Search every part of the file for words that should be gone"),
     command("Tools ▸ Protect", "Protect with password…", |app, _| app.dialogs.push(Dialog::protect())),
+    command("Tools ▸ Protect", "Encrypt for certificates…", |app, _| {
+        let own = app.settings.signing_identity.clone();
+        app.dialogs.push(Dialog::EncryptForCertificates(Box::new(crate::tool_dialogs::CertificateEncryptDialog::new(own))));
+    })
+    .hint("Only the people whose certificates you add can open the file; no shared password"),
     command("Tools ▸ Protect", "Remove protection", |app, _| {
+        if app.tabs.get(app.active).is_some_and(|tab| !tab.may_change_security) {
+            app.error("The certificate you opened this file with doesn't allow changing its security.");
+            return;
+        }
         if let Some(tab) = app.tab() {
             tab.protection = None;
+            tab.certificate_protection = None;
+            tab.certificate_dictionary = None;
             tab.original_encryption = None;
             // Re-writing the bytes stores them without encryption.
             let result = tab.apply("Remove protection", |_| Ok(()));
@@ -224,17 +235,35 @@ pub(super) const COMMANDS: &[Command] = &[
         app.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes]);
         app.record(Step::AccessibilityFix);
     }),
-    command("Tools ▸ PDF/A (archiving)", "Check", |app, _| {
-        if let Some(pdf) = app.tabs.get(app.active).map(|t| t.load_pdf()) {
-            if let Some(pdf) = app.report(pdf) {
-                app.dialogs.push(Dialog::PreflightResults(quintess_core::preflight::check_pdfa(&pdf)));
-            }
-        }
-    }),
-    command("Tools ▸ PDF/A (archiving)", "Convert to PDF/A-2b", |app, _| {
+    command("Tools ▸ Standards", "PDF/A (archiving)…", |app, _| app.dialogs.push(Dialog::Standards(Box::new(crate::tool_dialogs::StandardsDialog::archive()))))
+        .hint("Check or convert to PDF/A-1b, 2b, 2u, 3b, 3u, 4 or 4f"),
+    command("Tools ▸ Standards", "PDF/X (printing)…", |app, _| app.dialogs.push(Dialog::Standards(Box::new(crate::tool_dialogs::StandardsDialog::print()))))
+        .hint("Check or convert to PDF/X-1a or PDF/X-4 for a print shop"),
+    command("Tools ▸ Standards", "Convert to PDF/A-2b", |app, _| {
         app.apply_app_requests(vec![AppRequest::ConvertToPdfA]);
         app.record(Step::PdfA);
     }),
+    command("Tools ▸ Print production", "Make a booklet…", |app, _| app.dialogs.push(Dialog::Booklet(Box::default())))
+        .hint("Pages two to a sheet, to print double-sided and fold"),
+    command("Tools ▸ Print production", "Make a poster…", |app, _| app.dialogs.push(Dialog::Poster(Box::default())))
+        .hint("Split each page into tiles on smaller paper"),
+    command("Tools ▸ Print production", "Output preview…", |app, _| {
+        let page = app.tabs.get(app.active).map_or(0, |tab| tab.current_page);
+        app.dialogs.push(Dialog::OutputPreview(Box::new(crate::tool_dialogs::OutputPreviewDialog::new(page))));
+    })
+    .hint("The inks the document prints with, one plate at a time, and total ink coverage"),
+    command("Tools ▸ Print production", "Convert to grayscale", |app, _| app.convert_colors(false)),
+    command("Tools ▸ Print production", "Convert RGB to CMYK", |app, _| app.convert_colors(true)),
+    command("File ▸ Create", "From a scanner…", |app, ctx| app.dialogs.push(Dialog::Scan(Box::new(crate::tool_dialogs::ScanDialog::new(ctx))))).always(),
+    command("File ▸ Create", "Portfolio…", |app, _| app.dialogs.push(Dialog::CreatePortfolio(Box::default()))).always()
+        .hint("One PDF holding several files of any type"),
+    command("Tools", "Portfolio files…", |app, _| app.dialogs.push(Dialog::Portfolio(Box::default())))
+        .hint("Open, add, remove, reorder or extract the files in a portfolio"),
+    command("Tools", "Audio, video and 3D…", |app, _| app.dialogs.push(Dialog::Media(Box::default())))
+        .hint("Play or save the media embedded in the document"),
+    command("Edit", "Add video…", |app, _| app.add_video()).hint("Place an MP4 video on the current page, with a poster picture"),
+    command("Tools", "Article threads…", |app, _| app.dialogs.push(Dialog::Threads(Box::default())))
+        .hint("Stories that continue across columns and pages: go to them or copy their text in order"),
     command("Tools", "Attach a file…", |app, _| app.apply_sidebar_actions(vec![SidebarAction::AddAttachment])),
     command("Tools", "Record an action (start or stop)", |app, _| app.toggle_recording())
         .hint("Do page, stamp, redaction, cleanup and conversion steps once, then save them to run on other files")

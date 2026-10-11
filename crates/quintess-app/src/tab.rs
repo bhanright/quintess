@@ -105,6 +105,8 @@ pub struct DocumentTab {
     object_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::objects::PageObject>>>>,
     layer_cache: RefCell<Option<Rc<Vec<quintess_core::layers::Layer>>>>,
     object_layer_cache: RefCell<HashMap<usize, Rc<Vec<(usize, (u32, u16))>>>>,
+    /// Per page, where the pictures that text wraps around are.
+    wrap_cache: RefCell<HashMap<usize, Rc<Vec<[f32; 4]>>>>,
     /// Rendered pages: (page, resolution key) → texture.
     pub textures: HashMap<(usize, u32), egui::TextureHandle>,
     pub pending: HashSet<(usize, u32)>,
@@ -126,6 +128,14 @@ pub struct DocumentTab {
     /// Encryption to apply when the document is next saved. Kept separate
     /// from the bytes so later edits don't silently drop it.
     pub protection: Option<quintess_core::security::ProtectionSettings>,
+    /// Certificate encryption chosen in this session, applied at save time.
+    pub certificate_protection: Option<quintess_core::public_key::CertificateProtection>,
+    /// A file opened with a certificate: its Adobe.PubSec dictionary, put
+    /// back (with `original_encryption`) when it is saved. The tab's bytes
+    /// are the decrypted document.
+    pub certificate_dictionary: Option<quintess_core::lopdf::Dictionary>,
+    /// Whether the certificate it was opened with may change its security.
+    pub may_change_security: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -165,6 +175,7 @@ impl DocumentTab {
             object_cache: RefCell::new(HashMap::new()),
             layer_cache: RefCell::new(None),
             object_layer_cache: RefCell::new(HashMap::new()),
+            wrap_cache: RefCell::new(HashMap::new()),
             textures: HashMap::new(),
             pending: HashSet::new(),
             texture_night_mode: false,
@@ -180,6 +191,9 @@ impl DocumentTab {
             organizer_selection: Default::default(),
             error: None,
             protection: None,
+            certificate_protection: None,
+            certificate_dictionary: None,
+            may_change_security: true,
         };
         tab.refresh()?;
         tab.original_encryption = tab.load_pdf().ok().and_then(|pdf| pdf.original_encryption());
@@ -219,6 +233,7 @@ impl DocumentTab {
         self.object_cache.borrow_mut().clear();
         *self.layer_cache.borrow_mut() = None;
         self.object_layer_cache.borrow_mut().clear();
+        self.wrap_cache.borrow_mut().clear();
         self.textures.clear();
         self.pending.clear();
         self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
@@ -372,6 +387,26 @@ impl DocumentTab {
     }
 
     /// The objects on a page that can be picked: those not on a locked layer.
+    /// Where the pictures that text wraps around sit on a page.
+    pub fn wrapping_bounds(&self, page_index: usize) -> Rc<Vec<[f32; 4]>> {
+        if let Some(bounds) = self.wrap_cache.borrow().get(&page_index) {
+            return bounds.clone();
+        }
+        let bounds: Vec<[f32; 4]> = self.load_pdf().map(|pdf| {
+            let pictures = quintess_core::text_wrap::wrapping_pictures(&pdf, page_index).into_iter().map(|picture| picture.bounds);
+            let obstacles = quintess_core::text_wrap::list_flows(&pdf, page_index).into_iter().flat_map(|flow| flow.obstacles).map(|obstacle| obstacle.bounds);
+            pictures.chain(obstacles).collect()
+        }).unwrap_or_default();
+        let bounds = Rc::new(bounds);
+        self.wrap_cache.borrow_mut().insert(page_index, bounds.clone());
+        bounds
+    }
+
+    /// Whether text wraps around a picture at these bounds (within a point).
+    pub fn text_wraps_around(&self, page_index: usize, bounds: [f32; 4]) -> bool {
+        self.wrapping_bounds(page_index).iter().any(|wrapped| wrapped.iter().zip(bounds).all(|(a, b)| (a - b).abs() < 1.0))
+    }
+
     pub fn pickable_objects(&self, page_index: usize) -> Vec<quintess_core::objects::PageObject> {
         let locked: Vec<(u32, u16)> = self.layers().iter().filter(|layer| layer.locked).map(|layer| layer.id).collect();
         let owners = self.object_layers(page_index);
@@ -447,18 +482,29 @@ impl DocumentTab {
     }
 
     pub fn save_to(&mut self, path: PathBuf) -> Result<()> {
-        let bytes = match &self.protection {
-            Some(settings) => {
+        let bytes = match (&self.certificate_protection, &self.protection) {
+            (Some(settings), _) => {
+                let mut pdf = self.load_pdf()?;
+                pdf.forget_encryption();
+                quintess_core::public_key::protect_with_certificates(&mut pdf, settings)?;
+                // Encrypted objects must be written exactly as encrypted.
+                pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?
+            }
+            (None, Some(settings)) => {
                 let mut pdf = self.load_pdf()?;
                 pdf.forget_encryption();
                 quintess_core::security::protect(&mut pdf, settings)?;
                 // Encrypted objects must be written exactly as encrypted.
                 pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?
             }
-            None => {
+            (None, None) => {
                 let still_encrypted = quintess_core::security::inspect_security(&self.bytes).encrypted;
                 match &self.original_encryption {
                     // Edits leave the bytes unprotected; protect them as the file was.
+                    // Opened with a certificate: the same people can open it, with the same permissions.
+                    Some(encryption) if !still_encrypted && self.certificate_dictionary.is_some() => {
+                        quintess_core::document::encrypt_for_certificates_as_before(&self.bytes, encryption, self.certificate_dictionary.clone().expect("checked above"))?
+                    }
                     Some(encryption) if !still_encrypted => quintess_core::document::encrypt_as_before(&self.bytes, encryption)?,
                     // An unsigned file is written without the earlier versions an
                     // incremental save may have left in it (they can hold removed

@@ -367,10 +367,12 @@ pub fn draw(ui: &mut egui::Ui, tab: &DocumentTab, state: &mut ObjectToolState, p
         let square = Rect::from_center_size(center, vec2(8.0, 8.0));
         painter.rect(square, 1.0, Color32::WHITE, Stroke::new(1.5, accent), StrokeKind::Middle);
     }
-    toolbar(ui, state, page_index, shown, actions);
+    // Text wrap is offered for one picture at a time.
+    let wraps = (state.selected.len() == 1 && state.selected[0].kind == ObjectKind::Image).then(|| tab.text_wraps_around(page_index, state.selected[0].bounds));
+    toolbar(ui, state, page_index, shown, wraps, actions);
 }
 
-fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, selection_on_screen: Rect, actions: &mut Vec<ViewerAction>) {
+fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, selection_on_screen: Rect, wraps: Option<bool>, actions: &mut Vec<ViewerAction>) {
     let Some(bounds) = state.bounds() else { return };
     let center = ((bounds[0] + bounds[2]) / 2.0, (bounds[1] + bounds[3]) / 2.0);
     let height = 40.0;
@@ -388,7 +390,7 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
     let (cropping, all_pictures) = (state.cropping, pictures == state.selected.len());
     let starting_opacity = state.selected.first().map_or(1.0, |object| object.opacity);
     let state_single = state.selected.len() == 1;
-    let (mut toggle_crop, mut replace, mut outcome) = (false, false, None);
+    let (mut toggle_crop, mut replace, mut toggle_wrap, mut outcome) = (false, false, false, None);
     // Keep the bar inside the view, using its width from the last frame.
     let bar_id = ui.id().with(("object toolbar", page_index));
     let bar_width = ui.ctx().memory(|memory| memory.area_rect(bar_id)).map_or(520.0, |rect| rect.width());
@@ -423,6 +425,12 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
                 }
                 if all_pictures && ui.button("Replace…").on_hover_text("Put another picture in its place").clicked() {
                     replace = true;
+                }
+                if let Some(on) = wraps {
+                    let hint = if on { "Text flows around this picture and follows it. Click to stop." } else { "Make the paragraphs beside this picture flow around it, and follow it when it moves" };
+                    if ui.selectable_label(on, "Wrap text").on_hover_text(hint).clicked() {
+                        toggle_wrap = true;
+                    }
                 }
                 // Opacity and blend mode, chosen in a small menu and applied together.
                 let look_id = ui.id().with("object look");
@@ -462,6 +470,9 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
     });
     if toggle_crop {
         state.cropping = !state.cropping;
+    }
+    if let (true, Some(on)) = (toggle_wrap, wraps) {
+        actions.push(ViewerAction::SetTextWrap { page_index: state.page_index, bounds: state.selected[0].bounds, on: !on });
     }
     if replace {
         actions.push(ViewerAction::ReplacePicture { page_index: state.page_index, objects: state.selected.clone() });

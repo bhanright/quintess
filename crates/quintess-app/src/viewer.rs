@@ -140,6 +140,8 @@ pub enum ViewerAction {
     AddPageText { page: u32, x: f32, y: f32, text: String, style: LineStyle },
     /// Change pictures and drawings on a page; afterwards, select what lies
     /// at `expected` (kind and bounds), or clear the selection when empty.
+    /// Start or stop text wrapping around the picture at `bounds`.
+    SetTextWrap { page_index: usize, bounds: [f32; 4], on: bool },
     ChangeObjects { page_index: usize, objects: Vec<quintess_core::objects::PageObject>, change: quintess_core::objects::Change, label: String, expected: Vec<(quintess_core::objects::ObjectKind, [f32; 4])> },
     /// Choose a picture file to put in place of these pictures.
     ReplacePicture { page_index: usize, objects: Vec<quintess_core::objects::PageObject> },
