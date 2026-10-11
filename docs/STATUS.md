@@ -211,6 +211,38 @@ saves a picture of the window and exits (setup options are documented on
   blank frame shares), `QUINTESS_PAGE_MEMORY_MB`, `QUINTESS_DEBUG_REPAINT`.
   Known limit: flinging through big scans at 40 pages/s outpaces preview
   decoding on the first pass (the full JPEG is decoded per page).
+- Certificates and validation (`signatures.rs`, `validation.rs`, `cms.rs`,
+  `timestamp.rs`, `revocation.rs`, `ltv.rs`, `cert_store.rs`, `net.rs`): .pfx/.p12
+  signing (`SigningIdentity::from_pkcs12`, whole chain in the CMS), Windows store
+  certificates through CNG, RFC 3161 signature timestamps and /DocTimeStamp.
+  `verify` builds the chain to a `TrustStore` (Mozilla roots via
+  webpki-root-certs, Windows ROOT, `settings_folder()/trusted-certificates`),
+  judges certificates at the timestamp time, checks key usage and the token,
+  and gives a `SignatureVerdict` with reasons; never online (stored DSS/OCSP/CRL
+  are read). `check_revocation_online` and `ltv::add_long_term_validation` are
+  explicit. App: Sign dialog (file, Windows store, own identity, timestamp),
+  richer results with Trust, revocation check and LTV. Gaps: no name
+  constraints or path length, no OCSP freshness, Mozilla list is not AATL,
+  RSA-PSS/Ed25519 unsupported, the store's ECDSA path is untested.
+- Form scripts (`form_scripts.rs`, `form_scripts_prelude.js`): field K/V/C/F
+  JavaScript and document-level functions in Boa 0.22 (pure Rust, built at
+  opt-level s), Acrobat object model subset and the AForm built-ins in JS.
+  `apply_field_value` (refusals keep the old value), `recalculate`,
+  `keystroke`, `fill_fields_and_calculate`; merge calculates each copy. Never
+  runs OpenAction/page/link/mouse scripts. Limits: 1M loop iterations, depth
+  400, 2 s; callbacks inside built-ins escape the time limit (caller gives up
+  after 4 s); no memory cap. App: fill, import and Clear run scripts (no
+  per-keystroke filtering yet).
+- Document conversion (`conversion.rs`, `conversion/`): one provider interface;
+  built-in .docx via Oxi (oxidocs =0.8.0, MPL-2.0, feature `word-layout`,
+  +15 MB), .odt/HTML subset/Markdown/text as simplified documents, spreadsheets
+  and CSV as tables (`flow.rs`); LibreOffice (private profile, macros off,
+  proxy-blocked network), Office via PowerShell+COM (only with explicit
+  permission; stops only the copy it started), Edge/Chrome headless (throwaway
+  profile, network blocked for files). Temporary folder, timeout, cancellation;
+  results name engine, version, fidelity, omissions. App: File > Create > From
+  a file / From a web page. Not done: WebView2 PrintToPdf, built-in
+  presentations.
 - Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
   shown with a searchable topic list (F1, Help ▸ User guide). Keep it in
   step with features. `README.md` is the GitHub front page.
