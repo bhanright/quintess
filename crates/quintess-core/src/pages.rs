@@ -195,7 +195,7 @@ pub fn page_as_form_xobject(pdf: &mut Pdf, page_id: ObjectId) -> Result<(ObjectI
 }
 
 /// The size a page appears at once its rotation is applied.
-fn displayed_size(bounds: [f32; 4], rotation: i64) -> (f32, f32) {
+pub(crate) fn displayed_size(bounds: [f32; 4], rotation: i64) -> (f32, f32) {
     let width = bounds[2] - bounds[0];
     let height = bounds[3] - bounds[1];
     if rotation % 180 == 0 { (width, height) } else { (height, width) }
@@ -204,7 +204,7 @@ fn displayed_size(bounds: [f32; 4], rotation: i64) -> (f32, f32) {
 /// The matrix that draws a form with `bounds` and `rotation` so that its
 /// displayed shape fills the rectangle at (`x`, `y`) of size `scale` times
 /// its displayed size.
-fn placement_matrix(bounds: [f32; 4], rotation: i64, scale: f32, x: f32, y: f32) -> [f32; 6] {
+pub(crate) fn placement_matrix(bounds: [f32; 4], rotation: i64, scale: f32, x: f32, y: f32) -> [f32; 6] {
     let [left, bottom, right, top] = bounds;
     // Rotation is clockwise as displayed; each case moves the rotated box back
     // to the origin before scaling and placing it.

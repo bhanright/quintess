@@ -4,6 +4,7 @@
 //! `1-3,5,end`, `odd`, `even` or `all,!2`.
 
 mod more;
+mod production;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -577,6 +578,8 @@ enum Command {
     },
     #[command(flatten)]
     More(more::MoreCommand),
+    #[command(flatten)]
+    Production(production::ProductionCommand),
     /// Save every embedded image as a PNG.
     Images {
         #[command(flatten)]
@@ -1343,6 +1346,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::More(command) => more::run(command)?,
+        Command::Production(command) => production::run(command)?,
         Command::Images { input, min_size, output_folder } => {
             let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
             let folder = folder_or_parent(&output_folder, &input.input)?;
