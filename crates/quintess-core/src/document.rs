@@ -46,6 +46,22 @@ impl Pdf {
         Self::from_bytes(&bytes, password).with_context(|| format!("could not open {}", path.display()))
     }
 
+    /// Opens a file protected for specific certificates (see [`crate::public_key`]),
+    /// decrypting it with the recipient's certificate and private key. Files
+    /// that are not certificate-encrypted open normally. Use
+    /// [`crate::public_key::open_with_identity`] to also learn what the
+    /// certificate allows.
+    pub fn from_bytes_with_identity(bytes: &[u8], identity: &crate::signatures::SigningIdentity) -> Result<Self> {
+        Ok(crate::public_key::open_with_identity(bytes, identity)?.pdf)
+    }
+
+    /// Like [`Pdf::from_bytes_with_identity`], reading a file.
+    pub fn open_with_identity(path: impl AsRef<Path>, identity: &crate::signatures::SigningIdentity) -> Result<Self> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+        Self::from_bytes_with_identity(&bytes, identity).with_context(|| format!("could not open {}", path.display()))
+    }
+
     pub fn from_bytes(bytes: &[u8], password: Option<&str>) -> Result<Self> {
         let doc = match password {
             Some(password) => Document::load_mem_with_options(bytes, lopdf::LoadOptions::with_password(password))?,
@@ -55,6 +71,9 @@ impl Pdf {
             })?,
         };
         if doc.is_encrypted() {
+            if crate::public_key::is_certificate_encrypted(bytes) {
+                bail!("the document is encrypted for specific certificates; open it with a certificate and its private key (a password cannot open it)");
+            }
             bail!("the document is encrypted and the password was not accepted");
         }
         Ok(Self { doc })
@@ -113,12 +132,26 @@ impl Pdf {
     /// file was when opened, so saving never quietly removes its protection.
     pub fn to_bytes_keeping_encryption(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
         match self.original_encryption() {
-            Some(encryption) => encrypt_as_before(&self.to_bytes(settings)?, &encryption),
+            Some(encryption) => {
+                // A document opened with a certificate gets its Adobe.PubSec dictionary back.
+                let certificate_dictionary = self.doc.trailer.get(crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes()).ok().and_then(|object| object.as_dict().ok()).cloned();
+                encrypt_again(&self.to_bytes(settings)?, &encryption, certificate_dictionary)
+            }
             None => self.to_bytes(settings),
         }
     }
 
     pub fn to_bytes(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
+        // The remembered certificate dictionary is bookkeeping, not part of the file.
+        let remembered = self.doc.trailer.remove(crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes());
+        let result = self.write_bytes(settings);
+        if let Some(remembered) = remembered {
+            self.doc.trailer.set(crate::public_key::REMEMBERED_DICTIONARY_KEY, remembered);
+        }
+        result
+    }
+
+    fn write_bytes(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
         if settings.remove_unused_objects {
             self.doc.prune_objects();
         }
@@ -135,9 +168,24 @@ impl Pdf {
         Ok(bytes)
     }
 
+    /// Takes over the protection `source` was opened with (password or
+    /// certificates), for a document made by editing `source`'s file that
+    /// should be saved with the same protection.
+    pub fn take_encryption_from(&mut self, source: &Pdf) {
+        self.doc.encryption_state = source.doc.encryption_state.clone();
+        let remembered = crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes();
+        match source.doc.trailer.get(remembered) {
+            Ok(dictionary) => self.doc.trailer.set(remembered.to_vec(), dictionary.clone()),
+            Err(_) => {
+                self.doc.trailer.remove(remembered);
+            }
+        }
+    }
+
     /// Forgets the encryption the file was opened with, so it saves unprotected.
     pub fn forget_encryption(&mut self) {
         self.doc.encryption_state = None;
+        self.doc.trailer.remove(crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes());
     }
 
     /// The id of the root `/Pages` node.
@@ -500,9 +548,20 @@ pub fn write_file_safely(path: &Path, bytes: &[u8]) -> Result<()> {
 /// Encrypts an unprotected file with the same key, passwords and
 /// permissions as an earlier version of it had.
 pub fn encrypt_as_before(plain: &[u8], encryption: &lopdf::EncryptionState) -> Result<Vec<u8>> {
+    encrypt_again(plain, encryption, None)
+}
+
+/// [`encrypt_as_before`] for a file that was protected for certificates:
+/// `certificate_dictionary` is the original Adobe.PubSec `/Encrypt`
+/// dictionary, written in place of the stand-in the state encodes.
+fn encrypt_again(plain: &[u8], encryption: &lopdf::EncryptionState, certificate_dictionary: Option<Dictionary>) -> Result<Vec<u8>> {
     let mut doc = Document::load_mem(plain)?;
     doc.compress();
     doc.encrypt(encryption).map_err(|error| anyhow::anyhow!("could not encrypt the file again: {error}"))?;
+    if let Some(dictionary) = certificate_dictionary {
+        let encrypt_id = doc.trailer.get(b"Encrypt")?.as_reference()?;
+        doc.objects.insert(encrypt_id, Object::Dictionary(dictionary));
+    }
     let mut bytes = Vec::new();
     // Encrypted objects are written as they are (no object streams).
     doc.save_to(&mut bytes)?;

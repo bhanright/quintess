@@ -44,6 +44,8 @@ boa_engine = { version = "0.22.0", default-features = false, features = ["annex-
 quick-xml = "0.41"
 # Word layout for the built-in .docx conversion (MPL-2.0; pinned because its API is still 0.x).
 oxidocs = { version = "=0.8.0", optional = true }
+# RSA key transport for certificate encryption (public_key.rs); ring cannot encrypt with RSA.
+rsa = "0.9.10"
 
 [features]
 default = ["word-layout"]

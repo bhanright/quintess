@@ -43,6 +43,41 @@ struct Input {
     /// it out of the command line and shell history).
     #[arg(long, env = "QUINTESS_PASSWORD", hide_env_values = true)]
     password: Option<String>,
+    /// Open a file that was encrypted for certificates, with your own: a
+    /// .pfx/.p12 file, a .pem holding the certificate and its PKCS #8 key,
+    /// or an identity file from `quintess identity`. (`sign` uses it as the
+    /// signing identity.)
+    #[arg(long)]
+    identity: Option<PathBuf>,
+    /// Password of the --identity .pfx/.p12 file (or set
+    /// QUINTESS_IDENTITY_PASSWORD, which keeps it out of the command line).
+    #[arg(long, env = "QUINTESS_IDENTITY_PASSWORD", hide_env_values = true)]
+    identity_password: Option<String>,
+}
+
+impl Input {
+    /// The identity named by `--identity`, if any.
+    fn load_identity(&self) -> Result<Option<quintess_core::signatures::SigningIdentity>> {
+        self.identity.as_deref().map(|path| quintess_core::public_key::load_identity(path, self.identity_password.as_deref())).transpose()
+    }
+
+    /// The file's bytes in a form PDFium and the other readers can open,
+    /// with the password they should be given. A file encrypted for
+    /// certificates is decrypted here with `--identity`.
+    fn readable(&self) -> Result<(Vec<u8>, Option<String>)> {
+        let bytes = std::fs::read(&self.input).with_context(|| format!("could not read {}", self.input.display()))?;
+        if quintess_core::public_key::is_certificate_encrypted(&bytes) {
+            let identity = self.load_identity()?.context("this file is encrypted for specific certificates; open it with --identity your-certificate.pfx")?;
+            let mut pdf = quintess_core::public_key::open_with_identity(&bytes, &identity)?.pdf;
+            return Ok((pdf.to_bytes(&SaveSettings::default())?, None));
+        }
+        Ok((bytes, self.password.clone()))
+    }
+
+    fn open_document(&self) -> Result<quintess_core::pdfium_render::prelude::PdfDocument<'static>> {
+        let (bytes, password) = self.readable()?;
+        engine::open_document(bytes, password.as_deref())
+    }
 }
 
 /// Where to write the result.
@@ -275,7 +310,7 @@ enum Command {
         #[command(flatten)]
         output: Output,
     },
-    /// Encrypt with a password and permissions.
+    /// Encrypt with a password and permissions, or for certificate holders.
     Protect {
         #[command(flatten)]
         input: Input,
@@ -286,8 +321,23 @@ enum Command {
         #[arg(long, default_value = "")]
         owner_password: String,
         /// Use AES-128 for older readers.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "certificates")]
         aes128: bool,
+        /// Encrypt so only the holders of these certificates (PEM or DER
+        /// files) can open the file, with their private keys. Repeat for
+        /// each recipient. Replaces passwords; the --no-* options below are
+        /// the permissions every recipient gets unless --permissions says otherwise.
+        #[arg(long = "certificate", conflicts_with_all = ["user_password", "owner_password"])]
+        certificates: Vec<PathBuf>,
+        /// Give one recipient their own permissions: FILE=LIST, where FILE is
+        /// a --certificate as written and LIST is comma-separated from
+        /// print, copy, edit, comments, forms, assemble, all, none and
+        /// owner (may also change the security settings). Repeatable.
+        #[arg(long = "permissions", requires = "certificates")]
+        recipient_permissions: Vec<String>,
+        /// With --certificate: leave the XMP metadata readable by search indexers.
+        #[arg(long, requires = "certificates")]
+        leave_metadata_readable: bool,
         #[arg(long)]
         no_print: bool,
         #[arg(long)]
@@ -301,7 +351,12 @@ enum Command {
         #[command(flatten)]
         output: Output,
     },
-    /// Remove encryption (needs the password).
+    /// Show who a certificate-encrypted file was made for (by issuer and serial number).
+    Recipients {
+        /// The encrypted PDF.
+        input: PathBuf,
+    },
+    /// Remove encryption (needs the password, or --identity for a certificate-protected file).
     Unprotect {
         #[command(flatten)]
         input: Input,
@@ -808,7 +863,67 @@ fn print_redaction_check(check: &quintess_core::redaction_check::RedactionCheck,
     Ok(())
 }
 
+/// The recipients named by `--certificate`, each with the shared permissions
+/// unless a `--permissions FILE=LIST` entry gives that one their own.
+fn recipients_from(certificates: &[PathBuf], overrides: &[String], shared: &AllowedActions) -> Result<Vec<quintess_core::public_key::Recipient>> {
+    let mut by_file: BTreeMap<String, (AllowedActions, bool)> = BTreeMap::new();
+    for entry in overrides {
+        let (file, list) = entry.rsplit_once('=').with_context(|| format!("--permissions takes FILE=LIST, not \"{entry}\""))?;
+        if !certificates.iter().any(|certificate| certificate.to_string_lossy() == file) {
+            bail!("--permissions names {file}, which is not one of the --certificate files");
+        }
+        by_file.insert(file.to_string(), parse_permission_list(list)?);
+    }
+    certificates
+        .iter()
+        .map(|path| {
+            let mut recipient = quintess_core::public_key::Recipient::from_certificate_file(path)?;
+            match by_file.get(path.to_string_lossy().as_ref()) {
+                Some((allowed, may_change_security)) => {
+                    recipient.allowed = allowed.clone();
+                    recipient.may_change_security = *may_change_security;
+                }
+                None => recipient.allowed = shared.clone(),
+            }
+            Ok(recipient)
+        })
+        .collect()
+}
+
+/// `print,copy,owner` and the like: what a recipient may do, and whether they may change the security settings.
+fn parse_permission_list(list: &str) -> Result<(AllowedActions, bool)> {
+    let mut allowed = AllowedActions::nothing();
+    let mut may_change_security = false;
+    for word in list.split(',').map(|word| word.trim().to_ascii_lowercase()).filter(|word| !word.is_empty()) {
+        match word.as_str() {
+            "all" => allowed = AllowedActions::default(),
+            "none" => allowed = AllowedActions::nothing(),
+            "owner" => {
+                may_change_security = true;
+                allowed = AllowedActions::default();
+            }
+            "print" => {
+                allowed.print = true;
+                allowed.print_high_quality = true;
+            }
+            "copy" => allowed.copy_text_and_images = true,
+            "edit" => allowed.edit_content = true,
+            "comments" => allowed.add_comments = true,
+            "forms" => allowed.fill_forms = true,
+            "assemble" => allowed.assemble_pages = true,
+            other => bail!("unknown permission \"{other}\" (try print, copy, edit, comments, forms, assemble, all, none, owner)"),
+        }
+    }
+    Ok((allowed, may_change_security))
+}
+
 fn open(input: &Input) -> Result<Pdf> {
+    if let Some(identity) = input.load_identity()? {
+        let bytes = std::fs::read(&input.input).with_context(|| format!("could not read {}", input.input.display()))?;
+        if quintess_core::public_key::is_certificate_encrypted(&bytes) {
+            return Pdf::from_bytes_with_identity(&bytes, &identity).with_context(|| format!("could not open {}", input.input.display()));
+        }
+    }
     Pdf::open(&input.input, input.password.as_deref())
 }
 
@@ -845,8 +960,8 @@ pub(crate) fn save_edit(pdf: &mut Pdf, input: &Input, output: &Output, edit: Edi
         pdf.forget_encryption();
     } else if pdf.original_encryption().is_none() {
         // Edits that produced new bytes lost track of the input's protection; take it from the input.
-        if let Some(encryption) = Pdf::from_bytes(&original, input.password.as_deref()).ok().and_then(|p| p.original_encryption()) {
-            pdf.doc.encryption_state = Some(encryption);
+        if let Some(source) = open(input).ok().filter(|source| source.original_encryption().is_some()) {
+            pdf.take_encryption_from(&source);
         }
     }
     if signed && edit == Edit::Changes {
@@ -1080,7 +1195,7 @@ fn run(cli: Cli) -> Result<()> {
             metadata::write_page_labels(&mut pdf, &parsed)?;
             save(&mut pdf, &input, &output)?;
         }
-        Command::Protect { input, user_password, owner_password, aes128, no_print, no_copy, no_edit, no_comments, no_forms, output } => {
+        Command::Protect { input, user_password, owner_password, aes128, certificates, recipient_permissions, leave_metadata_readable, no_print, no_copy, no_edit, no_comments, no_forms, output } => {
             let mut pdf = open(&input)?;
             let allowed = AllowedActions {
                 print: !no_print,
@@ -1091,6 +1206,18 @@ fn run(cli: Cli) -> Result<()> {
                 fill_forms: !no_forms,
                 assemble_pages: !no_edit,
             };
+            if !certificates.is_empty() {
+                let recipients = recipients_from(&certificates, &recipient_permissions, &allowed)?;
+                for recipient in &recipients {
+                    println!("encrypting for {}", recipient.name());
+                }
+                quintess_core::public_key::protect_with_certificates(&mut pdf, &quintess_core::public_key::CertificateProtection { recipients, leave_metadata_unencrypted: leave_metadata_readable })?;
+                let target = output.output.clone().unwrap_or_else(|| input.input.clone());
+                // Encrypted objects must not be recompressed or pruned after encryption.
+                pdf.save(&target, &SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?;
+                println!("wrote {} (only the certificate holders above can open it)", target.display());
+                return Ok(());
+            }
             let owner_given = !owner_password.is_empty();
             let owner = security::protect(&mut pdf, &ProtectionSettings { user_password, owner_password, cipher: if aes128 { Cipher::Aes128 } else { Cipher::Aes256 }, allowed, leave_metadata_unencrypted: false })?;
             let target = output.output.clone().unwrap_or_else(|| input.input.clone());
@@ -1100,6 +1227,13 @@ fn run(cli: Cli) -> Result<()> {
             if !owner_given {
                 println!("owner password (keep it safe): {owner}");
             }
+        }
+        Command::Recipients { input } => {
+            let recipients = quintess_core::public_key::list_recipients(&std::fs::read(&input)?)?;
+            for recipient in &recipients {
+                println!("serial {}  issued by {}", recipient.serial_number, recipient.issuer);
+            }
+            println!("{} recipients", recipients.len());
         }
         Command::Unprotect { input, output } => {
             let mut pdf = open(&input)?;
@@ -1186,11 +1320,11 @@ fn run(cli: Cli) -> Result<()> {
             if sensitive {
                 patterns.extend(redact::sensitive_data_patterns().into_iter().map(|(_, p)| p));
             }
-            let bytes = std::fs::read(&input.input)?;
+            let (bytes, bytes_password) = input.readable()?;
             let mut areas = if patterns.is_empty() {
                 Vec::new()
             } else {
-                let document = engine::open_document(bytes.clone(), input.password.as_deref())?;
+                let document = engine::open_document(bytes.clone(), bytes_password.as_deref())?;
                 redact::find_areas(&document, &patterns)?
             };
             let mut pdf = open(&input)?;
@@ -1209,7 +1343,7 @@ fn run(cli: Cli) -> Result<()> {
             }
             // What lies under the boxes now, to look for everywhere afterwards.
             let texts = {
-                let document = engine::open_document(bytes.clone(), input.password.as_deref())?;
+                let document = engine::open_document(bytes.clone(), bytes_password.as_deref())?;
                 quintess_core::redaction_check::redacted_texts(&document, &areas)?
             };
             let report = redact::apply_redactions(&mut pdf, &areas, &RedactionSettings { overlay_text: label.clone(), remove_metadata: strip_metadata, ..Default::default() })?;
@@ -1232,7 +1366,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Search { input, query, regex, match_case, whole_words } => {
-            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let document = input.open_document()?;
             let pattern = engine::search_pattern(&query, regex, match_case, whole_words)?;
             let matches = engine::search_document(&document, &pattern)?;
             for found in &matches {
@@ -1276,7 +1410,8 @@ fn run(cli: Cli) -> Result<()> {
                 return Ok(());
             }
             let checker = quintess_core::spelling::SpellChecker::new(language.as_deref())?;
-            let found = quintess_core::spelling::check_document(&checker, &std::fs::read(&input.input)?, input.password.as_deref())?;
+            let (bytes, password) = input.readable()?;
+            let found = quintess_core::spelling::check_document(&checker, &bytes, password.as_deref())?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&found)?);
             } else {
@@ -1293,7 +1428,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Qr { input, json } => {
-            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let document = input.open_document()?;
             let codes = quintess_core::qr::find_in_document(&document, &|_, _| {})?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&codes)?);
@@ -1322,13 +1457,13 @@ fn run(cli: Cli) -> Result<()> {
             println!("{} match{} in {} of {} files{}", found.hits.len(), if found.hits.len() == 1 { "" } else { "es" }, files_with_hits, found.files_searched, if found.stopped_early { " (stopped at the limit)" } else { "" });
         }
         Command::Text { input, output } => {
-            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let document = input.open_document()?;
             write_or_print(&engine::extract_text(&document)?, &output)?;
         }
         Command::Render { input, pages, dpi, format, grayscale, output_folder } => {
             let pdf = open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
-            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let document = input.open_document()?;
             let folder = folder_or_parent(&output_folder, &input.input)?;
             let extension = if format.eq_ignore_ascii_case("jpg") || format.eq_ignore_ascii_case("jpeg") { "jpg" } else { "png" };
             for page in chosen {
@@ -1344,7 +1479,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::More(command) => more::run(command)?,
         Command::Images { input, min_size, output_folder } => {
-            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let document = input.open_document()?;
             let folder = folder_or_parent(&output_folder, &input.input)?;
             let images = quintess_core::images::extract_images(&document, min_size)?;
             for found in &images {
@@ -1361,6 +1496,19 @@ fn run(cli: Cli) -> Result<()> {
 fn info(input: &Input, json: bool) -> Result<()> {
     let bytes = std::fs::read(&input.input)?;
     let security_report = security::inspect_security(&bytes);
+    if security_report.uses_certificates && input.identity.is_none() {
+        // Nothing but the security handler can be read without a certificate.
+        let recipients = quintess_core::public_key::list_recipients(&bytes).unwrap_or_default();
+        if json {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "file": input.input, "bytes": bytes.len(), "security": security_report, "recipients": recipients }))?);
+        } else {
+            println!("File        {} ({:.1} KB)", input.input.display(), bytes.len() as f64 / 1024.0);
+            println!("Security    {}, certificate to open", security_report.cipher);
+            println!("Recipients  {} (see `quintess recipients`)", recipients.len());
+            println!("Open it with --identity to see its pages and properties.");
+        }
+        return Ok(());
+    }
     let pdf = open(input)?;
     let sizes = pages::page_sizes(&pdf)?;
     let document_info = metadata::read_info(&pdf);
@@ -1403,7 +1551,15 @@ fn info(input: &Input, json: bool) -> Result<()> {
     show("Producer", &document_info.producer);
     show("Created", &document_info.creation_date);
     show("Modified", &document_info.modification_date);
-    println!("Security    {}", if security_report.encrypted { format!("{}{}", security_report.cipher, if security_report.needs_password_to_open { ", password to open" } else { ", permissions only" }) } else { "none".into() });
+    println!(
+        "Security    {}",
+        if security_report.encrypted {
+            let opens_with = if security_report.uses_certificates { ", certificate to open" } else if security_report.needs_password_to_open { ", password to open" } else { ", permissions only" };
+            format!("{}{}", security_report.cipher, opens_with)
+        } else {
+            "none".into()
+        }
+    );
     println!("Bookmarks   {bookmarks}");
     println!("Form fields {fields}");
     println!("Comments    {comments}");
@@ -1670,7 +1826,7 @@ fn form(action: FormAction) -> Result<()> {
             }
         }
         FormAction::Detect { input, dry_run, output } => {
-            let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
+            let document = input.open_document()?;
             let proposals = forms::detect_fields(&document)?;
             drop(document);
             for proposal in &proposals {

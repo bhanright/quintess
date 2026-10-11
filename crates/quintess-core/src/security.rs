@@ -172,11 +172,13 @@ pub struct SecurityReport {
     pub needs_password_to_open: bool,
     pub cipher: String,
     pub allowed: Option<AllowedActions>,
+    /// Opened with a certificate and its private key, not a password (see [`crate::public_key`]).
+    pub uses_certificates: bool,
 }
 
 pub fn inspect_security(bytes: &[u8]) -> SecurityReport {
     let Ok(doc) = lopdf::Document::load_mem_with_options(bytes, lopdf::LoadOptions::default()).or_else(|_| lopdf::Document::load_mem(bytes)) else {
-        return SecurityReport { encrypted: true, needs_password_to_open: true, cipher: "unknown".into(), allowed: None };
+        return SecurityReport { encrypted: true, needs_password_to_open: true, cipher: "unknown".into(), allowed: None, uses_certificates: false };
     };
     // A file that only restricts permissions opens with an empty password,
     // and the loader then decrypts it straight away; its settings are kept.
@@ -184,8 +186,12 @@ pub fn inspect_security(bytes: &[u8]) -> SecurityReport {
     let encrypt = match (doc.get_encrypted(), decrypted_on_load.as_ref()) {
         (Ok(encrypt), _) => encrypt,
         (Err(_), Some(settings)) => settings,
-        (Err(_), None) => return SecurityReport { encrypted: false, needs_password_to_open: false, cipher: "none".into(), allowed: None },
+        (Err(_), None) => return SecurityReport { encrypted: false, needs_password_to_open: false, cipher: "none".into(), allowed: None, uses_certificates: false },
     };
+    if encrypt.get(b"Filter").ok().and_then(|filter| filter.as_name().ok()) == Some(b"Adobe.PubSec") {
+        // Each recipient's permissions are inside the file, readable only with their key.
+        return SecurityReport { encrypted: true, needs_password_to_open: true, cipher: "AES-256 (certificates)".into(), allowed: None, uses_certificates: true };
+    }
     let version = encrypt.get(b"V").and_then(|v| v.as_i64()).unwrap_or(0);
     let length = encrypt.get(b"Length").and_then(|v| v.as_i64()).unwrap_or(40);
     let cipher = match version {
@@ -195,5 +201,5 @@ pub fn inspect_security(bytes: &[u8]) -> SecurityReport {
     };
     let bits = encrypt.get(b"P").and_then(|v| v.as_i64()).unwrap_or(-1) as u32;
     let needs_password = decrypted_on_load.is_none() && doc.authenticate_user_password("").is_err();
-    SecurityReport { encrypted: true, needs_password_to_open: needs_password, cipher, allowed: Some(AllowedActions::from_bits(bits)) }
+    SecurityReport { encrypted: true, needs_password_to_open: needs_password, cipher, allowed: Some(AllowedActions::from_bits(bits)), uses_certificates: false }
 }

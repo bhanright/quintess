@@ -151,6 +151,37 @@ pub fn check(pdf: &Pdf, document: &pdfium_render::prelude::PdfDocument) -> Vec<C
     checks
 }
 
+/// What stands in the way of declaring the file PDF/UA-1, from the results
+/// of [`check`]. Every failed check blocks it. A check that needs a person's
+/// judgment (alternate text that describes its picture, enough color
+/// contrast) blocks it too, unless `manual_review_done` says a person has
+/// made that judgment.
+pub fn pdfua_blockers(checks: &[Check], manual_review_done: bool) -> Vec<String> {
+    checks
+        .iter()
+        .filter_map(|check| match check.status {
+            CheckStatus::Failed => Some(format!("{}: {}", check.name, check.detail)),
+            CheckStatus::NeedsReview if !manual_review_done => Some(format!("{}: needs a person to check it. {}", check.name, check.detail)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Declares the file PDF/UA-1 in its XMP metadata (`pdfuaid:part`), but only
+/// when [`pdfua_blockers`] finds nothing in the way; a false claim would
+/// mislead the assistive-technology users it is meant to help. Returns the
+/// blockers: empty means the claim was written.
+pub fn identify_pdfua(pdf: &mut Pdf, checks: &[Check], manual_review_done: bool) -> Result<Vec<String>> {
+    let blockers = pdfua_blockers(checks, manual_review_done);
+    if blockers.is_empty() {
+        let mut claims = crate::metadata::read_standards_claims(pdf);
+        claims.pdfua_part = Some(1);
+        let info = crate::metadata::read_info(pdf);
+        crate::metadata::write_xmp_claiming(pdf, &info, &claims)?;
+    }
+    Ok(blockers)
+}
+
 /// Repairs what can be repaired automatically. `fallback_title` is used
 /// when the document has no title (such as the first heading or file name).
 pub fn fix(pdf: &mut Pdf, fallback_title: &str, language: &str) -> Result<Vec<String>> {
