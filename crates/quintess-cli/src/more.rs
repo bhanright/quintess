@@ -85,6 +85,21 @@ pub enum MoreCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Make, list and unpack PDF portfolios (one PDF carrying other files).
+    Portfolio {
+        #[command(subcommand)]
+        action: PortfolioAction,
+    },
+    /// List, extract and add audio, video and 3D content.
+    Media {
+        #[command(subcommand)]
+        action: MediaAction,
+    },
+    /// List article threads (reading order across pages) and read their text.
+    Threads {
+        #[command(subcommand)]
+        action: ThreadsAction,
+    },
     /// Compare two versions: changed text and pages that look different.
     Compare {
         old: PathBuf,
@@ -361,8 +376,227 @@ pub enum MoreCommand {
     },
 }
 
+fn portfolio_command(action: PortfolioAction) -> Result<()> {
+    use quintess_core::portfolio::{self, PortfolioOptions, PortfolioSort, PortfolioView};
+    match action {
+        PortfolioAction::Create { files, output, cover_text, sort, initial, view } => {
+            let sort_by = match sort.as_str() {
+                "given" => PortfolioSort::Given,
+                "name" => PortfolioSort::Name,
+                "size" => PortfolioSort::Size,
+                "modified" => PortfolioSort::Modified,
+                other => bail!("unknown sort \"{other}\" (given, name, size, modified)"),
+            };
+            let view = match view.as_str() {
+                "details" => PortfolioView::Details,
+                "tile" => PortfolioView::Tile,
+                "hidden" => PortfolioView::Hidden,
+                other => bail!("unknown view \"{other}\" (details, tile, hidden)"),
+            };
+            let mut pdf = portfolio::create_portfolio(&files, &PortfolioOptions { cover_page_text: cover_text, sort_by, initial_file: initial, view })?;
+            pdf.save(&output, &SaveSettings::default())?;
+            println!("wrote {} ({} files)", output.display(), files.len());
+        }
+        PortfolioAction::List { input, json } => {
+            let pdf = crate::open(&input)?;
+            let Some(found) = portfolio::read_portfolio(&pdf) else { bail!("{} is not a portfolio", input.input.display()) };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&found)?);
+            } else {
+                for file in &found.files {
+                    let marker = if found.initial.as_deref() == Some(file.name.as_str()) { " (opens first)" } else { "" };
+                    println!("{:<40} {:>10} bytes  {:<28} {}{marker}", file.name, file.size_bytes, file.mime, file.modified.trim_start_matches("D:"));
+                }
+                println!("{} files; columns: {}", found.files.len(), found.columns.iter().map(|column| column.label.as_str()).collect::<Vec<_>>().join(", "));
+            }
+        }
+        PortfolioAction::Extract { input, output_folder, name } => {
+            let pdf = crate::open(&input)?;
+            if portfolio::read_portfolio(&pdf).is_none() {
+                bail!("{} is not a portfolio", input.input.display());
+            }
+            if name.is_empty() {
+                for path in portfolio::extract_all(&pdf, &output_folder)? {
+                    println!("wrote {}", path.display());
+                }
+            } else {
+                for wanted in &name {
+                    let data = portfolio::open_member(&pdf, wanted)?;
+                    let path = unique_path(&output_folder, wanted)?;
+                    std::fs::write(&path, data)?;
+                    println!("wrote {}", path.display());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn media_command(action: MediaAction) -> Result<()> {
+    use quintess_core::media;
+    match action {
+        MediaAction::List { input, json } => {
+            let pdf = crate::open(&input)?;
+            let items = media::list_media(&pdf);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            } else if items.is_empty() {
+                println!("No audio, video or 3D content.");
+            }
+            for (index, item) in items.iter().enumerate().filter(|_| !json) {
+                println!("{:>3}. page {:<3} {:<6} {:<28} {:>10} bytes  {}", index + 1, item.page, format!("{:?}", item.kind), item.mime, item.size, item.name);
+            }
+        }
+        MediaAction::Extract { input, output_folder, item } => {
+            let pdf = crate::open(&input)?;
+            let items = media::list_media(&pdf);
+            for number in &item {
+                if *number == 0 || *number > items.len() {
+                    bail!("there is no media item {number} (the document has {})", items.len());
+                }
+            }
+            for (index, found) in items.iter().enumerate() {
+                if !item.is_empty() && !item.contains(&(index + 1)) {
+                    continue;
+                }
+                // Sound and 3D items are named after their annotation, which has no extension.
+                let name = if found.name.contains('.') { found.name.clone() } else { format!("{}.{}", found.name, extension_for(&found.mime)) };
+                let path = unique_path(&output_folder, &name)?;
+                std::fs::write(&path, media::extract_media(&pdf, found)?)?;
+                println!("wrote {}", path.display());
+            }
+        }
+        MediaAction::AddVideo { input, video, page, rect, poster, output } => {
+            let numbers: Vec<f32> = rect.split(',').map(|part| part.trim().parse::<f32>()).collect::<std::result::Result<_, _>>().context("--rect takes four numbers: left,bottom,right,top")?;
+            let [left, bottom, right, top] = numbers[..] else { bail!("--rect takes four numbers: left,bottom,right,top") };
+            let mut pdf = crate::open(&input)?;
+            media::add_video(&mut pdf, page, [left, bottom, right, top], &video, poster.as_deref())?;
+            save(&mut pdf, &input, &output)?;
+        }
+    }
+    Ok(())
+}
+
+/// A file extension for a media type that has no name of its own.
+fn extension_for(mime: &str) -> &'static str {
+    match mime {
+        "model/u3d" => "u3d",
+        "model/prc" => "prc",
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        "video/mp4" => "mp4",
+        _ => "bin",
+    }
+}
+
+/// A path in `folder` for a file called `name`, without overwriting anything or leaving the folder.
+fn unique_path(folder: &std::path::Path, name: &str) -> Result<PathBuf> {
+    std::fs::create_dir_all(folder)?;
+    let safe_name = std::path::Path::new(&name.replace('\\', "/")).file_name().map(|part| part.to_string_lossy().into_owned()).filter(|part| !part.is_empty() && part != "..").unwrap_or_else(|| "file".into());
+    let mut path = folder.join(&safe_name);
+    let mut counter = 2;
+    while path.exists() {
+        path = folder.join(format!("{counter}-{safe_name}"));
+        counter += 1;
+    }
+    Ok(path)
+}
+
 fn document(input: &Input) -> Result<quintess_core::pdfium_render::prelude::PdfDocument<'static>> {
     input.open_document()
+}
+
+#[derive(Subcommand)]
+pub enum PortfolioAction {
+    /// Combine files into one portfolio PDF with a cover page.
+    Create {
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Text for the cover page, above the notice for readers without portfolio support.
+        #[arg(long)]
+        cover_text: Option<String>,
+        /// given (the order on the command line), name, size or modified.
+        #[arg(long, default_value = "given")]
+        sort: String,
+        /// Name of the file to open first.
+        #[arg(long)]
+        initial: Option<String>,
+        /// details, tile or hidden.
+        #[arg(long, default_value = "details")]
+        view: String,
+    },
+    /// List the files in a portfolio with their sizes and dates.
+    List {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save the files of a portfolio into a folder (all of them, or the ones named).
+    Extract {
+        #[command(flatten)]
+        input: Input,
+        /// The folder to write into.
+        #[arg(short, long)]
+        output_folder: PathBuf,
+        /// Only these files, by their names in the list.
+        #[arg(long)]
+        name: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum MediaAction {
+    /// List the audio, video and 3D content with its page, type and size.
+    List {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save media files into a folder (all of them, or the numbered ones from `media list`).
+    Extract {
+        #[command(flatten)]
+        input: Input,
+        #[arg(short, long)]
+        output_folder: PathBuf,
+        /// Item numbers from `media list` (starting at 1).
+        #[arg(long)]
+        item: Vec<usize>,
+    },
+    /// Put a video on a page as a clickable poster.
+    AddVideo {
+        #[command(flatten)]
+        input: Input,
+        /// The MP4 (or other video) file to embed.
+        video: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        page: u32,
+        /// Where it goes: left,bottom,right,top in points.
+        #[arg(long)]
+        rect: String,
+        /// A picture to show before it plays.
+        #[arg(long)]
+        poster: Option<PathBuf>,
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ThreadsAction {
+    /// List the threads and their boxes.
+    List {
+        #[command(flatten)]
+        input: Input,
+        /// Also print each thread's text in reading order.
+        #[arg(long)]
+        text: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -514,6 +748,37 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 println!("{:<40} {:>10} bytes  {place}  {}", attachment.name, attachment.size, attachment.description);
             }
         }
+        MoreCommand::Portfolio { action } => portfolio_command(action)?,
+        MoreCommand::Media { action } => media_command(action)?,
+        MoreCommand::Threads { action } => match action {
+            ThreadsAction::List { input, text, json } => {
+                let pdf = crate::open(&input)?;
+                let threads = quintess_core::threads::list_threads(&pdf);
+                let reading = if text {
+                    let document = document(&input)?;
+                    threads.iter().map(|thread| quintess_core::threads::thread_text(&document, thread)).collect::<Result<Vec<String>>>()?
+                } else {
+                    Vec::new()
+                };
+                if json {
+                    let entries: Vec<serde_json::Value> = threads.iter().enumerate().map(|(index, thread)| serde_json::json!({ "title": thread.title, "beads": thread.beads, "text": reading.get(index) })).collect();
+                    println!("{}", serde_json::to_string_pretty(&entries)?);
+                } else if threads.is_empty() {
+                    println!("No article threads.");
+                }
+                for (index, thread) in threads.iter().enumerate().filter(|_| !json) {
+                    println!("thread {}: {:?}, {} boxes", index + 1, thread.title, thread.beads.len());
+                    for (number, (page, rect)) in thread.beads.iter().enumerate() {
+                        println!("  {}. page {page}  [{:.0} {:.0} {:.0} {:.0}]", number + 1, rect[0], rect[1], rect[2], rect[3]);
+                    }
+                    if let Some(words) = reading.get(index) {
+                        for line in words.lines() {
+                            println!("    | {line}");
+                        }
+                    }
+                }
+            }
+        },
         MoreCommand::Compare { old, new, report, dpi } => {
             let old_document = engine::open_document(std::fs::read(&old)?, None)?;
             let new_document = engine::open_document(std::fs::read(&new)?, None)?;

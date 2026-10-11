@@ -294,7 +294,7 @@ pub fn to_layout_text(document: &PdfDocument) -> Result<String> {
             chars.sort_by(|a, b| a.0.total_cmp(&b.0));
             let mut line = String::new();
             let mut previous_right: Option<f32> = None;
-            for (left, right, character) in chars {
+            for (left, right, character) in logical_pieces(chars, average_width) {
                 // Letters that touch stay together; only a real gap is padded
                 // out to the column where the next text starts.
                 let touches = previous_right.is_some_and(|edge| left - edge < average_width * 0.3);
@@ -304,7 +304,7 @@ pub fn to_layout_text(document: &PdfDocument) -> Result<String> {
                         line.push(' ');
                     }
                 }
-                line.push(character);
+                line.push_str(&character);
                 previous_right = Some(right);
             }
             output.push_str(line.trim_end());
@@ -314,4 +314,43 @@ pub fn to_layout_text(document: &PdfDocument) -> Result<String> {
         output.push('\n');
     }
     Ok(output)
+}
+
+/// A visual line's characters (sorted left to right) as pieces to lay out:
+/// one piece per character, except that a stretch containing right-to-left
+/// letters becomes one piece holding its text in logical order, so Arabic
+/// and Hebrew copy out the way they are read. Stretches end at a gap of
+/// several character widths (a column break), which layout keeps.
+fn logical_pieces(chars: Vec<(f32, f32, char)>, average_width: f32) -> Vec<(f32, f32, String)> {
+    let mut pieces = Vec::with_capacity(chars.len());
+    let mut start = 0;
+    while start < chars.len() {
+        let mut end = start + 1;
+        while end < chars.len() && chars[end].0 - chars[end - 1].1 < average_width * 3.0 {
+            end += 1;
+        }
+        let stretch = &chars[start..end];
+        start = end;
+        if !stretch.iter().any(|&(_, _, character)| crate::bidi_text::is_strong_right_to_left(character)) {
+            pieces.extend(stretch.iter().map(|&(left, right, character)| (left, right, character.to_string())));
+            continue;
+        }
+        // Words in a file with no space characters are told apart by their gaps.
+        let mut placed: Vec<crate::bidi_text::PlacedChar> = Vec::with_capacity(stretch.len());
+        for (position, &(left, right, character)) in stretch.iter().enumerate() {
+            if position > 0 {
+                let (_, previous_right, previous) = stretch[position - 1];
+                if left - previous_right >= average_width * 0.3 && !character.is_whitespace() && !previous.is_whitespace() {
+                    placed.push((' ', [previous_right, 0.0, left, 0.001]));
+                }
+            }
+            placed.push((character, [left, 0.0, right, 0.001]));
+        }
+        let text: String = match crate::bidi_text::logical_order(&placed, None) {
+            Some(found) => found.logical.into_iter().map(|index| placed[index].0).collect(),
+            None => placed.iter().map(|&(character, _)| character).collect(),
+        };
+        pieces.push((stretch[0].0, stretch[stretch.len() - 1].1, text));
+    }
+    pieces
 }
