@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use quintess_core::settings::Settings;
-use quintess_core::{Pdf, SaveSettings, accessibility, attachments, batch, compare, convert, engine, ocr, optimize, preflight, signatures};
+use quintess_core::presentation::{self, PresentationSettings, SlideMode};
+use quintess_core::{Pdf, SaveSettings, accessibility, attachments, batch, compare, convert, engine, ocr, optimize, preflight, signatures, spreadsheet, tables};
 
 use crate::{Input, Output, pages_of, save, save_edited_bytes, save_removing, write_or_print};
 
@@ -30,18 +31,43 @@ pub enum MoreCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Convert to Markdown, HTML, Word, or plain text.
+    /// Convert to Markdown, HTML, Word, Excel, PowerPoint, CSV tables, or plain text.
     Export {
         #[command(flatten)]
         input: Input,
-        /// md, html, docx, txt (reading order) or layout (keeps columns).
+        /// md, html, docx, xlsx, pptx, csv (tables), txt (reading order) or layout (keeps columns).
         #[arg(long, short)]
         format: String,
+        /// The file to write; for csv without --table, the folder for one file per table.
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Leave images out of Markdown, HTML and Word output.
         #[arg(long)]
         no_images: bool,
+        /// xlsx: only the detected tables, one per sheet ("Page 3 table 1"),
+        /// instead of every page as a sheet.
+        #[arg(long)]
+        tables_only: bool,
+        /// pptx: each page as a full-slide picture (the default).
+        #[arg(long, conflicts_with = "editable")]
+        pictures: bool,
+        /// pptx: text boxes, pictures and lines you can edit.
+        #[arg(long)]
+        editable: bool,
+        /// pptx pictures: resolution of the page pictures.
+        #[arg(long, default_value_t = 150.0)]
+        dpi: f32,
+        /// csv: write only this table (its number from `quintess tables`) to one file.
+        #[arg(long)]
+        table: Option<usize>,
+    },
+    /// List the tables found in a document, with their cell text.
+    Tables {
+        #[command(flatten)]
+        input: Input,
+        /// Print JSON (pages, boxes, rows, spans) instead of text.
+        #[arg(long)]
+        json: bool,
     },
     /// List, add, extract or remove attached files.
     Attachments {
@@ -254,7 +280,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             println!("wrote {} ({:.0} KB → {:.0} KB, {:.0}% smaller)", target.display(), original_size / 1024.0, bytes.len() as f64 / 1024.0, (1.0 - bytes.len() as f64 / original_size.max(1.0)) * 100.0);
             println!("{} images resampled, {} recompressed, {} duplicate streams merged", report.images_resampled, report.images_recompressed, report.duplicate_streams_merged);
         }
-        MoreCommand::Export { input, format, output, no_images } => {
+        MoreCommand::Export { input, format, output, no_images, tables_only, pictures: _, editable, dpi, table } => {
             let document = document(&input)?;
             let stem = input.input.file_stem().unwrap_or_default().to_string_lossy().into_owned();
             let target = |extension: &str| output.clone().unwrap_or_else(|| input.input.with_file_name(format!("{stem}.{extension}")));
@@ -280,9 +306,62 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     std::fs::write(&path, convert::to_docx(&structure)?)?;
                     println!("wrote {}", path.display());
                 }
+                "xlsx" | "excel" => {
+                    let path = target("xlsx");
+                    let bytes = if tables_only { spreadsheet::document_tables_to_xlsx(&document) } else { spreadsheet::document_to_xlsx(&document) };
+                    std::fs::write(&path, bytes.context("could not make the workbook")?)?;
+                    println!("wrote {}", path.display());
+                }
+                "pptx" | "powerpoint" => {
+                    let path = target("pptx");
+                    let mode = if editable { SlideMode::Editable } else { SlideMode::Pictures };
+                    std::fs::write(&path, presentation::document_to_pptx(&document, &PresentationSettings { mode, picture_dpi: dpi })?)?;
+                    println!("wrote {}", path.display());
+                }
+                "csv" => {
+                    let found = tables::detect_tables(&document)?;
+                    if found.is_empty() {
+                        bail!("no tables were found");
+                    }
+                    let numbers = tables::number_on_page(&found);
+                    if let Some(wanted) = table {
+                        let Some(chosen) = wanted.checked_sub(1).and_then(|index| found.get(index)) else {
+                            bail!("there is no table {wanted}; {} found (see `quintess tables`)", found.len());
+                        };
+                        let path = target("csv");
+                        std::fs::write(&path, chosen.to_csv()?)?;
+                        println!("wrote {}", path.display());
+                    } else {
+                        let folder = output.clone().unwrap_or_else(|| input.input.with_file_name(format!("{stem}-tables")));
+                        std::fs::create_dir_all(&folder)?;
+                        for (chosen, number) in found.iter().zip(numbers) {
+                            let path = folder.join(format!("{stem}-page{}-table{number}.csv", chosen.page_index + 1));
+                            std::fs::write(&path, chosen.to_csv()?)?;
+                            println!("wrote {}", path.display());
+                        }
+                    }
+                }
                 "txt" | "text" => write_or_print(&engine::extract_text(&document)?, &output)?,
                 "layout" => write_or_print(&convert::to_layout_text(&document)?, &output)?,
-                other => bail!("unknown format \"{other}\" (md, html, docx, txt, layout)"),
+                other => bail!("unknown format \"{other}\" (md, html, docx, xlsx, pptx, csv, txt, layout)"),
+            }
+        }
+        MoreCommand::Tables { input, json } => {
+            let found = tables::detect_tables(&document(&input)?)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&found)?);
+            } else if found.is_empty() {
+                println!("No tables found.");
+            }
+            if !json {
+                let numbers = tables::number_on_page(&found);
+                for (index, (table, number)) in found.iter().zip(numbers).enumerate() {
+                    println!("table {} (page {}, table {number}): {} rows by {} columns{}", index + 1, table.page_index + 1, table.rows.len(), table.column_count(), if table.has_header { ", header row" } else { "" });
+                    for row in &table.rows {
+                        let cells: Vec<String> = row.iter().map(|cell| if cell.column_span > 1 { format!("{} [spans {}]", cell.text, cell.column_span) } else { cell.text.clone() }).collect();
+                        println!("  | {} |", cells.join(" | "));
+                    }
+                }
             }
         }
         MoreCommand::Attachments { input, add, extract, remove, output } => {
