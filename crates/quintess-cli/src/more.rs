@@ -273,11 +273,16 @@ pub enum MoreCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Run a saved action (JSON list of steps) over files.
+    /// Run a saved action (JSON list of steps) over files. A result whose
+    /// name is taken gets a number unless --overwrite or --skip-existing.
     Batch {
         action: PathBuf,
         #[arg(required = true)]
         inputs: Vec<PathBuf>,
+        #[command(flatten)]
+        existing: crate::ExistingFlags,
+        #[command(flatten)]
+        run: crate::RunFlags,
     },
     /// List the installed printers.
     Printers,
@@ -1000,12 +1005,15 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 println!("{:<26} {}{}", issue.rule, issue.detail, if issue.fixable && !convert { "  (fixable with --convert)" } else { "" });
             }
         }
-        MoreCommand::Batch { action, inputs } => {
+        MoreCommand::Batch { action, inputs, existing, run } => {
             let action = batch::Action::load(&action)?;
-            let results = batch::run_action(&action, &inputs, |done, total, path| eprintln!("[{done}/{total}] {}", path.display()));
+            crate::check_run_flags(&action, &run)?;
+            let options = run.options(existing.choice());
+            let results = batch::run_action(&action, &inputs, &options, |done, total, path| eprintln!("[{done}/{total}] {}", path.display()));
             let mut failures = 0;
             for result in results {
                 match (result.output, result.error) {
+                    (Some(output), _) if result.skipped => println!("skip  {}: {} already exists", result.input.display(), output.display()),
                     (Some(output), _) => println!("ok    {} → {}", result.input.display(), output.display()),
                     (_, Some(error)) => {
                         failures += 1;

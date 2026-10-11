@@ -283,7 +283,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 "watch" => {
                     // folder;action
                     if let Some((folder, action)) = value.split_once(';') {
-                        self.start_watch(PathBuf::from(folder), PathBuf::from(action), None);
+                        self.start_watch(PathBuf::from(folder), PathBuf::from(action), None, Default::default());
                     }
                 }
                 "command" => {
@@ -918,19 +918,29 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         self.jobs.push(Job::start(label, ctx, work));
     }
 
+    /// A job whose step joins the action being recorded once it succeeds
+    /// (not when it fails or is cancelled).
+    fn start_recorded_job(&mut self, ctx: &egui::Context, label: &str, step: quintess_core::batch::Step, work: impl FnOnce(&dyn Fn(u32, u32)) -> anyhow::Result<JobOutcome> + Send + 'static) {
+        let mut job = Job::start(label, ctx, work);
+        job.record_on_success = Some(step);
+        self.jobs.push(job);
+    }
+
     /// The active tab's id, bytes and password, for handing to a job.
     fn job_input(&self) -> Option<(u64, std::sync::Arc<Vec<u8>>, Option<String>, String)> {
         self.tabs.get(self.active).map(|t| (t.id, t.bytes.clone(), t.password.clone(), t.title.clone()))
     }
 
-    fn start_ocr(&mut self, ctx: &egui::Context) {
+    /// Recognizes text in the active document; `record` adds the step to an
+    /// action being recorded once it succeeds.
+    fn start_ocr(&mut self, ctx: &egui::Context, record: bool) {
         // Installed copies include the models; otherwise ask before downloading.
         if !quintess_core::ocr::models_present() {
             self.dialogs.push(Dialog::DownloadOcrModels);
             return;
         }
         let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
-        self.start_job(ctx, "Recognizing text", move |progress| {
+        let work = move |progress: &dyn Fn(u32, u32)| {
             let document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
             let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
             let pages: Vec<u32> = (1..=pdf.page_count()).collect();
@@ -940,12 +950,17 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 return Ok(JobOutcome::Message("Every page already has text; nothing to recognize.".into()));
             }
             Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words)", report.words), bytes: pdf.to_bytes(&SaveSettings::default())?, removes_content: false })
-        });
+        };
+        if record {
+            self.start_recorded_job(ctx, "Recognizing text", quintess_core::batch::Step::Ocr { dpi: None }, work);
+        } else {
+            self.start_job(ctx, "Recognizing text", work);
+        }
     }
 
-    fn start_optimize(&mut self, ctx: &egui::Context, settings: quintess_core::optimize::OptimizeSettings) {
+    fn start_optimize(&mut self, ctx: &egui::Context, settings: quintess_core::optimize::OptimizeSettings, step: quintess_core::batch::Step) {
         let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
-        self.start_job(ctx, "Reducing file size", move |_| {
+        self.start_recorded_job(ctx, "Reducing file size", step, move |_| {
             let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
             let (optimized, report) = quintess_core::optimize::optimize(&mut pdf, &settings)?;
             if optimized.len() >= bytes.len() {
@@ -1113,15 +1128,17 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         });
     }
 
-    fn apply_job_outcome(&mut self, outcome: JobOutcome) {
+    /// Applies what a finished job handed back; false when that failed (or
+    /// its document was closed meanwhile).
+    fn apply_job_outcome(&mut self, outcome: JobOutcome) -> bool {
         match outcome {
             JobOutcome::ReplaceBytes { tab_id, label, bytes, removes_content } => {
-                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
-                    let result = tab.replace_bytes_as(&label, bytes, removes_content);
-                    if self.report(result).is_some() {
-                        self.info(format!("{label}. Ctrl+Z undoes it."));
-                    }
+                let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) else { return false };
+                let result = tab.replace_bytes_as(&label, bytes, removes_content);
+                if self.report(result).is_none() {
+                    return false;
                 }
+                self.info(format!("{label}. Ctrl+Z undoes it."));
             }
             JobOutcome::ShowText { title, text } => self.dialogs.push(Dialog::TextResult { title, text }),
             JobOutcome::Comparison { summary, report_path } => self.dialogs.push(Dialog::ComparisonResult { summary, report_path }),
@@ -1140,7 +1157,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 self.info(format!("Scanned {pages} page{}.", if pages == 1 { "" } else { "s" }));
                 if recognize_text {
                     let ctx = self.worker_context.clone();
-                    self.start_ocr(&ctx);
+                    self.start_ocr(&ctx, false);
                 }
             }
             JobOutcome::QrCodes { tab_id, version, codes } => {
@@ -1157,6 +1174,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
             }
         }
+        true
     }
 
     fn check_accessibility(&mut self) {
@@ -2125,18 +2143,19 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
                 AppRequest::SaveAndClose { tab_ids, quitting } => self.save_and_close(tab_ids, quitting),
                 AppRequest::CloseDiscarding { tab_ids, quitting } => self.close_discarding(tab_ids, quitting),
-                AppRequest::StartOptimize(settings) => {
+                AppRequest::StartOptimize { settings, step } => {
                     let ctx = self.worker_context.clone();
-                    self.start_optimize(&ctx, settings);
+                    self.start_optimize(&ctx, settings, step);
                 }
-                AppRequest::StartBatch { action, inputs } => {
+                AppRequest::StartBatch { action, inputs, options } => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Running action", move |progress| {
                         let action = quintess_core::batch::Action::load(&action)?;
-                        let results = quintess_core::batch::run_action(&action, &inputs, |done, total, _| progress(done as u32, total as u32));
+                        let results = quintess_core::batch::run_action(&action, &inputs, &options, |done, total, _| progress(done as u32, total as u32));
                         let mut text = String::new();
                         for result in results {
                             match (result.output, result.error) {
+                                (Some(output), _) if result.skipped => text.push_str(&format!("– {} skipped: {} already exists\n", result.input.display(), output.display())),
                                 (Some(output), _) => text.push_str(&format!("✔ {} → {}\n", result.input.display(), output.display())),
                                 (_, Some(error)) => text.push_str(&format!("✘ {}: {error}\n", result.input.display())),
                                 _ => {}
@@ -2281,7 +2300,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         viewer::go_to_page(tab, page_index);
                     }
                 }
-                AppRequest::StartWatch { folder, action, output } => self.start_watch(folder, action, output),
+                AppRequest::StartWatch { folder, action, output, options } => self.start_watch(folder, action, output, options),
                 AppRequest::StartFolderSearch(query) => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Searching the folder", move |progress| {
@@ -2296,10 +2315,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.start_job(&ctx, "Filling copies", move |progress| {
                         let mut problems: Vec<String> = Vec::new();
                         let mut copies = Vec::new();
+                        let mut skipped = 0;
                         let count = quintess_core::form_merge::fill_rows(&job.template, job.password.as_deref(), &job.table, &job.plan, &job.settings, progress, |copy| {
                             problems.extend(copy.problems.iter().map(|problem| format!("Row {} ({}): {problem}", copy.row, copy.file_name)));
                             match &job.folder {
-                                Some(folder) => std::fs::write(folder.join(&copy.file_name), &copy.bytes)?,
+                                Some(folder) => match quintess_core::document::output_path(&folder.join(&copy.file_name), job.existing) {
+                                    Some(target) => quintess_core::document::write_file_safely(&target, &copy.bytes)?,
+                                    None => skipped += 1,
+                                },
                                 None => copies.push((copy.file_name, copy.bytes)),
                             }
                             Ok(())
@@ -2307,15 +2330,20 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         let place = match (&job.folder, &job.combined_file) {
                             (Some(folder), _) => folder.display().to_string(),
                             (None, Some(file)) => {
-                                std::fs::write(file, quintess_core::form_merge::combine(&copies)?)?;
+                                // The save dialog has already asked about replacing it.
+                                quintess_core::document::write_file_safely(file, &quintess_core::form_merge::combine(&copies)?)?;
                                 file.display().to_string()
                             }
                             (None, None) => String::new(),
                         };
+                        let mut summary = format!("Filled {} copies into {place}.", count - skipped);
+                        if skipped > 0 {
+                            summary.push_str(&format!(" Skipped {skipped} whose files already existed."));
+                        }
                         if problems.is_empty() {
-                            Ok(JobOutcome::Message(format!("Filled {count} copies into {place}.")))
+                            Ok(JobOutcome::Message(summary))
                         } else {
-                            Ok(JobOutcome::ShowText { title: "Filled copies".into(), text: format!("Filled {count} copies into {place}.\n\n{} values need a look:\n{}\n", problems.len(), problems.join("\n")) })
+                            Ok(JobOutcome::ShowText { title: "Filled copies".into(), text: format!("{summary}\n\n{} values need a look:\n{}\n", problems.len(), problems.join("\n")) })
                         }
                     });
                 }
@@ -2362,10 +2390,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let title = self.tabs.get(self.active).map(|t| t.title.trim_end_matches(".pdf").to_string()).unwrap_or_default();
                     let language = self.settings.language.clone();
                     let mut fixed = Vec::new();
-                    self.edit("Accessibility fixes", |pdf| {
+                    let done = self.try_edit("Accessibility fixes", |pdf| {
                         fixed = quintess_core::accessibility::fix(pdf, &title, &language)?;
                         Ok(())
                     });
+                    if !done {
+                        continue;
+                    }
+                    self.record(quintess_core::batch::Step::AccessibilityFix);
                     self.check_accessibility();
                     if !fixed.is_empty() {
                         self.info(format!("Fixed: {}", fixed.join("; ")));
@@ -2373,10 +2405,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
                 AppRequest::ConvertToPdfA => {
                     let mut remaining = Vec::new();
-                    self.edit("Convert to PDF/A-2b", |pdf| {
+                    let done = self.try_edit("Convert to PDF/A-2b", |pdf| {
                         remaining = quintess_core::preflight::convert_to_pdfa(pdf)?;
                         Ok(())
                     });
+                    if !done {
+                        continue;
+                    }
+                    self.record(quintess_core::batch::Step::PdfA);
                     self.dialogs.push(Dialog::PreflightResults(remaining));
                 }
             }
@@ -2466,16 +2502,22 @@ impl eframe::App for QuintessApp {
             self.remember_reading_positions(&ctx);
         }
         let mut finished = Vec::new();
-        self.jobs.retain(|job| match job.poll() {
+        self.jobs.retain_mut(|job| match job.poll() {
             Some(result) => {
-                finished.push((job.label.clone(), result));
+                finished.push((job.label.clone(), job.record_on_success.take(), result));
                 false
             }
             None => true,
         });
-        for (label, result) in finished {
+        for (label, step, result) in finished {
             match result {
-                Ok(outcome) => self.apply_job_outcome(outcome),
+                Ok(outcome) => {
+                    if self.apply_job_outcome(outcome) {
+                        if let Some(step) = step {
+                            self.record(step);
+                        }
+                    }
+                }
                 Err(error) => self.error(format!("{label} failed: {error:#}")),
             }
         }

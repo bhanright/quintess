@@ -35,8 +35,9 @@ pub enum AppRequest {
     SaveAndClose { tab_ids: Vec<u64>, quitting: bool },
     /// Close these documents (by tab id) without saving, or quit when `quitting`.
     CloseDiscarding { tab_ids: Vec<u64>, quitting: bool },
-    StartOptimize(quintess_core::optimize::OptimizeSettings),
-    StartBatch { action: PathBuf, inputs: Vec<PathBuf> },
+    /// Reduce the file size; `step` is recorded once it succeeds.
+    StartOptimize { settings: quintess_core::optimize::OptimizeSettings, step: Step },
+    StartBatch { action: PathBuf, inputs: Vec<PathBuf>, options: quintess_core::batch::RunOptions },
     SettingsChanged(quintess_core::settings::Settings),
     IdentityCreated(PathBuf),
     ApplyAccessibilityFixes,
@@ -74,7 +75,7 @@ pub enum AppRequest {
     SetMeasureScale(quintess_core::measure::Scale),
     /// Turn to a page and outline a box there (display points from the top left).
     ShowOnPage { page_index: usize, display_rect: [f32; 4] },
-    StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf> },
+    StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf>, options: quintess_core::batch::RunOptions },
     /// A step just applied, for the action being recorded (ignored otherwise).
     Record(quintess_core::batch::Step),
     /// Open a file (or switch to it) at a page, with the search shown.
@@ -108,6 +109,8 @@ pub struct FormMergeJob {
     /// A folder for separate files, or one combined file.
     pub folder: Option<PathBuf>,
     pub combined_file: Option<PathBuf>,
+    /// For separate files: what to do when a name is taken in the folder.
+    pub existing: quintess_core::document::ExistingFiles,
 }
 
 /// Choices in the "Fill from spreadsheet" dialog.
@@ -119,11 +122,12 @@ pub struct FormMergeDialog {
     pub name_pattern: String,
     pub flatten: bool,
     pub combine: bool,
+    pub existing: quintess_core::document::ExistingFiles,
 }
 
 impl FormMergeDialog {
     pub fn new(fields: Vec<String>) -> Self {
-        Self { data_path: None, table: None, plan: None, fields, name_pattern: "{row}".into(), flatten: false, combine: false }
+        Self { data_path: None, table: None, plan: None, fields, name_pattern: "{row}".into(), flatten: false, combine: false, existing: Default::default() }
     }
 
     /// Reads a spreadsheet and matches its columns to the form's fields.
@@ -166,7 +170,7 @@ pub enum Dialog {
     Preferences(quintess_core::settings::Settings),
     Optimize { preset: usize, dpi: f32, quality: u8, grayscale: bool, remove_metadata: bool },
     /// `steps` describes the chosen action's steps.
-    Batch { action: Option<PathBuf>, inputs: Vec<PathBuf>, steps: Vec<String> },
+    Batch { action: Option<PathBuf>, inputs: Vec<PathBuf>, steps: Vec<String>, run: RunChoices },
     CreateIdentity { name: String, email: String, organization: String },
     TextResult { title: String, text: String },
     SignatureResults(Vec<quintess_core::signatures::SignatureCheck>),
@@ -206,8 +210,78 @@ pub enum Dialog {
     MeasureScale { text: String, calibrated_points: Option<f32>, length: String, unit: String },
     DownloadOcrModels,
     QrResults(Vec<quintess_core::qr::FoundCode>),
-    Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
+    Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String>, run: RunChoices },
     CheckForText { texts: String },
+}
+
+/// Choices made when an action starts rather than stored in it: what to do
+/// with file names already taken (batch runs), the passwords Protect steps
+/// apply, and leave to download the OCR models. Passwords live only here,
+/// for this run, never in the action file.
+#[derive(Default)]
+pub struct RunChoices {
+    pub existing: quintess_core::document::ExistingFiles,
+    pub needs_passwords: bool,
+    pub needs_model_download: bool,
+    pub user_password: String,
+    pub owner_password: String,
+    pub allow_model_download: bool,
+}
+
+impl RunChoices {
+    /// The questions an action needs answered before it runs.
+    pub fn for_action(action: &quintess_core::batch::Action) -> Self {
+        RunChoices { needs_passwords: action.needs_passwords(), needs_model_download: action.needs_model_download(), ..Default::default() }
+    }
+
+    /// Shows the questions; `offer_existing` for runs that name their
+    /// results (a watched folder always adds a number).
+    fn show(&mut self, ui: &mut egui::Ui, offer_existing: bool) {
+        if offer_existing {
+            ui.label("When a result's file already exists");
+            ui.indent("existing files", |ui| {
+                for choice in quintess_core::document::ExistingFiles::ALL {
+                    ui.radio_value(&mut self.existing, choice, choice.label());
+                }
+            });
+        }
+        if self.needs_passwords {
+            ui.add_space(4.0);
+            ui.label(RichText::new("Passwords for the protect step").strong());
+            ui.weak("Asked for each run and never saved in the action file.");
+            egui::Grid::new("run passwords").num_columns(2).show(ui, |ui| {
+                ui.label("Owner password");
+                ui.add(egui::TextEdit::singleline(&mut self.owner_password).password(true).hint_text("lifts the restrictions (required)"));
+                ui.end_row();
+                ui.label("Open password");
+                ui.add(egui::TextEdit::singleline(&mut self.user_password).password(true).hint_text("optional"));
+                ui.end_row();
+            });
+        }
+        if self.needs_model_download {
+            ui.add_space(4.0);
+            ui.checkbox(&mut self.allow_model_download, "Download the recognition models the OCR step needs (about 12 MB, from the ocrs project)");
+        }
+    }
+
+    /// The choices for running, or why they aren't complete.
+    fn options(&self) -> anyhow::Result<quintess_core::batch::RunOptions> {
+        if self.needs_passwords && self.owner_password.is_empty() {
+            anyhow::bail!("enter the owner password for the protect step");
+        }
+        if self.needs_model_download && !self.allow_model_download {
+            anyhow::bail!("the OCR step needs the recognition models: tick the box to download them, or install them with Quintess");
+        }
+        let passwords = self.needs_passwords.then(|| quintess_core::batch::ProtectPasswords { user_password: self.user_password.clone(), owner_password: self.owner_password.clone() });
+        Ok(quintess_core::batch::RunOptions { existing: self.existing, allow_model_download: self.allow_model_download, passwords })
+    }
+}
+
+/// Loads an action chosen in the Batch or Watch dialog: its steps in words
+/// and the questions it needs answered before running.
+fn load_chosen_action(path: &std::path::Path) -> anyhow::Result<(Vec<String>, RunChoices)> {
+    let action = quintess_core::batch::Action::load(path)?;
+    Ok((action.steps.iter().map(Step::describe).collect(), RunChoices::for_action(&action)))
 }
 
 /// Matches found in the Find and redact dialog, with the search that found
@@ -720,6 +794,12 @@ fn form_merge_body(ui: &mut egui::Ui, merge: &mut FormMergeDialog, tab: &mut Doc
     ui.radio_value(&mut merge.combine, true, "One combined PDF, a bookmark per copy (flattened)");
     ui.add_enabled_ui(!merge.combine, |ui| {
         ui.checkbox(&mut merge.flatten, "Flatten each copy so its values can't be changed");
+        ui.label("When a file of the same name is already in the folder");
+        ui.indent("existing copies", |ui| {
+            for choice in quintess_core::document::ExistingFiles::ALL {
+                ui.radio_value(&mut merge.existing, choice, choice.label());
+            }
+        });
     });
     if buttons(ui, &format!("Fill {} copies…", table.rows.len()), outcome) {
         form_merge::check_name_pattern(&merge.name_pattern, &table.columns)?;
@@ -734,7 +814,7 @@ fn form_merge_body(ui: &mut egui::Ui, merge: &mut FormMergeDialog, tab: &mut Doc
         };
         if folder.is_some() || combined_file.is_some() {
             let settings = form_merge::MergeSettings { name_pattern: merge.name_pattern.clone(), flatten: merge.flatten || merge.combine };
-            outcome.requests.push(AppRequest::StartFormMerge(FormMergeJob { template: tab.bytes.clone(), password: tab.password.clone(), table: table.clone(), plan: plan.clone(), settings, folder, combined_file }));
+            outcome.requests.push(AppRequest::StartFormMerge(FormMergeJob { template: tab.bytes.clone(), password: tab.password.clone(), table: table.clone(), plan: plan.clone(), settings, folder, combined_file, existing: merge.existing }));
             outcome.keep_open = false;
         }
     }
@@ -980,14 +1060,14 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             }
             return Ok(());
         }
-        Dialog::Batch { action, inputs, steps } => {
+        Dialog::Batch { action, inputs, steps, run } => {
             ui.label("An action is a list of steps, such as OCR, redaction, watermark and optimize, run on every file. Record one with Tools ▸ Record an action.");
             ui.horizontal(|ui| -> anyhow::Result<()> {
                 if ui.button("Choose action…").clicked() {
                     *action = rfd::FileDialog::new().add_filter("Action", &["json"]).pick_file();
-                    *steps = match action {
-                        Some(path) => quintess_core::batch::Action::load(path)?.steps.iter().map(quintess_core::batch::Step::describe).collect(),
-                        None => Vec::new(),
+                    (*steps, *run) = match action {
+                        Some(path) => load_chosen_action(path)?,
+                        None => (Vec::new(), RunChoices::default()),
                     };
                 }
                 ui.label(action.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "No action chosen".into()));
@@ -1005,6 +1085,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 }
                 ui.label(format!("{} files", inputs.len()));
             });
+            ui.add_space(4.0);
+            run.show(ui, true);
             ui.collapsing("Example action", |ui| {
                 ui.monospace("{ \"steps\": [\n  { \"step\": \"ocr\" },\n  { \"step\": \"redact\", \"sensitive\": true },\n  { \"step\": \"watermark\", \"text\": \"DRAFT\" },\n  { \"step\": \"optimize\", \"preset\": \"smallest\" }\n], \"suffix\": \"-processed\" }");
             });
@@ -1013,7 +1095,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 if inputs.is_empty() {
                     anyhow::bail!("choose files to process");
                 }
-                outcome.requests.push(AppRequest::StartBatch { action, inputs: inputs.clone() });
+                let options = run.options()?;
+                outcome.requests.push(AppRequest::StartBatch { action, inputs: inputs.clone(), options });
                 outcome.keep_open = false;
             }
             return Ok(());
@@ -1051,8 +1134,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             }
             return Ok(());
         }
-        Dialog::Watch { folder, action, output, steps } => {
-            ui.label("While Quintess is open, PDFs dropped into the folder are run through an action and saved to the results folder. Originals move to a \"Processed\" folder inside it (or \"Failed\", with a note saying why).");
+        Dialog::Watch { folder, action, output, steps, run } => {
+            ui.label("While Quintess is open, PDFs dropped into the folder are run through an action and saved to the results folder (a result whose name is taken gets a number). Originals move to a \"Processed\" folder inside the watched folder (or \"Failed\", with a note saying why).");
             egui::Grid::new("watch").num_columns(2).show(ui, |ui| -> anyhow::Result<()> {
                 if ui.button("Folder to watch…").clicked() {
                     if let Some(chosen) = rfd::FileDialog::new().set_title("Folder to watch").pick_folder() {
@@ -1063,9 +1146,9 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 ui.end_row();
                 if ui.button("Action…").clicked() {
                     *action = rfd::FileDialog::new().add_filter("Action", &["json"]).pick_file();
-                    *steps = match action {
-                        Some(path) => quintess_core::batch::Action::load(path)?.steps.iter().map(quintess_core::batch::Step::describe).collect(),
-                        None => Vec::new(),
+                    (*steps, *run) = match action {
+                        Some(path) => load_chosen_action(path)?,
+                        None => (Vec::new(), RunChoices::default()),
                     };
                 }
                 ui.label(action.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "none chosen (record one with Tools ▸ Record an action)".into()));
@@ -1081,10 +1164,12 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             for (number, step) in steps.iter().enumerate() {
                 ui.weak(format!("{}. {step}", number + 1));
             }
+            run.show(ui, false);
             if buttons(ui, "Start watching", outcome) {
                 let folder = folder.clone().ok_or_else(|| anyhow::anyhow!("choose the folder to watch"))?;
                 let action = action.clone().ok_or_else(|| anyhow::anyhow!("choose the action to run"))?;
-                outcome.requests.push(AppRequest::StartWatch { folder, action, output: output.clone() });
+                let options = run.options()?;
+                outcome.requests.push(AppRequest::StartWatch { folder, action, output: output.clone(), options });
                 outcome.keep_open = false;
             }
             return Ok(());
@@ -2082,8 +2167,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     2 => Step::Optimize { preset: "smallest".into() },
                     _ => Step::OptimizeCustom { settings: settings.clone() },
                 };
-                outcome.requests.push(AppRequest::StartOptimize(settings));
-                outcome.requests.push(AppRequest::Record(step));
+                outcome.requests.push(AppRequest::StartOptimize { settings, step });
                 outcome.keep_open = false;
             }
         }

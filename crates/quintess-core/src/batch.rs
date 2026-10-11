@@ -50,7 +50,10 @@ pub enum Step {
     OptimizeCustom { settings: crate::optimize::OptimizeSettings },
     AccessibilityFix,
     PdfA,
-    Protect { #[serde(default)] user_password: String, #[serde(default)] owner_password: String },
+    /// Password protection. The passwords are given when the action runs
+    /// (`RunOptions::passwords`) and never written to the action file;
+    /// passwords in files saved by earlier versions are still read.
+    Protect { #[serde(default, skip_serializing)] user_password: String, #[serde(default, skip_serializing)] owner_password: String },
     Sign { identity: PathBuf, #[serde(default)] reason: String },
 }
 
@@ -107,6 +110,28 @@ pub struct BatchState {
     pub next_bates: Option<u64>,
 }
 
+/// The passwords a Protect step applies.
+#[derive(Clone, Debug, Default)]
+pub struct ProtectPasswords {
+    /// Needed to open the file; empty for none.
+    pub user_password: String,
+    /// Lifts the restrictions; required.
+    pub owner_password: String,
+}
+
+/// Choices made when an action runs rather than stored in it.
+#[derive(Clone, Debug, Default)]
+pub struct RunOptions {
+    /// What to do when a result's file name is taken.
+    pub existing: crate::document::ExistingFiles,
+    /// The OCR step may download the recognition models when they aren't
+    /// installed. Off unless the person agreed.
+    pub allow_model_download: bool,
+    /// For Protect steps; asked for when the action runs, since action
+    /// files are not a safe place for passwords.
+    pub passwords: Option<ProtectPasswords>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Action {
     pub steps: Vec<Step>,
@@ -135,18 +160,29 @@ impl Action {
     pub fn load(path: &Path) -> Result<Self> {
         serde_json::from_str(&std::fs::read_to_string(path)?).with_context(|| format!("{} is not a valid action", path.display()))
     }
+
+    /// Whether a Protect step needs passwords given when the action runs
+    /// (it has none stored from an earlier version's action file).
+    pub fn needs_passwords(&self) -> bool {
+        self.steps.iter().any(|step| matches!(step, Step::Protect { owner_password, .. } if owner_password.is_empty()))
+    }
+
+    /// Whether running the action would need the OCR models downloaded.
+    pub fn needs_model_download(&self) -> bool {
+        self.steps.iter().any(|step| matches!(step, Step::Ocr { .. })) && !crate::ocr::models_present()
+    }
 }
 
 /// Runs every step on one file's bytes.
-pub fn run_steps(bytes: Vec<u8>, steps: &[Step], file_name: &str) -> Result<Vec<u8>> {
-    run_steps_continuing(bytes, steps, file_name, &mut BatchState::default())
+pub fn run_steps(bytes: Vec<u8>, steps: &[Step], file_name: &str, options: &RunOptions) -> Result<Vec<u8>> {
+    run_steps_continuing(bytes, steps, file_name, options, &mut BatchState::default())
 }
 
 /// Runs every step on one file, carrying state (such as the next Bates
 /// number) over from earlier files of the same batch.
-pub fn run_steps_continuing(mut bytes: Vec<u8>, steps: &[Step], file_name: &str, state: &mut BatchState) -> Result<Vec<u8>> {
+pub fn run_steps_continuing(mut bytes: Vec<u8>, steps: &[Step], file_name: &str, options: &RunOptions, state: &mut BatchState) -> Result<Vec<u8>> {
     for step in steps {
-        bytes = run_step(bytes, step, file_name, state).with_context(|| format!("step \"{}\" failed", step.describe()))?;
+        bytes = run_step(bytes, step, file_name, options, state).with_context(|| format!("step \"{}\" failed", step.describe()))?;
     }
     Ok(bytes)
 }
@@ -162,7 +198,7 @@ fn edit(bytes: &[u8], change: impl FnOnce(&mut Pdf) -> Result<()>) -> Result<Vec
     pdf.to_bytes(&SaveSettings::default())
 }
 
-fn run_step(bytes: Vec<u8>, step: &Step, file_name: &str, state: &mut BatchState) -> Result<Vec<u8>> {
+fn run_step(bytes: Vec<u8>, step: &Step, file_name: &str, options: &RunOptions, state: &mut BatchState) -> Result<Vec<u8>> {
     match step {
         Step::Rotate { degrees, pages } => edit(&bytes, |pdf| {
             let chosen = parse_page_ranges(pages, pdf.page_count())?;
@@ -224,6 +260,9 @@ fn run_step(bytes: Vec<u8>, step: &Step, file_name: &str, state: &mut BatchState
         Step::Flatten { forms_only } => edit(&bytes, |pdf| crate::forms::flatten(pdf, *forms_only).map(|_| ())),
         Step::Ocr { dpi } => {
             if !crate::ocr::models_present() {
+                if !options.allow_model_download {
+                    bail!("the recognition models aren't installed; allow downloading them when starting the run (the command line's --download-models)");
+                }
                 crate::ocr::download_models()?;
             }
             let document = engine::open_document(bytes.clone(), None)?;
@@ -268,13 +307,15 @@ fn run_step(bytes: Vec<u8>, step: &Step, file_name: &str, state: &mut BatchState
         }),
         Step::PdfA => edit(&bytes, |pdf| crate::preflight::convert_to_pdfa(pdf).map(|_| ())),
         Step::Protect { user_password, owner_password } => {
+            // Passwords given for this run win over any an older action file holds.
+            let passwords = options.passwords.clone().unwrap_or_else(|| ProtectPasswords { user_password: user_password.clone(), owner_password: owner_password.clone() });
             // Without an owner password one would be made up and never shown,
             // so the restrictions could never be lifted.
-            if owner_password.is_empty() {
-                bail!("the protect step needs an owner_password, the password that lifts the restrictions");
+            if passwords.owner_password.is_empty() {
+                bail!("the protect step needs passwords when the action runs: enter them when starting it (the command line's --owner-password or QUINTESS_OWNER_PASSWORD)");
             }
             let mut pdf = Pdf::from_bytes(&bytes, None)?;
-            crate::security::protect(&mut pdf, &crate::security::ProtectionSettings { user_password: user_password.clone(), owner_password: owner_password.clone(), ..Default::default() })?;
+            crate::security::protect(&mut pdf, &crate::security::ProtectionSettings { user_password: passwords.user_password, owner_password: passwords.owner_password, ..Default::default() })?;
             pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })
         }
         Step::Sign { identity, reason } => {
@@ -290,31 +331,36 @@ pub struct BatchResult {
     pub input: PathBuf,
     pub output: Option<PathBuf>,
     pub error: Option<String>,
+    /// Left alone because its result's file already existed
+    /// (`ExistingFiles::Skip`); `output` names that file.
+    pub skipped: bool,
 }
 
 /// Runs an action over files; one failure does not stop the rest.
-pub fn run_action(action: &Action, inputs: &[PathBuf], mut progress: impl FnMut(usize, usize, &Path)) -> Vec<BatchResult> {
+pub fn run_action(action: &Action, inputs: &[PathBuf], options: &RunOptions, mut progress: impl FnMut(usize, usize, &Path)) -> Vec<BatchResult> {
     let mut results = Vec::new();
     let mut state = BatchState::default();
     for (index, input) in inputs.iter().enumerate() {
         progress(index + 1, inputs.len(), input);
-        let result = (|| -> Result<PathBuf> {
-            let bytes = std::fs::read(input)?;
-            let name = input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let output_bytes = run_steps_continuing(bytes, &action.steps, &name, &mut state)?;
+        let result = (|| -> Result<(PathBuf, bool)> {
             let folder = action.output_folder.clone().or_else(|| input.parent().map(Path::to_path_buf)).unwrap_or_default();
-            std::fs::create_dir_all(&folder)?;
             let stem = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
-            let target = folder.join(format!("{stem}{}.pdf", action.suffix));
-            if &target == input {
+            let wanted = folder.join(format!("{stem}{}.pdf", action.suffix));
+            if &wanted == input {
                 bail!("the output would overwrite the input; set a suffix or an output folder");
             }
-            std::fs::write(&target, output_bytes)?;
-            Ok(target)
+            // Decided before the work, so skipped files cost nothing.
+            let Some(target) = crate::document::output_path(&wanted, options.existing) else { return Ok((wanted, true)) };
+            let bytes = std::fs::read(input)?;
+            let name = input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let output_bytes = run_steps_continuing(bytes, &action.steps, &name, options, &mut state)?;
+            std::fs::create_dir_all(&folder)?;
+            crate::document::write_file_safely(&target, &output_bytes)?;
+            Ok((target, false))
         })();
         results.push(match result {
-            Ok(output) => BatchResult { input: input.clone(), output: Some(output), error: None },
-            Err(error) => BatchResult { input: input.clone(), output: None, error: Some(format!("{error:#}")) },
+            Ok((output, skipped)) => BatchResult { input: input.clone(), output: Some(output), error: None, skipped },
+            Err(error) => BatchResult { input: input.clone(), output: None, error: Some(format!("{error:#}")), skipped: false },
         });
     }
     results

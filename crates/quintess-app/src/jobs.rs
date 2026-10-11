@@ -33,6 +33,8 @@ pub struct Job {
     /// (done, total) for jobs that can count their work.
     pub progress: Arc<Mutex<(u32, u32)>>,
     result: Receiver<anyhow::Result<JobOutcome>>,
+    /// A step for the action being recorded, noted only if the job succeeds.
+    pub record_on_success: Option<quintess_core::batch::Step>,
 }
 
 impl Job {
@@ -53,7 +55,7 @@ impl Job {
             let _ = sender.send(result);
             ctx.request_repaint();
         });
-        Self { label: label.into(), progress, result: receiver }
+        Self { label: label.into(), progress, result: receiver, record_on_success: None }
     }
 
     /// The outcome if the job has finished.

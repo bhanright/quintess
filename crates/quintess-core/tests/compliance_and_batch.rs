@@ -65,7 +65,8 @@ fn batch_action_runs_steps_over_files() {
         { "step": "optimize", "preset": "lossless" }
     ], "suffix": "-done" }"#).unwrap();
     assert!(matches!(action.steps[0], Step::Redact { .. }));
-    let results = run_action(&action, &inputs, |_, _, _| {});
+    let overwrite = quintess_core::batch::RunOptions { existing: quintess_core::document::ExistingFiles::Overwrite, ..Default::default() };
+    let results = run_action(&action, &inputs, &overwrite, |_, _, _| {});
     for result in &results {
         assert!(result.error.is_none(), "{result:?}");
         let output = result.output.as_ref().unwrap();

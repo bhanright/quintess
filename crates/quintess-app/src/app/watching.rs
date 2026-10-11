@@ -22,9 +22,9 @@ pub(super) struct RunningWatch {
 }
 
 impl QuintessApp {
-    pub(super) fn start_watch(&mut self, inbox: PathBuf, action_path: PathBuf, output: Option<PathBuf>) {
+    pub(super) fn start_watch(&mut self, inbox: PathBuf, action_path: PathBuf, output: Option<PathBuf>, options: quintess_core::batch::RunOptions) {
         self.stop_watch();
-        let started = quintess_core::batch::Action::load(&action_path).and_then(|action| FolderWatcher::new(WatchSettings { inbox: inbox.clone(), action, output }));
+        let started = quintess_core::batch::Action::load(&action_path).and_then(|action| FolderWatcher::new(WatchSettings { inbox: inbox.clone(), action, output, options }));
         let Some(mut watcher) = self.report(started) else { return };
         let output = watcher.output().to_path_buf();
         let stop = Arc::new(AtomicBool::new(false));

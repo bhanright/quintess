@@ -225,10 +225,7 @@ pub(super) const COMMANDS: &[Command] = &[
     command("View ▸ Read out loud", "Stop reading", |app, _| app.stop_reading()).shortcut("Ctrl+Shift+E"),
     command("Tools", "Check spelling…", |app, ctx| app.start_spell_check(ctx)).shortcut("F7").hint("Go through misspelled words in the page text, comments and form fields"),
     command("Tools", "Find QR codes", |app, ctx| app.start_qr_scan(ctx)).hint("Read the QR codes printed on the pages, to open or copy what they hold"),
-    command("Tools", "Recognize text (OCR)", |app, ctx| {
-        app.start_ocr(ctx);
-        app.record(Step::Ocr { dpi: None });
-    }),
+    command("Tools", "Recognize text (OCR)", |app, ctx| app.start_ocr(ctx, true)),
     command("Tools", "Compare with another version…", |app, ctx| app.start_compare(ctx)),
     command("Tools ▸ Accessibility", "Check accessibility", |app, _| app.check_accessibility()),
     command("Tools ▸ Accessibility", "Tags and reading order", |app, _| app.sidebar.page = crate::sidebar::SidebarPage::Tags)
@@ -242,18 +239,12 @@ pub(super) const COMMANDS: &[Command] = &[
         }
     })
     .hint("Tag an untagged document from its layout: headings, paragraphs, lists, pictures, tables, links"),
-    command("Tools ▸ Accessibility", "Fix automatically", |app, _| {
-        app.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes]);
-        app.record(Step::AccessibilityFix);
-    }),
+    command("Tools ▸ Accessibility", "Fix automatically", |app, _| app.apply_app_requests(vec![AppRequest::ApplyAccessibilityFixes])),
     command("Tools ▸ Standards", "PDF/A (archiving)…", |app, _| app.dialogs.push(Dialog::Standards(Box::new(crate::tool_dialogs::StandardsDialog::archive()))))
         .hint("Check or convert to PDF/A-1b, 2b, 2u, 3b, 3u, 4 or 4f"),
     command("Tools ▸ Standards", "PDF/X (printing)…", |app, _| app.dialogs.push(Dialog::Standards(Box::new(crate::tool_dialogs::StandardsDialog::print()))))
         .hint("Check or convert to PDF/X-1a or PDF/X-4 for a print shop"),
-    command("Tools ▸ Standards", "Convert to PDF/A-2b", |app, _| {
-        app.apply_app_requests(vec![AppRequest::ConvertToPdfA]);
-        app.record(Step::PdfA);
-    }),
+    command("Tools ▸ Standards", "Convert to PDF/A-2b", |app, _| app.apply_app_requests(vec![AppRequest::ConvertToPdfA])),
     command("Tools ▸ Print production", "Make a booklet…", |app, _| app.dialogs.push(Dialog::Booklet(Box::default())))
         .hint("Pages two to a sheet, to print double-sided and fold"),
     command("Tools ▸ Print production", "Make a poster…", |app, _| app.dialogs.push(Dialog::Poster(Box::default())))
@@ -279,11 +270,11 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools", "Record an action (start or stop)", |app, _| app.toggle_recording())
         .hint("Do page, stamp, redaction, cleanup and conversion steps once, then save them to run on other files")
         .always(),
-    command("Tools", "Watch a folder…", |app, _| app.dialogs.push(Dialog::Watch { folder: None, action: None, output: None, steps: Vec::new() }))
+    command("Tools", "Watch a folder…", |app, _| app.dialogs.push(Dialog::Watch { folder: None, action: None, output: None, steps: Vec::new(), run: Default::default() }))
         .hint("Run an action on every PDF dropped into a folder, while Quintess is open")
         .always(),
     command("Tools", "Stop watching the folder", |app, _| app.stop_watch()).always(),
-    command("Tools", "Run an action on files…", |app, _| app.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new(), steps: Vec::new() })).always(),
+    command("Tools", "Run an action on files…", |app, _| app.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new(), steps: Vec::new(), run: Default::default() })).always(),
     command("Help", "User guide", |app, _| app.open_help("")).shortcut("F1").always(),
     command("Help", "Keyboard shortcuts", |app, _| app.open_help("Keyboard shortcuts")).always(),
     command("Help", "Check for updates…", |app, ctx| app.check_for_updates(ctx, true)).hint("Ask GitHub whether a newer version of Quintess exists").always(),

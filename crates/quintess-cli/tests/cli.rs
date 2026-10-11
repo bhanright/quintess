@@ -64,6 +64,33 @@ fn redacting_a_signed_file_removes_the_text_for_good() {
 }
 
 #[test]
+fn batch_runs_never_overwrite_silently_and_take_passwords_at_run_time() {
+    let folder = folder("batch_existing");
+    let pdf = letter(&folder);
+    let action = folder.join("action.json");
+    std::fs::write(&action, r#"{ "steps": [ { "step": "reverse" } ] }"#).unwrap();
+    let result = folder.join("letter-processed.pdf");
+    std::fs::write(&result, b"an earlier result").unwrap();
+    let output = ok(&["batch", path(&action), path(&pdf)]);
+    assert!(output.contains("letter-processed (2).pdf"), "{output}");
+    assert_eq!(std::fs::read(&result).unwrap(), b"an earlier result");
+    let output = ok(&["batch", path(&action), path(&pdf), "--skip-existing"]);
+    assert!(output.contains("skip"), "{output}");
+    assert_eq!(std::fs::read(&result).unwrap(), b"an earlier result");
+    ok(&["batch", path(&action), path(&pdf), "--overwrite"]);
+    assert_ne!(std::fs::read(&result).unwrap(), b"an earlier result");
+
+    // A protect step needs its password given now; it isn't in the file.
+    let protect = folder.join("protect.json");
+    std::fs::write(&protect, r#"{ "steps": [ { "step": "protect" } ], "suffix": "-locked" }"#).unwrap();
+    let refused = quintess(&["batch", path(&protect), path(&pdf)]);
+    assert!(!refused.status.success() && String::from_utf8_lossy(&refused.stderr).contains("--owner-password"), "{}", String::from_utf8_lossy(&refused.stderr));
+    assert!(!folder.join("letter-locked.pdf").exists());
+    ok_with_env(&["batch", path(&protect), path(&pdf)], &[("QUINTESS_OWNER_PASSWORD", "owner secret")]);
+    assert!(folder.join("letter-locked.pdf").exists());
+}
+
+#[test]
 fn ordinary_edits_to_a_signed_file_keep_the_signature() {
     let folder = folder("signed_edit");
     let pdf = letter(&folder);
