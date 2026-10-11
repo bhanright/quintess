@@ -26,6 +26,7 @@ pub mod document;
 pub mod edit_text;
 pub mod engine;
 pub mod metadata;
+pub mod objects;
 pub mod ocr;
 pub mod optimize;
 pub mod pages;
