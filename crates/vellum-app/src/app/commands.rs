@@ -225,6 +225,9 @@ pub(super) const COMMANDS: &[Command] = &[
         .always(),
     command("Tools", "Stop watching the folder", |app, _| app.stop_watch()).always(),
     command("Tools", "Run an action on files…", |app, _| app.dialogs.push(Dialog::Batch { action: None, inputs: Vec::new(), steps: Vec::new() })).always(),
+    command("Help", "User guide", |app, _| app.open_help("")).shortcut("F1").always(),
+    command("Help", "Keyboard shortcuts", |app, _| app.open_help("Keyboard shortcuts")).always(),
+    command("Help", "Check for updates…", |app, ctx| app.check_for_updates(ctx, true)).hint("Ask GitHub whether a newer version of Vellum exists").always(),
     command("Help", "About Vellum", |app, _| app.dialogs.push(Dialog::About)).always(),
 ];
 

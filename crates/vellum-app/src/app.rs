@@ -22,6 +22,8 @@ use crate::tab::{DocumentTab, FitMode};
 use crate::viewer::{self, Tool, ToolSettings, ViewerAction, ViewerState};
 
 mod commands;
+mod help;
+mod updates;
 mod studio;
 mod inspector;
 mod recording;
@@ -63,6 +65,11 @@ pub struct VellumApp {
     inspector: Option<inspector::Inspector>,
     /// Steps of the action being recorded, while recording.
     recording: Option<Vec<vellum_core::batch::Step>>,
+    /// The user guide window, while open (F1).
+    help: Option<help::Help>,
+    update_window: Option<updates::UpdateWindow>,
+    /// The startup update check (or question) has happened this session.
+    update_startup_done: bool,
     /// A folder being watched (see `watching.rs`).
     watch: Option<watching::RunningWatch>,
 }
@@ -119,6 +126,9 @@ impl VellumApp {
             other_panes: HashMap::new(),
             inspector: None,
             recording: None,
+            help: None,
+            update_window: None,
+            update_startup_done: false,
             watch: None,
         };
         app.tool_settings.author = app.settings.author.clone();
@@ -191,6 +201,13 @@ impl VellumApp {
                     }
                 }
                 "palette" => self.open_palette_with(value),
+                "help" => self.open_help(value),
+                "update-sample" => {
+                    // A made-up release, to check the update window's layout.
+                    let release = vellum_core::updates::Release { version: "0.2.0".into(), title: "Vellum 0.2.0".into(), notes: "Faster rendering of large documents.
+Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://github.com/bhanright/vellum/releases".into(), installer: Some(vellum_core::updates::Asset { name: "Vellum-0.2.0-setup.exe".into(), url: String::new(), size: 0 }), checksum: None };
+                    self.update_window = Some(updates::UpdateWindow::Available(release));
+                }
                 "crash" => {
                     if let Some(check) = self.self_check.as_mut() {
                         check.crash = true;
@@ -499,6 +516,9 @@ impl VellumApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let shortcut = |modifiers: Modifiers, key: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, key)));
+        if shortcut(Modifiers::NONE, Key::F1) {
+            self.open_help("");
+        }
         if shortcut(Modifiers::COMMAND, Key::K) || shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::P) {
             self.open_palette();
         }
@@ -776,6 +796,8 @@ impl VellumApp {
             JobOutcome::Comparison { summary, report_path } => self.dialogs.push(Dialog::ComparisonResult { summary, report_path }),
             JobOutcome::Message(message) => self.info(message),
             JobOutcome::FolderSearch(results) => self.dialogs.push(Dialog::FolderResults(results)),
+            JobOutcome::UpdateChecked { found, manual } => self.update_checked(found, manual),
+            JobOutcome::UpdateDownloaded { path, verified, version } => self.update_window = Some(updates::UpdateWindow::Ready { path, verified, version }),
             JobOutcome::QrCodes { tab_id, version, codes } => {
                 let count = codes.len();
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -1741,6 +1763,7 @@ impl eframe::App for VellumApp {
                 Err(error) => self.error(format!("{label} failed: {error:#}")),
             }
         }
+        self.startup_update_check(&ctx);
         // The palette goes first, so its Enter, arrows and Esc reach it before the shortcuts.
         self.show_palette(&ctx);
         self.shortcuts(&ctx);
@@ -1857,6 +1880,9 @@ impl eframe::App for VellumApp {
 
         self.apply_sidebar_actions(sidebar_actions);
         self.apply_viewer_actions(viewer_actions);
+
+        self.show_help(&ctx);
+        self.show_update_window(&ctx);
 
         if let Some(mut dialog) = self.dialogs.pop() {
             let outcome = dialogs::show(&ctx, &mut dialog, self.tabs.get_mut(self.active));

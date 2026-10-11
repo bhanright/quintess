@@ -16,6 +16,9 @@ pub enum JobOutcome {
     Message(String),
     FolderSearch(Box<crate::dialogs::FolderResults>),
     QrCodes { tab_id: u64, version: u64, codes: Vec<vellum_core::qr::FoundCode> },
+    /// `manual` checks report even when nothing is new.
+    UpdateChecked { found: Option<vellum_core::updates::Release>, manual: bool },
+    UpdateDownloaded { path: std::path::PathBuf, verified: bool, version: String },
 }
 
 pub struct Job {

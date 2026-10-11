@@ -699,6 +699,12 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     ui.checkbox(&mut settings.dark_interface, "Dark");
                 });
                 ui.end_row();
+                ui.label("Updates");
+                let mut automatic = settings.check_for_updates == Some(true);
+                if ui.checkbox(&mut automatic, "Check GitHub for new versions once a day").changed() {
+                    settings.check_for_updates = Some(automatic);
+                }
+                ui.end_row();
                 ui.label("Signing identity");
                 ui.horizontal(|ui| {
                     ui.label(settings.signing_identity.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".into()));

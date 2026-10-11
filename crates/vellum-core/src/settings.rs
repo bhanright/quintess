@@ -23,6 +23,12 @@ pub struct Settings {
     pub look: String,
     /// A dark interface (pages stay as they are unless night reading is on).
     pub dark_interface: bool,
+    /// Check GitHub for new versions automatically; `None` until asked.
+    pub check_for_updates: Option<bool>,
+    /// When the last check ran (RFC 3339).
+    pub last_update_check: Option<String>,
+    /// A version the person chose not to be told about again.
+    pub skipped_version: Option<String>,
 }
 
 /// The page a file was left at, and its zoom (`None` when it was fitted to
@@ -48,6 +54,9 @@ impl Default for Settings {
             reading_positions: Vec::new(),
             look: "studio".into(),
             dark_interface: true,
+            check_for_updates: None,
+            last_update_check: None,
+            skipped_version: None,
         }
     }
 }

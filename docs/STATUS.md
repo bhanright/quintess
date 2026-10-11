@@ -174,6 +174,15 @@ saves a picture of the window and exits (setup options are documented on
   copies out in PDFium's order (whole line reversed when mostly
   right-to-left); XFDF import reads flat fields only; signature checks do
   not validate certificate chains or revocation (self-signed is flagged).
+- Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
+  shown with a searchable topic list (F1, Help ▸ User guide). Keep it in
+  step with features. `README.md` is the GitHub front page.
+- Updates (`updates.rs`, `app/updates.rs`): opt in, asked once on first
+  run; at most daily if on; Help ▸ Check for updates any time; CLI
+  `check-updates`. Reads GitHub's latest release for `updates::REPOSITORY`
+  (bhanright/vellum, to confirm at publishing), downloads the asset ending
+  `-setup.exe` and verifies it against `<installer>.sha256` when the release
+  includes one (publish that file with each release).
 - Developer probes: `cargo run -p vellum-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).

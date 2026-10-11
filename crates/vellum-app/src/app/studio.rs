@@ -342,7 +342,7 @@ impl VellumApp {
                     ui.horizontal(|ui| {
                         let (dot, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                         ui.painter().circle_filled(dot.center(), 3.5, colors.success);
-                        ui.label(RichText::new(format!("v{}  ·  offline  ·  no account", env!("CARGO_PKG_VERSION"))).size(11.5).color(colors.text_muted));
+                        ui.label(RichText::new(format!("v{}  ·  works offline  ·  no account", env!("CARGO_PKG_VERSION"))).size(11.5).color(colors.text_muted));
                     });
                 });
             });

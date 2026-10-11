@@ -501,6 +501,8 @@ enum Command {
         #[arg(long, default_value_t = 2.0)]
         interval: f32,
     },
+    /// Ask GitHub whether a newer version of Vellum has been released.
+    CheckUpdates,
     /// Find and read the QR codes printed on the pages.
     Qr {
         #[command(flatten)]
@@ -1170,6 +1172,10 @@ fn run(cli: Cli) -> Result<()> {
                 std::thread::sleep(std::time::Duration::from_secs_f32(interval.max(0.2)));
             }
         }
+        Command::CheckUpdates => match vellum_core::updates::newer_release()? {
+            Some(release) => println!("Vellum {} is available (you have {}): {}", release.version, vellum_core::updates::CURRENT_VERSION, release.page),
+            None => println!("Vellum {} is the latest version.", vellum_core::updates::CURRENT_VERSION),
+        },
         Command::Qr { input, json } => {
             let document = engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())?;
             let codes = vellum_core::qr::find_in_document(&document, &|_, _| {})?;
