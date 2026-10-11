@@ -17,9 +17,9 @@ pub fn note_unsaved(documents: Vec<(String, Arc<Vec<u8>>)>) {
     }
 }
 
+/// `%LOCALAPPDATA%\Quintess` on Windows, `~/.local/share/quintess` on Linux.
 fn data_folder() -> PathBuf {
-    let base = std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
-    base.join("Quintess")
+    quintess_core::system::data_folder()
 }
 
 pub fn install_handler() {

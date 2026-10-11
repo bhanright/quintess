@@ -2018,8 +2018,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
                 AppRequest::OpenUrlConfirmed(url) => {
                     if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") || url.starts_with("tel:") {
-                        // `explorer` hands the address to the default browser without a shell.
-                        let _ = std::process::Command::new("explorer").arg(&url).spawn();
+                        // Handed to the default browser or mail program as one argument, without a shell.
+                        let _ = quintess_core::system::open_in_default_app(&url);
                     } else {
                         self.error(format!("Quintess only opens web and mail links, not {url}"));
                     }

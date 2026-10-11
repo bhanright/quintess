@@ -351,7 +351,7 @@ pub fn choose_provider(format: InputFormat, options: &ConversionOptions, provide
             .iter()
             .copied()
             .find(|provider| provider.supports(format) && is_available(*provider) && (*provider != Provider::MicrosoftOffice || options.allow_office_automation))
-            .ok_or_else(|| anyhow!("no installed converter can turn a {} into a PDF; install LibreOffice, or allow Microsoft Office", format.description()))?,
+            .ok_or_else(|| anyhow!("no installed converter can turn a {} into a PDF; install LibreOffice{}", format.description(), if cfg!(windows) { ", or allow Microsoft Office" } else { "" }))?,
     };
     if !provider.supports(format) {
         let alternatives: Vec<&str> = Provider::ALL.iter().filter(|other| other.supports(format)).map(|other| other.name()).collect();

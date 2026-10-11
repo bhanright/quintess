@@ -34,7 +34,8 @@ pub fn pdfium() -> Result<&'static Pdfium> {
             match Pdfium::bind_to_system_library() {
                 Ok(bindings) => Ok(Pdfium::new(bindings)),
                 Err(error) => Err(format!(
-                    "PDFium could not be loaded. Put pdfium.dll next to the program or set QUINTESS_PDFIUM_DIR. Tried: {}; system library: {error}",
+                    "PDFium could not be loaded. Put {} next to the program or set QUINTESS_PDFIUM_DIR. Tried: {}; system library: {error}",
+                    Pdfium::pdfium_platform_library_name().to_string_lossy(),
                     if tried.is_empty() { "no candidate folders had the library".to_string() } else { tried.join(", ") }
                 )),
             }

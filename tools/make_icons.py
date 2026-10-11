@@ -79,6 +79,11 @@ def main() -> None:
     sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
     images = [icon(mark, size) for size in sizes]
     images[-1].save(ASSETS / "quintess.ico", sizes=[(s, s) for s in sizes], append_images=images[:-1])
+    # The Linux packages install these into the hicolor icon theme.
+    for size in [16, 22, 24, 32, 48, 64, 128, 256, 512]:
+        folder = ASSETS / "linux" / "icons" / "hicolor" / f"{size}x{size}" / "apps"
+        folder.mkdir(parents=True, exist_ok=True)
+        icon(mark, size).save(folder / "quintess.png", optimize=True)
     print("wrote icons from", SOURCE.name, "mark size", mark.size)
 
 

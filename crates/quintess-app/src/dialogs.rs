@@ -208,13 +208,17 @@ pub struct PrintDialog {
     pub which_pages: usize,
     pub range: String,
     pub current_page: u32,
+    /// The chosen printer's paper sizes (CUPS; empty on Windows, where the
+    /// driver's Properties dialog sets the paper).
+    pub paper_sizes: Vec<quintess_core::print::PaperSize>,
 }
 
 impl PrintDialog {
     pub fn new(page_count: u32, current_page: u32) -> Self {
         let printers = quintess_core::print::printers().unwrap_or_default();
         let printer = printers.first().map(|p| p.name.clone()).unwrap_or_default();
-        Self { printers, settings: quintess_core::print::PrintSettings::new(printer, page_count), which_pages: 0, range: String::new(), current_page }
+        let paper_sizes = quintess_core::print::paper_sizes(&printer);
+        Self { printers, settings: quintess_core::print::PrintSettings::new(printer, page_count), which_pages: 0, range: String::new(), current_page, paper_sizes }
     }
 }
 
@@ -740,7 +744,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 let licenses = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join("licenses")));
                 if let Some(folder) = licenses.filter(|folder| folder.is_dir()) {
                     if ui.button("Open-source licenses…").clicked() {
-                        let _ = std::process::Command::new("explorer").arg(&folder).spawn();
+                        let _ = quintess_core::system::open_in_default_app(&folder);
                     }
                 }
                 if ui.button("Close").clicked() {
@@ -1275,7 +1279,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             ui.horizontal(|ui| {
                 if ui.button("Open visual report").clicked() {
-                    let _ = std::process::Command::new("explorer").arg(report_path.as_os_str()).spawn();
+                    let _ = quintess_core::system::open_in_default_app(report_path);
                 }
                 if ui.button("Close").clicked() {
                     outcome.keep_open = false;
@@ -2006,10 +2010,12 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                         }
                     });
                     if print.settings.printer != before {
-                        // Driver settings belong to one printer.
+                        // Driver settings and paper names belong to one printer.
                         print.settings.device_mode = None;
+                        print.settings.paper_size = None;
+                        print.paper_sizes = quintess_core::print::paper_sizes(&print.settings.printer);
                     }
-                    if ui.button("Properties…").on_hover_text("Paper size, tray, quality and other printer settings").clicked() {
+                    if quintess_core::print::HAS_DRIVER_PROPERTIES_DIALOG && ui.button("Properties…").on_hover_text("Paper size, tray, quality and other printer settings").clicked() {
                         match quintess_core::print::printer_properties(&print.settings.printer, 0, print.settings.device_mode.as_deref()) {
                             Ok(Some(mode)) => print.settings.device_mode = Some(mode),
                             Ok(None) => {}
@@ -2018,6 +2024,17 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     }
                 });
                 ui.end_row();
+                if !print.paper_sizes.is_empty() {
+                    ui.label("Paper");
+                    let default_name = print.paper_sizes.iter().find(|size| size.is_default).map(|size| format!("Printer default ({})", size.name)).unwrap_or_else(|| "Printer default".into());
+                    egui::ComboBox::from_id_salt("paper").selected_text(print.settings.paper_size.clone().unwrap_or_else(|| default_name.clone())).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut print.settings.paper_size, None, default_name);
+                        for size in &print.paper_sizes {
+                            ui.selectable_value(&mut print.settings.paper_size, Some(size.name.clone()), size.name.as_str());
+                        }
+                    });
+                    ui.end_row();
+                }
                 ui.label("Pages");
                 ui.vertical(|ui| {
                     ui.radio_value(&mut print.which_pages, 0, if page_count == 1 { "All (1 page)".to_string() } else { format!("All ({page_count} pages)") });

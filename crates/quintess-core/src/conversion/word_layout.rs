@@ -12,7 +12,7 @@
 //! each word is squeezed or stretched to the width Word would give it, so
 //! the lines and pages still break where Word breaks them.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -437,52 +437,7 @@ fn installed_font_file(family: &str, bold: bool, italic: bool) -> Option<(PathBu
     [windows_files[style_index], free_files[style_index]]
         .into_iter()
         .filter(|name| !name.is_empty())
-        .find_map(|name| font_index().get(&name.to_ascii_lowercase()).map(|path| (path.clone(), name.to_string())))
-}
-
-/// Every font file in the usual folders, by lowercase file name, gathered once.
-fn font_index() -> &'static HashMap<String, PathBuf> {
-    static INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
-    INDEX.get_or_init(|| {
-        let mut folders: Vec<PathBuf> = Vec::new();
-        if cfg!(windows) {
-            folders.push(PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts"));
-            if let Ok(local) = std::env::var("LOCALAPPDATA") {
-                folders.push(PathBuf::from(local).join(r"Microsoft\Windows\Fonts"));
-            }
-        } else {
-            folders.extend(["/usr/share/fonts", "/usr/local/share/fonts"].map(PathBuf::from));
-            if let Ok(home) = std::env::var("HOME") {
-                folders.push(PathBuf::from(&home).join(".local/share/fonts"));
-                folders.push(PathBuf::from(home).join(".fonts"));
-            }
-        }
-        let mut index = HashMap::new();
-        for folder in folders {
-            gather_font_files(&folder, 0, &mut index);
-        }
-        index
-    })
-}
-
-fn gather_font_files(folder: &std::path::Path, depth: usize, index: &mut HashMap<String, PathBuf>) {
-    // Linux keeps fonts in nested folders (truetype/liberation/...); a few
-    // levels is enough and keeps the walk quick.
-    if depth > 4 {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(folder) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            gather_font_files(&path, depth + 1, index);
-        } else if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-            let lower = name.to_ascii_lowercase();
-            if lower.ends_with(".ttf") || lower.ends_with(".ttc") || lower.ends_with(".otf") {
-                index.entry(lower).or_insert(path);
-            }
-        }
-    }
+        .find_map(|name| crate::system_fonts::find(name).map(|path| (path, name.to_string())))
 }
 
 /// Word colors are hex RGB ("1F3864", "#1F3864"); "auto" means black.

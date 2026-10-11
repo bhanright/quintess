@@ -149,7 +149,7 @@ The **Measure** tool (in the dock's More tools, or **Tools ▸ Measure**) measur
 **View ▸ Read out loud** reads the document with your computer's own voices (Windows' built-in voices, or the system speech service on Linux). Nothing is sent anywhere.
 
 - **Read this page** (Ctrl+Shift+V) or **Read to the end** (Ctrl+Shift+B). The paragraph being read is outlined, and pages turn as reading moves on.
-- The bar at the bottom pauses and resumes (Ctrl+Shift+C), skips to the next paragraph, stops (Ctrl+Shift+E), changes the speed, and picks a voice. More voices can be added in Windows Settings ▸ Time & language ▸ Speech.
+- The bar at the bottom pauses and resumes (Ctrl+Shift+C), skips to the next paragraph, stops (Ctrl+Shift+E), changes the speed, and picks a voice. More voices can be added in Windows Settings ▸ Time & language ▸ Speech. On Linux, reading aloud needs the speech-dispatcher package; its voices come from the speech engines installed for it (such as espeak-ng).
 - Scanned pages have no text to read until Tools ▸ Recognize text (OCR) adds it.
 
 # Comments and markup
@@ -274,7 +274,7 @@ Notes:
 **Sign here**: drag a box where the signature should appear, then choose what to sign with:
 
 - **A certificate file** (.pfx or .p12) from a certificate authority, with its password. The password is used for this signature only and never saved.
-- **A certificate installed in Windows**, including smart cards and keys that can't be copied (Windows may ask for your PIN).
+- **A certificate installed in Windows**, including smart cards and keys that can't be copied (Windows may ask for your PIN). This choice appears only on Windows; on Linux, sign with a certificate file.
 - **Your own Quintess identity** (**Tools ▸ Sign ▸ Create signing identity** makes one). Other programs show it as unverified, since no authority vouches for it.
 
 Tick **Add a trusted timestamp** to have a timestamp server vouch for when you signed, so the signature stays provably on time even after your certificate expires. Only a fingerprint of the signature is sent.
@@ -308,7 +308,7 @@ Quintess trusts the same authorities as Firefox and, on Windows, the system's. *
 **File ▸ Create ▸ From a file** turns Word, OpenDocument, spreadsheets, CSV, presentations, web pages, text and Markdown into PDFs; **From a web page** prints a page from the internet. The dialog lists the converters on your computer and how faithful each is:
 
 - **Built-in** is always there and never uses the network. Word documents get a built-in page layout (approximate; fonts you don't have are replaced). OpenDocument text, simple web pages and Markdown become a simplified document; spreadsheets and CSV become a table of their values.
-- **LibreOffice** (free to install), **Microsoft Office** and **a browser** (Edge or Chrome) give higher fidelity when installed. Office opens the document invisibly in Word, Excel or PowerPoint, and asks your permission each time.
+- **LibreOffice** (free to install), **Microsoft Office** and **a browser** (Edge or Chrome) give higher fidelity when installed. Office opens the document invisibly in Word, Excel or PowerPoint, and asks your permission each time. Microsoft Office is used only on Windows; on Linux, install LibreOffice (and Chromium or Chrome for web pages).
 
 Converters run with the network blocked for files on your computer and are stopped after two minutes. Quintess always says which converter it used and what it left out.
 
@@ -364,6 +364,8 @@ Files attached to a PDF are listed in the sidebar's **Files** section, where you
 
 **File ▸ Print** (Ctrl+P) chooses the printer, pages, copies, scaling (fit or actual size), automatic rotation, grayscale, two-sided printing and whether to print comments. **Properties…** opens the printer's own settings (paper, tray, quality).
 
+On Linux, Quintess prints through CUPS (the cups-client package): it sends the chosen pages as a PDF, and CUPS fits them to the paper. There is no Properties button; choose the **Paper** size in the dialog, and set trays and quality in your system's printer settings.
+
 ## Print production
 
 - **Make a booklet** (Tools ▸ Print production) lays the pages out two to a sheet, so that printed double-sided and folded they read in order. Choose the paper (it is used sideways: letter paper makes half-letter pages, tabloid makes letter pages), the binding side, how many sheets nest in each stack for thick booklets, creep (how far inner sheets move toward the fold) and a gutter. Print the result double-sided, flipping on the short edge, at actual size.
@@ -418,6 +420,36 @@ Commands overwrite the input unless you give `-o`; they write safely, so a crash
 - **F1**: this guide
 - **Esc**: back to the Select tool
 
+# Installing
+
+## Installing on Windows
+
+Download the installer (`Quintess-<version>-setup.exe`) from the releases page at github.com/bhanright/quintess/releases and run it. It installs for your user account only, with no administrator rights needed, and offers Quintess for opening PDFs without changing your default. Remove it from Windows Settings ▸ Apps.
+
+## Installing on Linux
+
+Quintess runs on 64-bit Linux with glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and newer. Download one of the two packages from the releases page at github.com/bhanright/quintess/releases.
+
+**Debian, Ubuntu, Mint and other apt systems**: download `quintess_<version>_amd64.deb`, then in a terminal in that folder run `sudo apt install ./quintess_<version>_amd64.deb`. apt installs the libraries it needs. Quintess appears in your applications menu and under **Open with** for PDF files; the commands are `quintess-app` and `quintess`. Remove it with `sudo apt remove quintess`.
+
+**Any other distribution**: download `quintess-<version>-linux-x86_64.tar.gz`, unpack it with `tar -xzf quintess-<version>-linux-x86_64.tar.gz`, go into the `quintess-<version>-linux-x86_64` folder and run `./install.sh`. This installs for you only, into `~/.local` (the program in `~/.local/lib/quintess`, the commands in `~/.local/bin`, a menu entry and icons). `sudo ./install.sh --system` installs for everyone into `/opt/quintess` instead, with the commands in `/usr/local/bin`. Remove it with `~/.local/lib/quintess/uninstall.sh` (or `sudo /opt/quintess/uninstall.sh`). The tarball needs `libspeechd2` (Fedora: `speech-dispatcher-libs`), which most desktops already have; `install.sh` names any missing library.
+
+Each download has a `.sha256` file beside it; `sha256sum -c quintess_<version>_amd64.deb.sha256` checks the download.
+
+**Optional programs**, each for one feature:
+
+- Printing: `cups-client` (and a printer set up in CUPS).
+- Scanning: `sane-utils`, with your scanner's SANE driver.
+- Reading aloud: `speech-dispatcher` with a voice such as `espeak-ng`.
+- Converting Office documents: LibreOffice; web pages: Chromium or Chrome.
+- Opening links, folders and reports: `xdg-utils`.
+- File dialogs on desktops without a portal: `zenity`.
+- Editing text in documents whose fonts aren't embedded: `fonts-liberation`, which match Arial, Times New Roman and Courier New in width.
+
+On apt systems the first ones are installed with Quintess unless you turned off recommended packages.
+
+**What differs from Windows**: there is no certificate store to sign from (use a .pfx or .p12 file), Microsoft Office can't convert documents (LibreOffice can), printing has no driver Properties dialog (choose the paper size in the Print dialog), and Quintess doesn't update itself. Settings are in `~/.config/quintess`, recovered documents and downloaded models in `~/.local/share/quintess`, and extra spelling dictionaries are also found in `/usr/share/hunspell`.
+
 # Privacy and updates
 
 Quintess never sends your documents anywhere. It contacts the internet only if you ask it to:
@@ -427,10 +459,12 @@ Quintess never sends your documents anywhere. It contacts the internet only if y
 - **Downloading a spelling dictionary** fetches it from the open-source dictionaries project on GitHub.
 - **Creating a PDF from a web page** loads that page.
 - **Trusted timestamps** send a fingerprint of the signature (not the document) to the timestamp server, and **checking revocation** or **adding long-term validation** asks the certificates' issuers whether they were revoked.
-- A copy of Quintess built from source may ask to download the OCR models once; the installer includes them.
+- A copy of Quintess built from source may ask to download the OCR models once; the installer and the Linux packages include them.
+
+On Linux, Quintess doesn't update itself: when a new version is out, it opens the release page, and you install the new package the same way you installed the old one.
 
 # If something goes wrong
 
-- If Quintess hits a problem it can't recover from, it saves your unsaved documents to `%LOCALAPPDATA%\Quintess\Recovered` and the details to `%LOCALAPPDATA%\Quintess\crash.log`, and tells you before closing.
+- If Quintess hits a problem it can't recover from, it saves your unsaved documents to `%LOCALAPPDATA%\Quintess\Recovered` and the details to `%LOCALAPPDATA%\Quintess\crash.log` (on Linux, `~/.local/share/quintess/Recovered` and `~/.local/share/quintess/crash.log`), and tells you before closing.
 - **Ctrl+Z** undoes edits one at a time, back to when you opened the file.
-- Preferences are in `%APPDATA%\Quintess\settings.json`.
+- Preferences are in `%APPDATA%\Quintess\settings.json` (on Linux, `~/.config/quintess/settings.json`).

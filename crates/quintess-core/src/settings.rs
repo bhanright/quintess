@@ -90,9 +90,9 @@ impl Default for Settings {
     }
 }
 
+/// `%APPDATA%\Quintess` on Windows, `~/.config/quintess` on Linux (see `system`).
 pub fn settings_folder() -> PathBuf {
-    let base = std::env::var("APPDATA").or_else(|_| std::env::var("XDG_CONFIG_HOME")).map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".config"));
-    base.join("Quintess")
+    crate::system::config_folder()
 }
 
 fn settings_path() -> PathBuf {

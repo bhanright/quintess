@@ -4,10 +4,11 @@ PDFium and the OCR models. Run it before each release:
 
     python tools/third_party_notices.py
 
-It reads `cargo metadata`, follows only the dependencies that end up in the
-programs (not test-only or build-only ones) and copies each crate's own
-LICENSE / COPYING / NOTICE files. Identical texts are printed once and
-referred to afterwards.
+It reads `cargo metadata` for Windows and for Linux, follows only the
+dependencies that end up in the programs (not test-only or build-only ones)
+and copies each crate's own LICENSE / COPYING / NOTICE files. One file
+covers both systems; crates built for only one are marked. Identical texts
+are printed once and referred to afterwards.
 """
 
 import hashlib
@@ -18,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "licenses" / "THIRD-PARTY-NOTICES.txt"
 PROGRAMS = ["quintess-app", "quintess-cli"]
+PLATFORMS = {"x86_64-pc-windows-msvc": "Windows", "x86_64-unknown-linux-gnu": "Linux"}
 LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
 
 
@@ -46,10 +48,16 @@ def license_texts(folder):
 
 
 def main():
-    metadata = json.loads(subprocess.run(
-        ["cargo", "metadata", "--format-version", "1", "--filter-platform", "x86_64-pc-windows-msvc"],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout)
-    packages = shipped_packages(metadata)
+    # Package id -> (package, the systems it is built for).
+    found = {}
+    for target, system in PLATFORMS.items():
+        metadata = json.loads(subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--filter-platform", target],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+        for package in shipped_packages(metadata):
+            found.setdefault(package["id"], (package, []))[1].append(system)
+    packages = sorted((package for package, _ in found.values()), key=lambda p: (p["name"].lower(), p["version"]))
+    only_on = {pid: systems[0] for pid, (_, systems) in found.items() if len(systems) == 1}
     lines = [
         "Third-party software in Quintess",
         "==============================",
@@ -70,12 +78,17 @@ def main():
         "  used unmodified.",
         "Oxi (oxidocs, oxidocs-core, oxidocs-common), the built-in Word layout engine: MPL-2.0",
         "  (https://mozilla.org/MPL/2.0/); its source is at https://github.com/Ryujiyasu/oxi.",
+        "Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):",
+        "  a subset of Material Icons (Outlined) by Google, Apache-2.0, from",
+        "  https://github.com/google/material-design-icons; text in its section below.",
         "",
         f"Rust crates ({len(packages)}):",
         "",
     ]
     for package in packages:
-        lines.append(f"  {package['name']} {package['version']}  -  {package.get('license') or 'see its license file'}")
+        system = only_on.get(package["id"])
+        note = f"  ({system} only)" if system else ""
+        lines.append(f"  {package['name']} {package['version']}  -  {package.get('license') or 'see its license file'}{note}")
     lines.append("")
     printed = {}
     for package in packages:
@@ -92,6 +105,10 @@ def main():
             else:
                 printed[digest] = f"{package['name']} ({name})"
                 lines += [f"{name}:", "", text, ""]
+    icons = ROOT / "assets" / "fonts" / "quintess-icons.LICENSE.txt"
+    lines += ["", "=" * 78, "Material Icons (the app's fallback icons)", "=" * 78, "", icons.read_text(encoding="utf-8").strip()]
+    # The Windows and Linux builds of PDFium come from the same release of
+    # pdfium-binaries and carry the same license files.
     pdfium = ROOT / "vendor" / "pdfium"
     lines += ["", "=" * 78, "PDFium and its components", "=" * 78]
     for path in [pdfium / "LICENSE"] + sorted((pdfium / "licenses").glob("*")):

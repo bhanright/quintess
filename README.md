@@ -2,9 +2,9 @@
 
 <h1 align="center">Quintess</h1>
 
-<p align="center"><a href="https://quintess.cc">quintess.cc</a> · <a href="https://github.com/bhanright/quintess/releases/latest">Download for Windows</a> · <a href="docs/USER_GUIDE.md">User guide</a></p>
+<p align="center"><a href="https://quintess.cc">quintess.cc</a> · <a href="https://github.com/bhanright/quintess/releases/latest">Download for Windows and Linux</a> · <a href="docs/USER_GUIDE.md">User guide</a></p>
 
-A free, open-source, private PDF reader and editor for Windows. Edit text, sign, redact, fill forms and automate, all on your own computer. No account, no uploads, works offline.
+A free, open-source, private PDF reader and editor for Windows and Linux. Edit text, sign, redact, fill forms and automate, all on your own computer. No account, no uploads, works offline.
 
 ## What it does
 
@@ -24,7 +24,34 @@ The built-in guide (press **F1** in the app, or read [docs/USER_GUIDE.md](docs/U
 
 ## Install
 
+### Windows
+
 Download the installer from the [releases page](https://github.com/bhanright/quintess/releases) and run it. It installs for your user account only (no administrator rights needed) and offers Quintess for opening PDFs without changing your default.
+
+### Linux
+
+64-bit Linux with glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36, Mint 21 and newer). Download a package from the [releases page](https://github.com/bhanright/quintess/releases); each has a `.sha256` file to check it with `sha256sum -c`.
+
+Debian, Ubuntu, Mint and other apt systems:
+
+```sh
+sudo apt install ./quintess_<version>_amd64.deb
+```
+
+(`sudo dpkg -i quintess_<version>_amd64.deb` works too, followed by `sudo apt -f install` if it reports missing libraries.) Remove it with `sudo apt remove quintess`.
+
+Any distribution, with the tarball:
+
+```sh
+tar -xzf quintess-<version>-linux-x86_64.tar.gz
+cd quintess-<version>-linux-x86_64
+./install.sh               # for you, into ~/.local
+sudo ./install.sh --system # or for everyone, into /opt/quintess
+```
+
+Remove it with `~/.local/lib/quintess/uninstall.sh` (or `sudo /opt/quintess/uninstall.sh`). The tarball needs `libspeechd2` (Fedora: `speech-dispatcher-libs`); `install.sh` names anything missing.
+
+Both put Quintess in the applications menu and under "Open with" for PDFs, with the commands `quintess-app` and `quintess`. Optional, per feature: `cups-client` (printing), `sane-utils` (scanning), `speech-dispatcher` (read aloud), LibreOffice (converting Office files), `xdg-utils` (opening links), `zenity` (file dialogs without a desktop portal), `fonts-liberation` (stand-in fonts when editing text). On Linux there is no certificate store to sign from (use a .pfx/.p12 file), no Microsoft Office conversion and no self-update; see [Installing on Linux](docs/USER_GUIDE.md#installing-on-linux) in the guide.
 
 ## Privacy
 
@@ -32,7 +59,7 @@ Quintess never sends your documents anywhere. It goes online only when you ask: 
 
 ## Building from source
 
-See [docs/BUILDING.md](docs/BUILDING.md). In short: Rust (MSVC), PDFium from pdfium-binaries in `vendor/pdfium`, then `cargo build -j 6`.
+See [docs/BUILDING.md](docs/BUILDING.md). In short: Rust, PDFium from pdfium-binaries in `vendor/pdfium` (Windows) or `vendor/pdfium-linux` (Linux), then `cargo build -j 6`. `python3 tools/package_linux.py` makes the Linux packages.
 
 ## License
 

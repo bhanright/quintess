@@ -269,29 +269,55 @@ pub fn icon_family() -> FontFamily {
     FontFamily::Name("icons".into())
 }
 
+/// The icons used where Segoe Fluent Icons is missing (Linux, older
+/// Windows): a subset of Material Icons with each glyph at the code point of
+/// the Segoe icon it stands in for (`tools/make_icon_font.py`), so drawing
+/// code is the same with either font. Apache-2.0; see the notices.
+const BUNDLED_ICON_FONT: &[u8] = include_bytes!("../../../assets/fonts/quintess-icons.otf");
+
+/// A font file for one role: the first of the Windows fonts, then on other
+/// systems the font fontconfig picks for `fontconfig_pattern` (the
+/// desktop's own choice), then the first of the common free fonts.
+fn font_file(windows_files: &[&str], fontconfig_pattern: &str, free_files: &[&str]) -> Option<std::path::PathBuf> {
+    use quintess_core::system_fonts;
+    // Developer switch: QUINTESS_IGNORE_SYSTEM_FONTS=1 shows the app as it
+    // looks with none of these fonts (built-in text font, bundled icons).
+    if std::env::var_os("QUINTESS_IGNORE_SYSTEM_FONTS").is_some() {
+        return None;
+    }
+    let desktop_choice = || if fontconfig_pattern.is_empty() { None } else { system_fonts::fontconfig_match(fontconfig_pattern) };
+    system_fonts::find_first(windows_files).or_else(desktop_choice).or_else(|| system_fonts::find_first(free_files))
+}
+
 /// Loads the fonts both looks use. Studio uses Windows 11's Segoe UI
 /// Variable for text, Bahnschrift for headings, Cascadia Mono for numbers
-/// and Segoe Fluent Icons for icons; each falls back to an older font, and
-/// icons fall back to text labels when no icon font is found.
+/// and Segoe Fluent Icons for icons; each falls back to an older font. On
+/// Linux the desktop's own sans-serif and monospace fonts are used (through
+/// fontconfig, else common free fonts, else egui's built-in font), and the
+/// bundled icon font stands in for Segoe's.
 pub fn install_fonts(ctx: &egui::Context) {
-    let folder = std::path::Path::new(&std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
     let mut fonts = egui::FontDefinitions::default();
-    let mut load = |name: &str, files: &[&str]| -> bool {
-        for file in files {
-            if let Ok(bytes) = std::fs::read(folder.join(file)) {
+    let mut load = |name: &str, file: Option<std::path::PathBuf>| -> bool {
+        match file.and_then(|path| std::fs::read(path).ok()) {
+            Some(bytes) => {
                 fonts.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
-                return true;
+                true
             }
+            None => false,
         }
-        false
     };
-    let text = load("text", &["SegUIVar.ttf", "segoeui.ttf"]);
-    let semibold = load("semibold", &["seguisb.ttf", "segoeuib.ttf"]);
-    let display = load("display", &["bahnschrift.ttf", "seguisb.ttf"]);
-    let mono = load("mono", &["CascadiaMono.ttf", "consola.ttf"]);
-    let icons = load("icons", &["SegoeIcons.ttf", "segmdl2.ttf"]);
-    let symbol = load("symbol", &["seguisym.ttf"]);
-    let emoji = load("emoji", &["seguiemj.ttf"]);
+    let text = load("text", font_file(&["SegUIVar.ttf", "segoeui.ttf"], "sans-serif", &["Cantarell-VF.otf", "Cantarell-Regular.otf", "NotoSans-Regular.ttf", "DejaVuSans.ttf", "Ubuntu-R.ttf", "LiberationSans-Regular.ttf"]));
+    let semibold = load("semibold", font_file(&["seguisb.ttf", "segoeuib.ttf"], "sans-serif:bold", &["NotoSans-SemiBold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "Ubuntu-M.ttf", "LiberationSans-Bold.ttf"]));
+    let display = load("display", font_file(&["bahnschrift.ttf", "seguisb.ttf"], "sans-serif:bold", &["NotoSans-SemiBold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "Ubuntu-M.ttf", "LiberationSans-Bold.ttf"]));
+    let mono = load("mono", font_file(&["CascadiaMono.ttf", "consola.ttf"], "monospace", &["DejaVuSansMono.ttf", "NotoSansMono-Regular.ttf", "UbuntuMono-R.ttf", "LiberationMono-Regular.ttf"]));
+    let system_icons = load("icons", font_file(&["SegoeIcons.ttf", "segmdl2.ttf"], "", &[]));
+    // Wide symbol coverage (arrows, check marks, math) behind the text font.
+    let symbol = load("symbol", font_file(&["seguisym.ttf"], "", &["NotoSansSymbols2-Regular.ttf", "DejaVuSans.ttf"]));
+    let emoji = load("emoji", font_file(&["seguiemj.ttf"], "", &[]));
+    if !system_icons {
+        fonts.font_data.insert("icons".to_owned(), std::sync::Arc::new(egui::FontData::from_static(BUNDLED_ICON_FONT)));
+    }
+    let icons = true;
     let mut fallbacks: Vec<String> = Vec::new();
     for (present, name) in [(symbol, "symbol"), (emoji, "emoji")] {
         if present {
@@ -308,8 +334,11 @@ pub fn install_fonts(ctx: &egui::Context) {
         monospace.insert(0, "mono".to_owned());
     }
     monospace.extend(fallbacks.iter().cloned());
+    // egui's own fonts go last, so a family is never empty when none of the
+    // system fonts was found (as on a bare Linux install).
+    let built_in: Vec<String> = egui::FontDefinitions::default().families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let with_text = |first: Option<&str>| -> Vec<String> {
-        first.map(str::to_owned).into_iter().chain(text.then(|| "text".to_owned())).chain(fallbacks.iter().cloned()).collect()
+        first.map(str::to_owned).into_iter().chain(text.then(|| "text".to_owned())).chain(fallbacks.iter().cloned()).chain(built_in.iter().cloned()).collect()
     };
     // The rich text editor's bold, and headings.
     fonts.families.insert(FontFamily::Name("bold".into()), with_text(semibold.then_some("semibold")));
@@ -324,7 +353,8 @@ pub fn has_icons(ctx: &egui::Context) -> bool {
     ctx.data(|data| data.get_temp::<bool>(egui::Id::new("icon font present"))).unwrap_or(false)
 }
 
-/// Icons from Segoe Fluent Icons, by what they show.
+/// Icons by what they show, as Segoe Fluent Icons code points (the bundled
+/// icon font puts its stand-ins at the same code points).
 pub mod icon {
     pub const ADD: char = '\u{E710}';
     pub const CLOSE: char = '\u{E711}';
@@ -447,5 +477,22 @@ pub fn page_shadow(painter: &egui::Painter, rect: egui::Rect, colors: &Palette) 
         painter.add(shadow.as_shape(rect, CornerRadius::same(2)));
     } else {
         painter.rect_filled(rect.translate(vec2(2.0, 3.0)), 2.0, Color32::from_black_alpha(50));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_bundled_icon_font_has_every_icon() {
+        // Every code point in the `icon` module must be in the font that
+        // stands in for Segoe Fluent Icons, or Linux shows an empty box.
+        let source = include_str!("theme.rs");
+        let module = source.split("pub mod icon {").nth(1).and_then(|rest| rest.split("\n}").next()).expect("the icon module");
+        let code_point = regex::Regex::new(r"'\\u\{([0-9A-Fa-f]+)").unwrap();
+        let icons: Vec<char> = code_point.captures_iter(module).filter_map(|found| u32::from_str_radix(&found[1], 16).ok()).filter_map(char::from_u32).collect();
+        assert!(icons.len() > 40, "found {} icons", icons.len());
+        let face = ttf_parser::Face::parse(super::BUNDLED_ICON_FONT, 0).expect("the bundled icon font parses");
+        let missing: Vec<String> = icons.iter().filter(|icon| face.glyph_index(**icon).is_none()).map(|icon| format!("U+{:04X}", *icon as u32)).collect();
+        assert!(missing.is_empty(), "add these to tools/make_icon_font.py and rerun it: {}", missing.join(", "));
     }
 }

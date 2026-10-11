@@ -48,7 +48,7 @@ const BUILT_IN_DIC: &str = include_str!("../../../assets/dictionaries/en-US.dic"
 /// Folders searched for Hunspell dictionaries, most specific first.
 fn dictionary_folders() -> Vec<PathBuf> {
     let mut folders = Vec::new();
-    if let Some(folder) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|parent| parent.join("dictionaries"))) {
+    if let Some(folder) = crate::system::program_folder().map(|folder| folder.join("dictionaries")) {
         folders.push(folder);
     }
     folders.push(crate::settings::settings_folder().join("dictionaries"));

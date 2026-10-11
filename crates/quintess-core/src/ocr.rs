@@ -33,16 +33,12 @@ const RECOGNITION_MODEL_SHA256: &str = "86c145c2edb96c8caed5b1ebb8f44d7064089222
 
 /// The `models` folder installed beside the program.
 fn installed_models_folder() -> Option<PathBuf> {
-    std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join("models")))
+    crate::system::program_folder().map(|folder| folder.join("models"))
 }
 
 /// Where downloaded models are kept.
 pub fn models_folder() -> PathBuf {
-    let base = std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("XDG_DATA_HOME")).map(PathBuf::from).unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        PathBuf::from(home).join(".local").join("share")
-    });
-    base.join("Quintess").join("models")
+    crate::system::data_folder().join("models")
 }
 
 /// The models to use: the installed ones if present, else downloaded ones.

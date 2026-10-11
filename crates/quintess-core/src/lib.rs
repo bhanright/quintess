@@ -52,7 +52,6 @@ mod preflight_scan;
 pub mod pdfx;
 pub mod public_key;
 pub mod presentation;
-#[cfg(windows)]
 pub mod print;
 pub mod qr;
 pub mod ranges;
@@ -68,6 +67,8 @@ pub mod signatures;
 pub mod spelling;
 pub mod spreadsheet;
 pub mod strings;
+pub mod system;
+pub mod system_fonts;
 pub mod tables;
 pub mod tag_tree;
 pub mod text_wrap;

@@ -41,14 +41,22 @@ saves a picture of the window and exits (setup options are documented on
 - Export: Markdown, HTML, Word, plain and layout text, images.
 - Attachments, comparison (text diff plus visual overlay report).
 - Offline OCR (`ocrs`) with an invisible, word-aligned text layer; models
-  download once into `%LOCALAPPDATA%\Quintess\models`.
+  are bundled beside the program, or download once into
+  `%LOCALAPPDATA%\Quintess\models` (`~/.local/share/quintess/models`).
 - Digital signatures: self-signed identities, visible signatures as
   incremental updates, verification (CMS cross-checked with OpenSSL).
 - Accessibility checker with automatic fixes; PDF/A-2b preflight and conversion.
 - Batch actions (JSON list of steps over many files).
-- Printing through Windows (`print.rs`): printer list, driver properties,
-  copies, collate, fit or actual size, auto-rotate, grayscale, duplex, print
-  to file. Tested only through "Microsoft Print to PDF" writing to a file.
+- Printing (`print.rs`): Windows spooler in `print/spooler.rs` (printer
+  list, driver properties, copies, collate, fit or actual size, auto-rotate,
+  grayscale, duplex, print to file; tested only through "Microsoft Print to
+  PDF" writing to a file). CUPS on Linux in `print/cups.rs`: `lpstat`
+  lists printers, `lpoptions -l` the paper sizes (`PrintSettings::paper_size`,
+  a Paper row in the dialog instead of Properties), and `lp` gets a PDF of
+  the chosen pages (`printable_copy`, vector, comments stripped when left
+  out) with copies, collate, sides, print-scaling, nopdfAutoRotate,
+  print-color-mode and PageSize options. Argument building and parsing are
+  tested on every system; no job has been sent to a real CUPS queue.
 - Editing existing page text (`edit_text.rs`): line by line, change, restyle,
   move, delete, add, find and replace. The old line's glyphs are removed with
   the redaction engine in text-only mode (never PDFium content regeneration,
@@ -261,7 +269,9 @@ et.rs`): .pfx/.p12
   `check-updates`. Reads GitHub's latest release for `updates::REPOSITORY`
   (bhanright/quintess), downloads the asset ending
   `-setup.exe` and verifies it against `<installer>.sha256` when the release
-  includes one (publish that file with each release).
+  includes one (publish that file with each release). On Linux it never
+  downloads or runs anything (`INSTALLER_SUFFIX` is `None`): the window
+  points to the release page and says to update with the same package.
 - Developer probes: `cargo run -p quintess-core --example font_probe -- file.pdf`
   (which embedded fonts are reusable) and `--example width_probe` (per-glyph
   widths against PDFium).
@@ -321,6 +331,32 @@ et.rs`): .pfx/.p12
   reading-order boxes on the page, Tag an area tool. CLI: `tags`,
   `reading-order`. Not done: tags inside form XObjects, column-aware
   reading order, tables from text alignment, tagging comments.
+- Linux (2026-10-11): the whole workspace builds for x86_64 Linux.
+  `system.rs` holds the per-system choices: settings in `config_folder()`
+  (`%APPDATA%\Quintess`, `$XDG_CONFIG_HOME/quintess`), data in
+  `data_folder()` (`%LOCALAPPDATA%\Quintess`, `$XDG_DATA_HOME/quintess`;
+  models, Recovered, crash.log), `program_folder()` for bundled files, and
+  `open_in_default_app` / `reveal_in_file_manager` (explorer or xdg-open;
+  every former `explorer` call goes through them). `system_fonts.rs` indexes
+  installed fonts by file name on both systems (and asks `fc-match`); the
+  editing fallback chain tries Liberation (metric-compatible with Arial,
+  Times New Roman, Courier New), DejaVu and Noto after the Windows fonts.
+  The app's UI fonts follow fontconfig's sans-serif and monospace, then
+  common free fonts, then egui's own; icons come from
+  `assets/fonts/quintess-icons.otf` (Material Icons subset at the Segoe code
+  points, `tools/make_icon_font.py`; a new `icon::` constant needs a line
+  there) when Segoe Fluent Icons is missing. `QUINTESS_IGNORE_SYSTEM_FONTS=1`
+  shows that look on Windows. Packages: `tools/package_linux.py` writes
+  `quintess_<version>_amd64.deb` and `quintess-<version>-linux-x86_64.tar.gz`
+  (+ `.sha256`) from `installer/linux/` (install.sh, uninstall.sh, the
+  .desktop file) and `assets/linux/icons`; `.github/workflows/linux-release.yml`
+  builds on Ubuntu 22.04 (glibc 2.35), runs the tests, installs both
+  packages and screenshots the app under Xvfb. Not on Linux: the Windows
+  certificate store (the Sign dialog hides it), Microsoft Office conversion
+  (listed as "Windows only"), the printer Properties dialog, self-update.
+  Verified only by cross-building from Windows with zig (this PC has
+  virtualization off, so WSL could not run); the Linux tests, packages and
+  app have not run on Linux yet: the workflow's first run is that check.
 
 ## Ideas for next
 

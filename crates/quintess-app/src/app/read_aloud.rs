@@ -97,7 +97,7 @@ impl QuintessApp {
                     let voice_index = current.and_then(|id| voices.iter().position(|voice| voice.id() == id));
                     ReadAloud { speaker, tab_id, queue, current: None, paused: false, started_at: Instant::now(), heard_speaking: false, voices, voice_index, speed: 1.0 }
                 }
-                Err(error) => return self.error(format!("Reading aloud needs the computer's speech voices, which couldn't be started: {error}")),
+                Err(error) => return self.error(format!("Reading aloud needs the computer's speech voices, which couldn't be started: {error}{}", if cfg!(windows) { "" } else { " (install the speech-dispatcher package and a voice such as espeak-ng)" })),
             },
         };
         self.read_aloud = Some(reader);

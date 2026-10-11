@@ -1,0 +1,109 @@
+# Builds the Linux packages (.deb and .tar.gz) on Ubuntu 22.04, whose glibc
+# (2.35) is the oldest the programs then need: Ubuntu 22.04, Debian 12,
+# Fedora 36 and newer run them. Runs by hand (Actions > Linux release > Run
+# workflow) and on version tags, where the packages are attached to the
+# release (a draft release is created if none exists yet).
+name: Linux release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PDFIUM_URL: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086/pdfium-linux-x64.tgz
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libclang-dev libspeechd-dev \
+            libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libx11-dev \
+            fonts-liberation fonts-dejavu-core fonts-noto-core hunspell-en-us
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: PDFium
+        run: mkdir -p vendor/pdfium-linux && curl -sSfL "$PDFIUM_URL" | tar -xz -C vendor/pdfium-linux
+      - name: Test
+        env:
+          QUINTESS_PDFIUM_DIR: ${{ github.workspace }}/vendor/pdfium-linux/lib
+        run: cargo test -j 4 --workspace
+
+  package:
+    name: Packages
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libclang-dev libspeechd-dev \
+            libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libx11-dev \
+            xvfb libgl1-mesa-dri xdg-utils fonts-dejavu-core
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: PDFium
+        run: mkdir -p vendor/pdfium-linux && curl -sSfL "$PDFIUM_URL" | tar -xz -C vendor/pdfium-linux
+      - name: OCR models
+        # Checked against their SHA-256 by package_linux.py.
+        run: |
+          mkdir -p vendor/ocrs-models
+          for model in text-detection text-recognition; do
+            curl -sSfL -o "vendor/ocrs-models/$model.onnx" "https://ocrs-models.s3-accelerate.amazonaws.com/$model.onnx"
+          done
+      - name: Build and package
+        run: python3 tools/package_linux.py
+      - name: Install the .deb and try it
+        run: |
+          sudo apt-get install -y ./installer/output/quintess_*_amd64.deb
+          quintess --version
+          printf '# Quintess on Linux\n\nA **sample** page with *styles*.\n\n- One\n- Two\n' > sample.md
+          quintess create markdown sample.md -o sample.pdf
+          quintess info sample.pdf
+          quintess print sample.pdf --to-file printed.pdf
+          quintess info printed.pdf
+          # The app's self-check: renders the window once and saves a picture.
+          QUINTESS_SCREENSHOT="$PWD/screenshot-deb.png" timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" quintess-app sample.pdf
+          QUINTESS_SCREENSHOT="$PWD/screenshot-print-dialog.png" QUINTESS_SETUP=dialog=print timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" quintess-app sample.pdf
+          sudo apt-get remove -y quintess
+      - name: Install the tarball and try it
+        run: |
+          mkdir -p unpacked && tar -xzf installer/output/quintess-*-linux-x86_64.tar.gz -C unpacked
+          cd unpacked/quintess-*-linux-x86_64
+          ./install.sh
+          ~/.local/bin/quintess --version
+          QUINTESS_SCREENSHOT="$GITHUB_WORKSPACE/screenshot-tarball.png" timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" ~/.local/bin/quintess-app "$GITHUB_WORKSPACE/sample.pdf"
+          ~/.local/lib/quintess/uninstall.sh
+          test ! -e ~/.local/bin/quintess
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quintess-linux
+          path: |
+            installer/output/quintess_*_amd64.deb
+            installer/output/quintess_*_amd64.deb.sha256
+            installer/output/quintess-*-linux-x86_64.tar.gz
+            installer/output/quintess-*-linux-x86_64.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshot-*.png
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(ls installer/output/quintess_*_amd64.deb* installer/output/quintess-*-linux-x86_64.tar.gz*)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $files --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --title "Quintess ${GITHUB_REF_NAME#v}" --notes "Linux packages; see the README for installing." $files
+          fi

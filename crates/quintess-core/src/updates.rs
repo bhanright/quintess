@@ -1,8 +1,11 @@
 //! Checking for a newer version of Quintess on GitHub, only when the person
 //! asks or has turned automatic checks on. The check asks GitHub's public
 //! API for the latest release; nothing about the person or their documents
-//! is sent. A newer release's installer can be downloaded and, when the
-//! release publishes a `.sha256` file beside it, verified.
+//! is sent. On Windows a newer release's installer can be downloaded and,
+//! when the release publishes a `.sha256` file beside it, verified. On Linux
+//! Quintess is installed from a package (.deb or the tarball's install.sh),
+//! so it never downloads or runs anything itself: it points to the release
+//! page, and the person updates the way they installed.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -33,7 +36,8 @@ pub struct Release {
     pub notes: String,
     /// The release's page on GitHub.
     pub page: String,
-    /// The Windows installer, if the release has one.
+    /// The installer this program can download and start: the Windows
+    /// installer on Windows, and never anything on other systems.
     pub installer: Option<Asset>,
     /// A file holding the installer's SHA-256, if published.
     pub checksum: Option<Asset>,
@@ -58,8 +62,17 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     }
 }
 
+/// The end of the name of the installer this program can run, if any.
+pub const INSTALLER_SUFFIX: Option<&str> = if cfg!(windows) { Some("-setup.exe") } else { None };
+
 /// Reads GitHub's description of a release.
 pub fn parse_release(json: &str) -> Result<Release> {
+    parse_release_with_installer(json, INSTALLER_SUFFIX)
+}
+
+/// Reads a release, taking as the installer the asset whose name ends with
+/// `installer_suffix` (none when `None`).
+fn parse_release_with_installer(json: &str, installer_suffix: Option<&str>) -> Result<Release> {
     let value: serde_json::Value = serde_json::from_str(json).context("GitHub's answer could not be read")?;
     let text = |key: &str| value.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let tag = text("tag_name");
@@ -80,7 +93,7 @@ pub fn parse_release(json: &str) -> Result<Release> {
                 .collect()
         })
         .unwrap_or_default();
-    let installer = assets.iter().find(|a| a.name.to_lowercase().ends_with("-setup.exe")).cloned();
+    let installer = installer_suffix.and_then(|suffix| assets.iter().find(|a| a.name.to_lowercase().ends_with(suffix)).cloned());
     let checksum = installer.as_ref().and_then(|installer| assets.iter().find(|a| a.name.eq_ignore_ascii_case(&format!("{}.sha256", installer.name))).cloned());
     Ok(Release {
         version: tag.trim_start_matches(['v', 'V']).to_string(),
@@ -124,7 +137,12 @@ pub fn newer_release() -> Result<Option<Release>> {
 /// SHA-256, the download must match it. Returns the file and whether it was
 /// verified.
 pub fn download_installer(release: &Release, folder: &Path, progress: &dyn Fn(u64, u64)) -> Result<(PathBuf, bool)> {
-    let Some(installer) = &release.installer else { bail!("this release has no Windows installer; download it from {}", release.page) };
+    let Some(installer) = &release.installer else {
+        if cfg!(windows) {
+            bail!("this release has no Windows installer; download it from {}", release.page)
+        }
+        bail!("update with the same kind of package you installed: download it from {}", release.page)
+    };
     // The name comes from GitHub; keep only what is safe in a file name.
     let name: String = installer.name.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect();
     if !name.to_lowercase().ends_with(".exe") {
@@ -181,10 +199,27 @@ mod tests {
             "assets":[{"name":"Quintess-0.2.0-setup.exe","browser_download_url":"https://example.com/a.exe","size":1234},
                       {"name":"Quintess-0.2.0-setup.exe.sha256","browser_download_url":"https://example.com/a.sha256","size":64},
                       {"name":"notes.txt","browser_download_url":"https://example.com/n","size":5}]}"#;
-        let release = parse_release(json).unwrap();
+        let release = parse_release_with_installer(json, Some("-setup.exe")).unwrap();
         assert_eq!(release.version, "0.2.0");
         assert_eq!(release.installer.as_ref().map(|a| a.size), Some(1234));
         assert_eq!(release.checksum.as_ref().map(|a| a.name.as_str()), Some("Quintess-0.2.0-setup.exe.sha256"));
         assert!(parse_release(r#"{"message":"Not Found"}"#).is_err());
+    }
+
+    #[test]
+    fn only_windows_takes_an_installer_to_run() {
+        let json = r#"{"tag_name":"v0.2.0","html_url":"https://github.com/bhanright/quintess/releases/tag/v0.2.0",
+            "assets":[{"name":"Quintess-0.2.0-setup.exe","browser_download_url":"https://example.com/a.exe","size":1234},
+                      {"name":"quintess_0.2.0_amd64.deb","browser_download_url":"https://example.com/q.deb","size":99},
+                      {"name":"quintess-0.2.0-linux-x86_64.tar.gz","browser_download_url":"https://example.com/q.tar.gz","size":98}]}"#;
+        let release = parse_release(json).unwrap();
+        if cfg!(windows) {
+            assert_eq!(release.installer.map(|a| a.name).as_deref(), Some("Quintess-0.2.0-setup.exe"));
+        } else {
+            // Linux never downloads a Windows installer, nor runs a package itself.
+            assert_eq!(release.installer, None);
+            assert!(download_installer(&release, &std::env::temp_dir(), &|_, _| {}).is_err());
+        }
+        assert_eq!(parse_release_with_installer(json, None).unwrap().installer, None);
     }
 }

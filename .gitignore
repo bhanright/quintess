@@ -5,3 +5,5 @@
 
 /logo_source/candidates/
 /.claude/
+/installer/output/
+__pycache__/

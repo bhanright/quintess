@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Quintess
+GenericName=PDF Reader and Editor
+Comment=Read, edit, sign, redact and fill PDF files, privately and offline
+Exec=quintess-app %F
+TryExec=quintess-app
+Icon=quintess
+Terminal=false
+Categories=Office;Viewer;Graphics;
+MimeType=application/pdf;application/x-pdf;
+Keywords=PDF;edit;sign;redact;form;OCR;annotate;
+StartupNotify=true
+StartupWMClass=quintess

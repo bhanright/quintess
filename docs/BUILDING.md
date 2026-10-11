@@ -2,7 +2,8 @@
 
 Quintess is a Rust workspace: `crates/quintess-core` (the engine),
 `crates/quintess-cli` (the `quintess` command) and `crates/quintess-app` (the
-desktop app). It builds on Windows 10 and 11 (x64).
+desktop app). It builds on Windows 10 and 11 (x64) and on 64-bit Linux
+(see "Linux" below).
 
 ## What you need
 
@@ -54,10 +55,66 @@ downloaded once by `quintess ocr`); tests never use the network.
    into `Quintess-<version>-setup.exe.sha256`.
 6. Publish both files on a GitHub release tagged `v<version>`.
 
+## Linux
+
+The same workspace builds on 64-bit Linux. On Ubuntu or Debian:
+
+```
+sudo apt install build-essential pkg-config libclang-dev libspeechd-dev \
+  libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libx11-dev \
+  fonts-liberation fonts-dejavu-core
+```
+
+(`libclang-dev` and `libspeechd-dev` build the read-aloud bindings; the
+others are what the window and the tests need.) Install Rust with rustup,
+then unpack the Linux build of PDFium **chromium/8086**
+(`pdfium-linux-x64.tgz` from the same pdfium-binaries release) into
+`vendor/pdfium-linux`, so `vendor/pdfium-linux/lib/libpdfium.so` exists, and
+point the tests at it:
+
+```
+QUINTESS_PDFIUM_DIR=$PWD/vendor/pdfium-linux/lib cargo test -j 6 --workspace
+```
+
+Packages: with the OCR models in `vendor/ocrs-models` and the notices
+regenerated, `python3 tools/package_linux.py` builds the release binaries
+and writes `installer/output/quintess_<version>_amd64.deb` and
+`quintess-<version>-linux-x86_64.tar.gz`, each with a `.sha256` file. It
+reads the glibc version the programs need and the libraries they link from
+the built files, and writes the .deb's dependencies from them. The programs
+need the glibc of the system they were built on or later, so releases are
+built on Ubuntu 22.04 (glibc 2.35) by `.github/workflows/linux-release.yml`,
+which also installs both packages, takes self-check screenshots under Xvfb
+and attaches the packages to the release on version tags.
+
+From Windows, the Linux programs can be cross-built (not run) with zig:
+`pip install ziglang cargo-zigbuild libclang`, the headers and library of
+Ubuntu's `libspeechd-dev`/`libspeechd2` unpacked into a sysroot, then
+`cargo zigbuild --target x86_64-unknown-linux-gnu.2.31` with `LIBCLANG_PATH`,
+`BINDGEN_EXTRA_CLANG_ARGS` (zig's glibc headers and the sysroot) and
+`-L <sysroot>/usr/lib/x86_64-linux-gnu` set. `tools/package_linux.py
+--skip-build --target x86_64-unknown-linux-gnu.2.31` then packages them.
+
+Install layout (the same on Windows: everything beside the programs):
+the programs, `libpdfium.so`, `dictionaries/`, `models/` and `licenses/`
+live in one folder, `/usr/lib/quintess` for the .deb and
+`~/.local/lib/quintess` or `/opt/quintess` for the tarball, with
+`quintess` and `quintess-app` linked from a `bin` folder. The programs find
+their files through their own (link-resolved) location. Settings go to
+`~/.config/quintess`, data (models, recovered documents, crash log) to
+`~/.local/share/quintess`, following `XDG_CONFIG_HOME` and `XDG_DATA_HOME`.
+
 ## Logo and icons
 
 `tools/make_logo.py` generated the logo candidates through OpenRouter;
 the chosen one is `logo_source/quintess-logo-source.png`.
 `tools/make_icons.py` turns it into `assets/` (the app icon, the window
-icon, the `.ico` and the mark used in the app's header), and
+icon, the `.ico`, the mark used in the app's header and the Linux hicolor
+icons in `assets/linux/icons`), and
 `site/tools/make_images.py` makes the website's icons from those.
+
+`assets/fonts/quintess-icons.otf` is the app's icon font where Segoe Fluent
+Icons is missing (Linux): `tools/make_icon_font.py` cuts it from Google's
+Material Icons (Outlined, Apache-2.0) and moves each glyph to the code point
+of the Segoe icon it replaces. A new icon in `theme.rs` needs a line in that
+script's table and a rerun.

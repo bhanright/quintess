@@ -303,7 +303,12 @@ pub enum MoreCommand {
         /// Leave out comments and form fields.
         #[arg(long)]
         no_annotations: bool,
-        /// Write the printer's output to this file (for "Microsoft Print to PDF").
+        /// Paper size by the printer's name for it, such as A4 or Letter
+        /// (CUPS on Linux; on Windows the driver's settings decide).
+        #[arg(long)]
+        paper: Option<String>,
+        /// Write the printer's output to this file (for "Microsoft Print to
+        /// PDF"); with CUPS, the PDF that would be sent, without printing.
         #[arg(long)]
         to_file: Option<PathBuf>,
     },
@@ -1018,16 +1023,20 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 println!("{}{}", printer.name, if printer.is_default { "  (default)" } else { "" });
             }
         }
-        MoreCommand::Print { input, printer, pages, copies, actual_size, grayscale, duplex, no_annotations, to_file } => {
+        MoreCommand::Print { input, printer, pages, copies, actual_size, grayscale, duplex, no_annotations, paper, to_file } => {
             let document = document(&input)?;
             let page_count = document.pages().len() as u32;
-            let printer = printer.or_else(quintess_core::print::default_printer).context("no printer given and no default printer is set")?;
+            // CUPS writes the job to a file without any printer; the Windows
+            // spooler needs one (such as "Microsoft Print to PDF") to write it.
+            let printer_optional = !cfg!(windows) && to_file.is_some();
+            let printer = printer.or_else(quintess_core::print::default_printer).or_else(|| printer_optional.then(String::new)).context("no printer given and no default printer is set")?;
             let mut settings = quintess_core::print::PrintSettings::new(printer.clone(), page_count);
             settings.pages = quintess_core::ranges::parse_page_ranges(&pages, page_count)?;
             settings.copies = copies;
             settings.grayscale = grayscale;
             settings.annotations = !no_annotations;
-            settings.output_file = to_file;
+            settings.paper_size = paper;
+            settings.output_file = to_file.clone();
             if actual_size {
                 settings.scaling = quintess_core::print::Scaling::ActualSize;
             }
@@ -1041,7 +1050,10 @@ pub fn run(command: MoreCommand) -> Result<()> {
             let title = input.input.file_name().unwrap_or_default().to_string_lossy().into_owned();
             quintess_core::print::print(&document, &title, &settings, |done, total| eprint!("\rprinting sheet {done} of {total}"))?;
             eprintln!();
-            println!("sent to {printer}");
+            match to_file {
+                Some(file) => println!("wrote {}", file.display()),
+                None => println!("sent to {printer}"),
+            }
         }
         MoreCommand::Wrap { input, page, around, gap, side, reflow, from, unwrap, list, output } => {
             use quintess_core::text_wrap::{self, FlowSelection, ObstacleChange, WrapOptions, WrapSide};

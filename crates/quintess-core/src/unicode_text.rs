@@ -100,45 +100,61 @@ impl FaceData {
 
 /// Candidate font files, most general first. Missing files are skipped.
 fn fallback_files(style: FontStyle) -> Vec<(PathBuf, u32)> {
-    let windows = PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
-    // The font matching the standard font's look comes first, so Latin text
-    // looks like its neighbors; Segoe UI then covers Greek, Cyrillic and more.
-    let matching = match (style.family, style.weight) {
-        (FontFamily::Sans, FontWeight::Regular) => "arial.ttf",
-        (FontFamily::Sans, FontWeight::Bold) => "arialbd.ttf",
-        (FontFamily::Sans, FontWeight::Italic) => "ariali.ttf",
-        (FontFamily::Serif, FontWeight::Regular) => "times.ttf",
-        (FontFamily::Serif, FontWeight::Bold) => "timesbd.ttf",
-        (FontFamily::Serif, FontWeight::Italic) => "timesi.ttf",
-        (FontFamily::Monospace, FontWeight::Regular) => "cour.ttf",
-        (FontFamily::Monospace, FontWeight::Bold) => "courbd.ttf",
-        (FontFamily::Monospace, FontWeight::Italic) => "couri.ttf",
-    };
-    let broad = match style.weight {
-        FontWeight::Regular => "segoeui.ttf",
-        FontWeight::Bold => "segoeuib.ttf",
-        FontWeight::Italic => "segoeuii.ttf",
-    };
-    let main = [matching, broad];
-    let mut files: Vec<(PathBuf, u32)> = main.iter().map(|name| (windows.join(name), 0)).collect();
-    for name in ["seguisym.ttf", "Nirmala.ttc", "msyh.ttc", "YuGothR.ttc", "malgun.ttf", "seguihis.ttf", "seguiemj.ttf"] {
-        files.push((windows.join(name), 0));
-    }
-    // Linux and macOS locations for common free fonts.
-    for path in [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        "/Library/Fonts/Arial Unicode.ttf",
-    ] {
-        files.push((PathBuf::from(path), 0));
-    }
+    let mut files: Vec<(PathBuf, u32)> = fallback_file_names(style).iter().filter_map(|name| crate::system_fonts::find(name)).map(|path| (path, 0)).collect();
     if let Ok(extra) = std::env::var("QUINTESS_FONT") {
         files.insert(0, (PathBuf::from(extra), 0));
     }
     files
+}
+
+/// The file names tried for a style, in order. The font matching the
+/// standard font's look comes first, so Latin text looks like its
+/// neighbors; broad fonts then cover Greek, Cyrillic and more, and script
+/// fonts the rest. Windows names come first; on Linux the metric-compatible
+/// Liberation fonts stand in for Arial, Times New Roman and Courier New
+/// (same widths, so edited lines keep their length), then DejaVu and Noto.
+fn fallback_file_names(style: FontStyle) -> Vec<&'static str> {
+    let (windows_matching, free_matching) = match (style.family, style.weight) {
+        (FontFamily::Sans, FontWeight::Regular) => ("arial.ttf", "LiberationSans-Regular.ttf"),
+        (FontFamily::Sans, FontWeight::Bold) => ("arialbd.ttf", "LiberationSans-Bold.ttf"),
+        (FontFamily::Sans, FontWeight::Italic) => ("ariali.ttf", "LiberationSans-Italic.ttf"),
+        (FontFamily::Serif, FontWeight::Regular) => ("times.ttf", "LiberationSerif-Regular.ttf"),
+        (FontFamily::Serif, FontWeight::Bold) => ("timesbd.ttf", "LiberationSerif-Bold.ttf"),
+        (FontFamily::Serif, FontWeight::Italic) => ("timesi.ttf", "LiberationSerif-Italic.ttf"),
+        (FontFamily::Monospace, FontWeight::Regular) => ("cour.ttf", "LiberationMono-Regular.ttf"),
+        (FontFamily::Monospace, FontWeight::Bold) => ("courbd.ttf", "LiberationMono-Bold.ttf"),
+        (FontFamily::Monospace, FontWeight::Italic) => ("couri.ttf", "LiberationMono-Italic.ttf"),
+    };
+    let (windows_broad, free_broad) = match style.weight {
+        FontWeight::Regular => ("segoeui.ttf", ["DejaVuSans.ttf", "NotoSans-Regular.ttf"]),
+        FontWeight::Bold => ("segoeuib.ttf", ["DejaVuSans-Bold.ttf", "NotoSans-Bold.ttf"]),
+        FontWeight::Italic => ("segoeuii.ttf", ["DejaVuSans-Oblique.ttf", "NotoSans-Italic.ttf"]),
+    };
+    let mut names = vec![windows_matching, free_matching, windows_broad];
+    names.extend(free_broad);
+    // Symbols and other scripts, Windows fonts then their free counterparts.
+    names.extend([
+        "seguisym.ttf",
+        "Nirmala.ttc",
+        "msyh.ttc",
+        "YuGothR.ttc",
+        "malgun.ttf",
+        "seguihis.ttf",
+        "seguiemj.ttf",
+        "NotoSansSymbols2-Regular.ttf",
+        "NotoSansDevanagari-Regular.ttf",
+        "NotoSansBengali-Regular.ttf",
+        "NotoSansTamil-Regular.ttf",
+        "NotoSansArabic-Regular.ttf",
+        "NotoNaskhArabic-Regular.ttf",
+        "NotoSansHebrew-Regular.ttf",
+        "NotoSansThai-Regular.ttf",
+        "NotoSansCJK-Regular.ttc",
+        "NotoSansCJKsc-Regular.otf",
+        "DroidSansFallbackFull.ttf",
+        "Arial Unicode.ttf",
+    ]);
+    names
 }
 
 fn faces(style: FontStyle) -> &'static [FaceData] {

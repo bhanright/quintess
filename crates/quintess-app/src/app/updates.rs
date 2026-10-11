@@ -107,6 +107,11 @@ impl QuintessApp {
                         ui.label(RichText::new(release.notes.trim()).color(colors.text_muted));
                     });
                 }
+                if cfg!(not(windows)) {
+                    // Linux installs come from a package; Quintess doesn't replace itself.
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Download it from the release page: the .deb if you installed with apt or dpkg, the .tar.gz if you used install.sh.").color(colors.text_muted));
+                }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if release.installer.is_some() && crate::theme::primary_button(ui, "Download and install").clicked() {
@@ -114,7 +119,7 @@ impl QuintessApp {
                         keep = false;
                     }
                     if ui.button("Release page").clicked() && release.page.starts_with("https://github.com/") {
-                        let _ = std::process::Command::new("explorer").arg(&release.page).spawn();
+                        let _ = quintess_core::system::open_in_default_app(&release.page);
                     }
                     if ui.button("Skip this version").clicked() {
                         self.settings.skipped_version = Some(release.version.clone());
@@ -149,7 +154,7 @@ impl QuintessApp {
                         keep = false;
                     }
                     if ui.button("Show the file").clicked() {
-                        let _ = std::process::Command::new("explorer").arg("/select,").arg(path).spawn();
+                        let _ = quintess_core::system::reveal_in_file_manager(path);
                     }
                     if ui.button("Later").clicked() {
                         keep = false;
