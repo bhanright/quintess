@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use quintess_core::settings::Settings;
 use quintess_core::presentation::{self, PresentationSettings, SlideMode};
-use quintess_core::{Pdf, SaveSettings, accessibility, attachments, batch, compare, convert, engine, ocr, optimize, preflight, signatures, spreadsheet, tables};
+use quintess_core::{SaveSettings, accessibility, attachments, batch, compare, convert, engine, ocr, optimize, preflight, signatures, spreadsheet, tables};
 
 use crate::{Input, Output, pages_of, save, save_edited_bytes, save_removing, write_or_print};
 
@@ -126,9 +126,6 @@ pub enum MoreCommand {
     Sign {
         #[command(flatten)]
         input: Input,
-        /// Identity file from `quintess identity`; defaults to the one in settings.
-        #[arg(long)]
-        identity: Option<PathBuf>,
         /// Sign with a certificate and key from a .pfx or .p12 file. The
         /// password is read from an environment variable (QUINTESS_PFX_PASSWORD
         /// unless --password-env names another), never from the command line.
@@ -212,13 +209,50 @@ pub enum MoreCommand {
         fix: bool,
         #[arg(long)]
         language: Option<String>,
+        /// Declare the file PDF/UA-1 in its metadata, if every check passes.
+        /// Checks that need a person's judgment (alternate text that fits its
+        /// picture, color contrast) hold it back until you add --reviewed.
+        #[arg(long)]
+        identify_pdfua: bool,
+        /// With --identify-pdfua: you have made those judgments yourself.
+        #[arg(long, requires = "identify_pdfua")]
+        reviewed: bool,
         #[command(flatten)]
         output: Output,
     },
-    /// Check against PDF/A, or convert toward PDF/A-2b.
+    /// Check against PDF/A, or convert toward a PDF/A level.
     Pdfa {
         #[command(flatten)]
         input: Input,
+        /// 1b, 2b, 2u, 3b, 3u, 4 or 4f.
+        #[arg(long, default_value = "2b")]
+        level: String,
+        #[arg(long)]
+        convert: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Check against PDF/X for print, or convert toward it.
+    Pdfx {
+        #[command(flatten)]
+        input: Input,
+        /// x1a (PDF/X-1a:2003: CMYK only, no transparency) or x4.
+        #[arg(long, default_value = "x4")]
+        level: String,
+        /// An ICC profile of the printing condition (for example a CMYK
+        /// profile from your printer); PDF/X-1a needs one to add the output
+        /// intent, and PDF/X-4 uses sRGB without one.
+        #[arg(long)]
+        profile: Option<PathBuf>,
+        /// Name of the printing condition, such as FOGRA39; read from the profile when omitted.
+        #[arg(long)]
+        condition: Option<String>,
+        /// Mark the file as already trapped (the default says it has not been).
+        #[arg(long)]
+        trapped: bool,
+        /// Leave RGB colors alone instead of converting them to CMYK for X-1a.
+        #[arg(long)]
+        keep_rgb: bool,
         #[arg(long)]
         convert: bool,
         #[command(flatten)]
@@ -296,7 +330,7 @@ pub enum MoreCommand {
 }
 
 fn document(input: &Input) -> Result<quintess_core::pdfium_render::prelude::PdfDocument<'static>> {
-    engine::open_document(std::fs::read(&input.input)?, input.password.as_deref())
+    input.open_document()
 }
 
 #[derive(Subcommand)]
@@ -325,7 +359,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 settings.jpeg_quality = quality;
             }
             settings.grayscale_images = grayscale;
-            let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;
+            let mut pdf = crate::open(&input)?;
             let original_size = std::fs::metadata(&input.input)?.len() as f64;
             let (mut bytes, report) = optimize::optimize(&mut pdf, &settings)?;
             if bytes.len() as f64 >= original_size {
@@ -426,7 +460,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             }
         }
         MoreCommand::Attachments { input, add, extract, remove, output } => {
-            let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;
+            let mut pdf = crate::open(&input)?;
             if let Some(folder) = extract {
                 for path in attachments::extract_all(&pdf, &folder)? {
                     println!("wrote {}", path.display());
@@ -475,7 +509,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 println!("The recognition models weren't installed; downloading them (about 12 MB, once, checked against known checksums)…");
                 ocr::download_models()?;
             }
-            let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;
+            let mut pdf = crate::open(&input)?;
             let chosen = pages_of(&pdf, &pages)?;
             let document = document(&input)?;
             let report = ocr::make_searchable(&mut pdf, &document, &chosen, &ocr::OcrSettings { dpi, skip_pages_with_text: !force }, |done, total| eprint!("\rrecognizing page {done} of {total}"))?;
@@ -492,7 +526,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             signatures::SigningIdentity::self_signed(&name, &email, &organization)?.save(&output)?;
             println!("wrote {} — keep this file private; it contains your signing key", output.display());
         }
-        MoreCommand::Sign { input, identity, pfx, password_env, cert_store, timestamp, page, rect, field, reason, location, image, output } => {
+        MoreCommand::Sign { input, pfx, password_env, cert_store, timestamp, page, rect, field, reason, location, image, output } => {
             let identity = if let Some(pfx) = pfx {
                 let password = std::env::var(&password_env).unwrap_or_default();
                 if password.is_empty() {
@@ -502,8 +536,9 @@ pub fn run(command: MoreCommand) -> Result<()> {
             } else if let Some(thumbprint) = cert_store {
                 quintess_core::cert_store::identity_from_store(&thumbprint)?
             } else {
-                let identity_path = identity.or(Settings::load().signing_identity).context("give --identity (create one with `quintess identity`), --pfx or --cert-store")?;
-                signatures::SigningIdentity::load(&identity_path)?
+                // --identity is shared with the commands that open certificate-protected files; here it names the signer.
+                let identity_path = input.identity.clone().or(Settings::load().signing_identity).context("give --identity (create one with `quintess identity`), --pfx or --cert-store")?;
+                quintess_core::public_key::load_identity(&identity_path, input.identity_password.as_deref())?
             };
             let numbers: Vec<f32> = rect.split(',').map(|n| n.trim().parse()).collect::<Result<_, _>>().context("--rect takes four numbers")?;
             if numbers.len() != 4 {
@@ -590,8 +625,8 @@ pub fn run(command: MoreCommand) -> Result<()> {
                 println!("{}  {}  issued by {}  expires {}", certificate.thumbprint, certificate.name, certificate.issuer, &certificate.expires[..10.min(certificate.expires.len())]);
             }
         }
-        MoreCommand::Accessibility { input, fix, language, output } => {
-            let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;
+        MoreCommand::Accessibility { input, fix, language, identify_pdfua, reviewed, output } => {
+            let mut pdf = crate::open(&input)?;
             if fix {
                 let title = input.input.file_stem().unwrap_or_default().to_string_lossy().into_owned();
                 for done in accessibility::fix(&mut pdf, &title, &language.unwrap_or_else(|| Settings::load().language))? {
@@ -601,24 +636,66 @@ pub fn run(command: MoreCommand) -> Result<()> {
             }
             let bytes = pdf.to_bytes(&SaveSettings::default())?;
             let document = engine::open_document(bytes, None)?;
-            for check in accessibility::check(&pdf, &document) {
+            let checks = accessibility::check(&pdf, &document);
+            for check in &checks {
                 println!("{:<14} {:<36} {}", format!("{:?}", check.status), check.name, check.detail);
             }
+            if identify_pdfua {
+                let blockers = accessibility::identify_pdfua(&mut pdf, &checks, reviewed)?;
+                if blockers.is_empty() {
+                    save(&mut pdf, &input, &output)?;
+                    println!("declared PDF/UA-1 in the metadata");
+                } else {
+                    println!("not declared as PDF/UA-1, because:");
+                    for blocker in blockers {
+                        println!("  {blocker}");
+                    }
+                }
+            }
         }
-        MoreCommand::Pdfa { input, convert, output } => {
-            let mut pdf = Pdf::open(&input.input, input.password.as_deref())?;
+        MoreCommand::Pdfa { input, level, convert, output } => {
+            let level = preflight::PdfALevel::parse(&level).with_context(|| format!("unknown PDF/A level \"{level}\" (try 1b, 2b, 2u, 3b, 3u, 4 or 4f)"))?;
+            let mut pdf = crate::open(&input)?;
             let issues = if convert {
-                let remaining = preflight::convert_to_pdfa(&mut pdf)?;
+                let remaining = preflight::convert_to_pdfa_level(&mut pdf, level)?;
                 save(&mut pdf, &input, &output)?;
                 remaining
             } else {
-                preflight::check_pdfa(&pdf)
+                preflight::check_pdfa_level(&pdf, level)
             };
             if issues.is_empty() {
-                println!("No PDF/A problems found by this check (a full validator such as veraPDF checks more).");
+                println!("No {} problems found by this check (a full validator such as veraPDF checks more).", level.label());
             }
             for issue in issues {
-                println!("{:<24} {}{}", issue.rule, issue.detail, if issue.fixable { "  (fixable with --convert)" } else { "" });
+                println!("{:<24} {}{}", issue.rule, issue.detail, if issue.fixable && !convert { "  (fixable with --convert)" } else { "" });
+            }
+        }
+        MoreCommand::Pdfx { input, level, profile, condition, trapped, keep_rgb, convert, output } => {
+            let level = quintess_core::pdfx::PdfXLevel::parse(&level).with_context(|| format!("unknown PDF/X level \"{level}\" (try x1a or x4)"))?;
+            let mut pdf = crate::open(&input)?;
+            let options = quintess_core::pdfx::PdfXOptions {
+                output_profile: profile.as_ref().map(|path| std::fs::read(path).with_context(|| format!("could not read {}", path.display()))).transpose()?,
+                output_condition_identifier: condition.unwrap_or_default(),
+                trapped,
+                fallback_title: input.input.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
+                convert_rgb_to_cmyk: !keep_rgb,
+                ..Default::default()
+            };
+            let issues = if convert {
+                let conversion = quintess_core::pdfx::convert_to_pdfx(&mut pdf, level, &options)?;
+                for fix in &conversion.fixes {
+                    println!("fixed: {fix}");
+                }
+                save(&mut pdf, &input, &output)?;
+                conversion.remaining
+            } else {
+                quintess_core::pdfx::check_pdfx_with(&pdf, level, &options)
+            };
+            if issues.is_empty() {
+                println!("No {} problems found by this check (your printer's preflight may check more).", level.label());
+            }
+            for issue in issues {
+                println!("{:<26} {}{}", issue.rule, issue.detail, if issue.fixable && !convert { "  (fixable with --convert)" } else { "" });
             }
         }
         MoreCommand::Batch { action, inputs } => {

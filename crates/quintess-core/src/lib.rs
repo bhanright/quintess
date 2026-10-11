@@ -38,6 +38,9 @@ pub mod ocr;
 pub mod optimize;
 pub mod pages;
 pub mod preflight;
+mod preflight_scan;
+pub mod pdfx;
+pub mod public_key;
 pub mod presentation;
 #[cfg(windows)]
 pub mod print;

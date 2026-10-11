@@ -41,6 +41,8 @@ webpki-root-certs = "1.0.9"
 # out Temporal and its time zone data; Annex B adds the older string
 # functions (substr, escape) that Acrobat-era scripts use.
 boa_engine = { version = "0.22.0", default-features = false, features = ["annex-b"] }
+# RSA key transport for certificate encryption (public_key.rs); ring cannot encrypt with RSA.
+rsa = "0.9.10"
 
 [dev-dependencies]
 image = "0.25"

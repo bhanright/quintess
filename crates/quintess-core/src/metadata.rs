@@ -130,8 +130,81 @@ pub fn pdf_date_to_iso(date: &str) -> Option<String> {
     Some(iso)
 }
 
-/// Writes a fresh XMP packet carrying the given properties.
+/// A PDF/A claim in the XMP metadata (`pdfaid`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PdfAClaim {
+    /// 1 to 4.
+    pub part: u32,
+    /// `B`, `U`, `A`, `E` or `F`; PDF/A-4 itself has none.
+    pub conformance: Option<String>,
+    /// The edition year PDF/A-4 declares (2020 today).
+    pub revision: Option<u32>,
+}
+
+/// The standards the document's XMP metadata says it conforms to. Only
+/// declare one when a check has found nothing standing in its way.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StandardsClaims {
+    pub pdfa: Option<PdfAClaim>,
+    /// `pdfuaid:part` (1 for PDF/UA-1).
+    pub pdfua_part: Option<u32>,
+    /// `pdfxid:GTS_PDFXVersion`, such as `PDF/X-4`.
+    pub pdfx_version: Option<String>,
+}
+
+impl StandardsClaims {
+    /// The XMP elements for these claims.
+    fn to_xmp(&self) -> String {
+        let mut out = String::new();
+        if let Some(claim) = &self.pdfa {
+            out.push_str(&format!("<pdfaid:part>{}</pdfaid:part>\n", claim.part));
+            if let Some(revision) = claim.revision {
+                out.push_str(&format!("<pdfaid:rev>{revision}</pdfaid:rev>\n"));
+            }
+            if let Some(conformance) = &claim.conformance {
+                out.push_str(&format!("<pdfaid:conformance>{}</pdfaid:conformance>\n", xml_escape(conformance)));
+            }
+        }
+        if let Some(part) = self.pdfua_part {
+            out.push_str(&format!("<pdfuaid:part>{part}</pdfuaid:part>\n"));
+        }
+        if let Some(version) = &self.pdfx_version {
+            out.push_str(&format!("<pdfxid:GTS_PDFXVersion>{}</pdfxid:GTS_PDFXVersion>\n", xml_escape(version)));
+        }
+        out
+    }
+}
+
+/// The standards claims in the document's XMP metadata (none when it has no XMP).
+pub fn read_standards_claims(pdf: &Pdf) -> StandardsClaims {
+    let Some(xmp) = read_xmp(pdf) else { return StandardsClaims::default() };
+    // Properties are written either as elements or as attributes of rdf:Description.
+    let value_of = |name: &str, pattern: &str| -> Option<String> {
+        let expression = format!(r#"{name}(?:>|\s*=\s*["'])\s*({pattern})"#);
+        regex::Regex::new(&expression).ok()?.captures(&xmp)?.get(1).map(|found| found.as_str().to_string())
+    };
+    let pdfa = value_of("pdfaid:part", r"\d").and_then(|part| part.parse().ok()).map(|part| PdfAClaim {
+        part,
+        conformance: value_of("pdfaid:conformance", "[A-Za-z]").map(|letter| letter.to_uppercase()),
+        revision: value_of("pdfaid:rev", r"\d{4}").and_then(|year| year.parse().ok()),
+    });
+    StandardsClaims {
+        pdfa,
+        pdfua_part: value_of("pdfuaid:part", r"\d").and_then(|part| part.parse().ok()),
+        pdfx_version: value_of("pdfxid:GTS_PDFXVersion", r"[^<\x22']+").map(|version| version.trim().to_string()),
+    }
+}
+
+/// Writes a fresh XMP packet carrying the given properties, and the
+/// standards claims the old packet made.
 pub fn write_xmp(pdf: &mut Pdf, info: &DocumentInfo) -> Result<()> {
+    let claims = read_standards_claims(pdf);
+    write_xmp_claiming(pdf, info, &claims)
+}
+
+/// Writes a fresh XMP packet with the given properties and standards claims
+/// (replacing any the old packet made).
+pub fn write_xmp_claiming(pdf: &mut Pdf, info: &DocumentInfo, claims: &StandardsClaims) -> Result<()> {
     let mut body = String::new();
     if let Some(title) = &info.title {
         body.push_str(&format!("<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">{}</rdf:li></rdf:Alt></dc:title>\n", xml_escape(title)));
@@ -157,26 +230,19 @@ pub fn write_xmp(pdf: &mut Pdf, info: &DocumentInfo) -> Result<()> {
     if let Some(date) = info.modification_date.as_deref().and_then(pdf_date_to_iso) {
         body.push_str(&format!("<xmp:ModifyDate>{date}</xmp:ModifyDate>\n<xmp:MetadataDate>{date}</xmp:MetadataDate>\n"));
     }
-    let extra = pdfa_identification(pdf).unwrap_or_default();
+    let extra = claims.to_xmp();
     let packet = format!(
         "<?xpacket begin=\"\u{FEFF}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
 <x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
 <rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" \
-xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\">\n\
+xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" xmlns:pdfuaid=\"http://www.aiim.org/pdfua/ns/id/\" \
+xmlns:pdfxid=\"http://www.npes.org/pdfx/ns/id/\">\n\
 {body}{extra}</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>"
     );
     let stream = Stream::new(dictionary! { "Type" => "Metadata", "Subtype" => "XML" }, packet.into_bytes()).with_compression(false);
     let metadata_id = pdf.doc.add_object(stream);
     pdf.doc.catalog_mut()?.set("Metadata", metadata_id);
     Ok(())
-}
-
-/// Keeps an existing PDF/A identification when the packet is rewritten.
-fn pdfa_identification(pdf: &Pdf) -> Option<String> {
-    let xmp = read_xmp(pdf)?;
-    let part = regex::Regex::new(r"pdfaid:part(?:>|=.)(\d)").ok()?.captures(&xmp)?.get(1)?.as_str().to_string();
-    let conformance = regex::Regex::new(r"pdfaid:conformance(?:>|=.)([ABUabu])").ok()?.captures(&xmp).and_then(|c| c.get(1)).map(|m| m.as_str().to_uppercase()).unwrap_or_else(|| "B".into());
-    Some(format!("<pdfaid:part>{part}</pdfaid:part>\n<pdfaid:conformance>{conformance}</pdfaid:conformance>\n"))
 }
 
 /// How the document opens in a viewer.
