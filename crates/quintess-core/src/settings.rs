@@ -36,6 +36,9 @@ pub struct Settings {
     /// Memory for page pictures, in megabytes: more keeps more pages ready,
     /// so scrolling quickly through a long document doesn't wait.
     pub page_memory_megabytes: u32,
+    /// Graphics: "automatic" (OpenGL, falling back to wgpu) or "wgpu"
+    /// (DirectX or Vulkan). Read when the app starts.
+    pub graphics: String,
 }
 
 /// The page a file was left at, and its zoom (`None` when it was fitted to
@@ -67,6 +70,7 @@ impl Default for Settings {
             check_spelling: true,
             spelling_language: String::new(),
             page_memory_megabytes: 768,
+            graphics: "automatic".into(),
         }
     }
 }

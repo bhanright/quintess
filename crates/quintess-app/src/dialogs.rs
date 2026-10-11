@@ -745,6 +745,13 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     ui.add(egui::Slider::new(&mut settings.page_memory_megabytes, 128..=8192).logarithmic(true).suffix(" MB").text("for page pictures"));
                 });
                 ui.end_row();
+                ui.label("Graphics");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut settings.graphics, "automatic".to_string(), "Automatic").on_hover_text("OpenGL, which uses about half the memory; DirectX or Vulkan if OpenGL can't start");
+                    ui.selectable_value(&mut settings.graphics, "wgpu".to_string(), "DirectX / Vulkan").on_hover_text("The most compatible choice, if pages draw wrongly or the window misbehaves");
+                    ui.weak("takes effect when Quintess next starts");
+                });
+                ui.end_row();
                 ui.label("Updates");
                 let mut automatic = settings.check_for_updates == Some(true);
                 if ui.checkbox(&mut automatic, "Check GitHub for new versions once a day").changed() {

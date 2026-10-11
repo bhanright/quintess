@@ -28,10 +28,9 @@ fn main() -> eframe::Result {
     // which mostly goes to setting up a Vulkan or DirectX device. When a
     // computer's OpenGL driver can't start, wgpu takes over.
     // QUINTESS_RENDERER=wgpu chooses wgpu outright.
-    let first_choice = match std::env::var("QUINTESS_RENDERER").as_deref() {
-        Ok("wgpu") => eframe::Renderer::Wgpu,
-        _ => eframe::Renderer::Glow,
-    };
+    let preference = quintess_core::settings::Settings::load().graphics;
+    let choice = std::env::var("QUINTESS_RENDERER").unwrap_or(preference);
+    let first_choice = if choice == "wgpu" { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow };
     let options = |renderer| eframe::NativeOptions { renderer, viewport: viewport.clone(), ..Default::default() };
     let result = eframe::run_native("Quintess", options(first_choice), Box::new({
         let files = files.clone();
