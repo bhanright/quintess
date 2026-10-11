@@ -186,6 +186,14 @@ saves a picture of the window and exits (setup options are documented on
   files, Line/PolyLine/Polygon annotations with /IT …Dimension and /Measure (RL)
   plus a drawn label. Object opacity/blend modes: `Change::Appearance` wraps
   the run in `q /QsGsN gs … Q`, replacing an earlier one so values are absolute.
+- Tables and Office export (`tables.rs`, `spreadsheet.rs`, `presentation.rs`):
+  tables from ruling lines (grid from thin rectangles and stroked edges, spans
+  where a rule is missing, wrapped cells merged) or text alignment (segments,
+  empty vertical bands as columns, alignment check, prose/list rejection);
+  `parse_number` with Excel formats; xlsx (tables per sheet or page per sheet),
+  pptx (page pictures, or editable text boxes/images/lines, hand-written OOXML
+  via `zip`), CSV per table. CLI `export -f xlsx|pptx|csv`, `tables`. Not done:
+  text color in editable slides, European number formats, grids in Form XObjects.
 - Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
   shown with a searchable topic list (F1, Help ▸ User guide). Keep it in
   step with features. `README.md` is the GitHub front page.

@@ -792,9 +792,37 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     fn start_export(&mut self, ctx: &egui::Context, format: &'static str) {
         let Some((_, bytes, password, title)) = self.job_input() else { return };
         let stem = title.trim_end_matches(".pdf").to_string();
-        let Some(path) = rfd::FileDialog::new().add_filter(format, &[format]).set_file_name(format!("{stem}.{format}")).save_file() else { return };
+        // "tables.xlsx" and "editable.pptx" are variants of the same file type.
+        let extension = format.rsplit('.').next().unwrap_or(format);
+        let path = if format == "csv" {
+            // One file per table, so pick a folder.
+            rfd::FileDialog::new().set_title("Choose a folder for the tables").pick_folder()
+        } else {
+            rfd::FileDialog::new().add_filter(extension, &[extension]).set_file_name(format!("{stem}.{extension}")).save_file()
+        };
+        let Some(path) = path else { return };
         self.start_job(ctx, "Exporting", move |_| {
             let document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
+            match format {
+                "xlsx" => return write_export(&path, quintess_core::spreadsheet::document_to_xlsx(&document)?),
+                "tables.xlsx" => return write_export(&path, quintess_core::spreadsheet::document_tables_to_xlsx(&document)?),
+                "pptx" | "editable.pptx" => {
+                    let mode = if format == "pptx" { quintess_core::presentation::SlideMode::Pictures } else { quintess_core::presentation::SlideMode::Editable };
+                    let settings = quintess_core::presentation::PresentationSettings { mode, ..Default::default() };
+                    return write_export(&path, quintess_core::presentation::document_to_pptx(&document, &settings)?);
+                }
+                "csv" => {
+                    let tables = quintess_core::tables::detect_tables(&document)?;
+                    if tables.is_empty() {
+                        anyhow::bail!("no tables were found in this document");
+                    }
+                    for (index, table) in tables.iter().enumerate() {
+                        std::fs::write(path.join(format!("{stem} page {} table {}.csv", table.page_index + 1, index + 1)), table.to_csv()?)?;
+                    }
+                    return Ok(JobOutcome::Message(format!("Wrote {} table{} to {}", tables.len(), if tables.len() == 1 { "" } else { "s" }, path.display())));
+                }
+                _ => {}
+            }
             let structure = quintess_core::convert::analyze(&document, true)?;
             match format {
                 "docx" => std::fs::write(&path, quintess_core::convert::to_docx(&structure)?)?,
@@ -1849,6 +1877,12 @@ fn annotation_label(kind: &quintess_core::annotations::AnnotationKind) -> &'stat
         RedactionMark { .. } => "redaction mark",
         Measurement { .. } => "measurement",
     }
+}
+
+/// Writes an exported file safely and says where it went.
+fn write_export(path: &std::path::Path, bytes: Vec<u8>) -> anyhow::Result<JobOutcome> {
+    quintess_core::document::write_file_safely(path, &bytes)?;
+    Ok(JobOutcome::Message(format!("Exported to {}", path.display())))
 }
 
 impl eframe::App for QuintessApp {

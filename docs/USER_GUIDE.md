@@ -250,6 +250,16 @@ Self-made identities show as unverified in other programs, since no authority vo
 - **Tools ▸ Compare with another version** lists the text changes and shows a visual overlay report.
 - **File ▸ Export as** saves a Word document, Markdown or a web page; **File ▸ Export** saves text, pictures of the pages, the pictures embedded in the document, form data or a comment summary.
 
+## Tables, Excel and PowerPoint
+
+Quintess finds tables on its own: from ruling lines where the page has them, and from how the text lines up where it doesn't. Ordinary paragraphs, bullet lists and empty grids are left alone.
+
+- **File ▸ Export as ▸ Excel workbook** makes one sheet per page: text lines in rows, tables in their columns. Numbers such as `1,234.50`, `(45)`, `12%` and `$3.00` become real numbers that display as they did on the page. **Excel, tables only** writes just the tables, one per sheet ("Page 3 table 1").
+- **Tables as CSV** writes one CSV file per table into a folder you choose.
+- **PowerPoint, page pictures** makes one slide per page that looks exactly like the PDF. **PowerPoint, editable** builds real text boxes, pictures and lines instead, which you can edit but which may differ slightly from the original.
+
+From the command line: `quintess tables report.pdf` lists the tables found (`--json` for positions and spans); `quintess export report.pdf -f xlsx` (`--tables-only`), `-f csv` (`--table 2` for one table) and `-f pptx` (`--editable`, `--dpi`).
+
 # File size, accessibility and archiving
 
 - **File ▸ Reduce file size**: *Keep quality* compresses without changing anything visible; *Balanced* and *Smallest* also resample pictures (Smallest removes metadata, attachments and scripts too). *Custom* sets resolution and quality.
