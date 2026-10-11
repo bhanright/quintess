@@ -62,6 +62,8 @@ pub struct SidebarState {
     reply_draft: String,
     editing_comment: Option<(u32, u16)>,
     new_bookmark_title: String,
+    /// The bookmark being renamed (its path in the tree), and the title typed so far.
+    renaming_bookmark: Option<(Vec<usize>, String)>,
     field_drafts: std::collections::HashMap<String, String>,
     drafts_version: (u64, u64),
     /// The layer being renamed, and the name typed so far.
@@ -165,8 +167,8 @@ fn bookmarks(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState,
         ui.add(egui::TextEdit::singleline(&mut state.new_bookmark_title).hint_text("New bookmark title").desired_width(ui.available_width() - 50.0));
         if ui.button("Add").on_hover_text("Bookmark the current page").clicked() && !state.new_bookmark_title.trim().is_empty() {
             let mut entries = tab.bookmarks.clone();
-            entries.push(BookmarkEntry { title: state.new_bookmark_title.trim().to_string(), page: tab.current_page as u32 + 1, children: Vec::new() });
-            entries.sort_by_key(|e| e.page);
+            let entry = BookmarkEntry { title: state.new_bookmark_title.trim().to_string(), page: tab.current_page as u32 + 1, children: Vec::new() };
+            quintess_core::bookmarks::insert_by_page(&mut entries, entry);
             actions.push(SidebarAction::SetBookmarks(entries));
             state.new_bookmark_title.clear();
         }
@@ -176,51 +178,94 @@ fn bookmarks(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState,
         ui.weak("This document has no bookmarks.");
         return;
     }
+    ui.weak("Right-click a bookmark to rename, move or delete it.");
     let mut jump = None;
-    let mut remove_path: Option<Vec<usize>> = None;
+    let mut change: Option<(Vec<usize>, BookmarkChange)> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        fn level(ui: &mut egui::Ui, entries: &[BookmarkEntry], path: &mut Vec<usize>, jump: &mut Option<u32>, remove: &mut Option<Vec<usize>>) {
-            for (index, entry) in entries.iter().enumerate() {
-                path.push(index);
-                let label = format!("{}  ·  {}", entry.title, entry.page);
-                if entry.children.is_empty() {
-                    let response = ui.selectable_label(false, label);
-                    if response.clicked() {
-                        *jump = Some(entry.page);
-                    }
-                    response.context_menu(|ui| {
-                        if ui.button("Delete bookmark").clicked() {
-                            *remove = Some(path.clone());
-                            ui.close();
-                        }
-                    });
-                } else {
-                    let header = egui::CollapsingHeader::new(label).id_salt(path.clone()).default_open(path.len() < 2).show(ui, |ui| level(ui, &entry.children, path, jump, remove));
-                    if header.header_response.clicked() {
-                        *jump = Some(entry.page);
-                    }
-                }
-                path.pop();
-            }
-        }
-        level(ui, &tab.bookmarks, &mut Vec::new(), &mut jump, &mut remove_path);
+        bookmark_level(ui, &tab.bookmarks, &mut Vec::new(), &mut state.renaming_bookmark, &mut jump, &mut change);
     });
     if let Some(page) = jump.filter(|p| *p > 0) {
         go_to_page(tab, page as usize - 1);
     }
-    if let Some(path) = remove_path {
+    if let Some((path, change)) = change {
+        use quintess_core::bookmarks::{move_bookmark, remove_bookmark, rename_bookmark};
         let mut entries = tab.bookmarks.clone();
-        fn remove_at(entries: &mut Vec<BookmarkEntry>, path: &[usize]) {
-            match path {
-                [index] => {
-                    entries.remove(*index);
-                }
-                [first, rest @ ..] => remove_at(&mut entries[*first].children, rest),
-                [] => {}
-            }
+        let changed = match change {
+            BookmarkChange::Rename(title) => rename_bookmark(&mut entries, &path, &title),
+            BookmarkChange::Move { up } => move_bookmark(&mut entries, &path, up).is_some(),
+            BookmarkChange::Delete { keep_children } => remove_bookmark(&mut entries, &path, keep_children).is_some(),
+        };
+        if changed {
+            actions.push(SidebarAction::SetBookmarks(entries));
         }
-        remove_at(&mut entries, &path);
-        actions.push(SidebarAction::SetBookmarks(entries));
+    }
+}
+
+/// A change asked for in a bookmark's right-click menu.
+enum BookmarkChange {
+    Rename(String),
+    Move { up: bool },
+    /// Remove it; `keep_children` puts the bookmarks under it in its place.
+    Delete { keep_children: bool },
+}
+
+/// One level of the bookmark tree, each with its right-click menu.
+fn bookmark_level(ui: &mut egui::Ui, entries: &[BookmarkEntry], path: &mut Vec<usize>, renaming: &mut Option<(Vec<usize>, String)>, jump: &mut Option<u32>, change: &mut Option<(Vec<usize>, BookmarkChange)>) {
+    for (index, entry) in entries.iter().enumerate() {
+        path.push(index);
+        if let Some((renamed_path, title)) = renaming.as_mut().filter(|(renamed_path, _)| renamed_path == path) {
+            let response = ui.add(egui::TextEdit::singleline(title).desired_width(f32::INFINITY));
+            if response.lost_focus() {
+                if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    *change = Some((renamed_path.clone(), BookmarkChange::Rename(title.clone())));
+                }
+                *renaming = None;
+            } else if !response.has_focus() {
+                response.request_focus();
+            }
+        } else {
+            let label = format!("{}  ·  {}", entry.title, entry.page);
+            let response = if entry.children.is_empty() {
+                ui.selectable_label(false, label)
+            } else {
+                egui::CollapsingHeader::new(label).id_salt(path.clone()).default_open(path.len() < 2).show(ui, |ui| bookmark_level(ui, &entry.children, path, renaming, jump, change)).header_response
+            };
+            if response.clicked() {
+                *jump = Some(entry.page);
+            }
+            let (first, last) = (index == 0, index + 1 == entries.len());
+            response.context_menu(|ui| {
+                let mut chosen = None;
+                if ui.button("Rename").clicked() {
+                    *renaming = Some((path.clone(), entry.title.clone()));
+                    ui.close();
+                }
+                if ui.add_enabled(!first, egui::Button::new("Move up")).clicked() {
+                    chosen = Some(BookmarkChange::Move { up: true });
+                }
+                if ui.add_enabled(!last, egui::Button::new("Move down")).clicked() {
+                    chosen = Some(BookmarkChange::Move { up: false });
+                }
+                ui.separator();
+                if entry.children.is_empty() {
+                    if ui.button("Delete bookmark").clicked() {
+                        chosen = Some(BookmarkChange::Delete { keep_children: false });
+                    }
+                } else {
+                    if ui.button("Delete, keeping the bookmarks under it").clicked() {
+                        chosen = Some(BookmarkChange::Delete { keep_children: true });
+                    }
+                    if ui.button("Delete with the bookmarks under it").clicked() {
+                        chosen = Some(BookmarkChange::Delete { keep_children: false });
+                    }
+                }
+                if let Some(chosen) = chosen {
+                    *change = Some((path.clone(), chosen));
+                    ui.close();
+                }
+            });
+        }
+        path.pop();
     }
 }
 
@@ -294,6 +339,8 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
     });
 }
 
+/// A comment's kind in words, for every annotation type the PDF standard
+/// names; a type it doesn't name is shown as it is.
 pub fn friendly_kind(subtype: &str) -> &str {
     match subtype {
         "Text" => "Note",
@@ -301,10 +348,38 @@ pub fn friendly_kind(subtype: &str) -> &str {
         "Square" => "Rectangle",
         "Circle" => "Ellipse",
         "Ink" => "Drawing",
+        "Highlight" => "Highlight",
+        "Underline" => "Underline",
+        "Squiggly" => "Squiggly underline",
         "StrikeOut" => "Strikethrough",
         "Redact" => "Redaction mark",
+        "Line" => "Line",
+        "Polygon" => "Polygon",
         "PolyLine" => "Polyline",
+        "Stamp" => "Stamp",
+        "Caret" => "Insertion mark",
+        "FileAttachment" => "Attached file",
+        "Sound" => "Sound",
+        "Movie" | "Screen" | "RichMedia" => "Media",
+        "3D" => "3D model",
+        "Popup" => "Pop-up note",
+        "Link" => "Link",
+        "Widget" => "Form field",
+        "Watermark" => "Watermark",
+        "PrinterMark" => "Printer's mark",
+        "TrapNet" => "Trap network",
+        "Projection" => "Projection",
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod friendly_kind_tests {
+    #[test]
+    fn standard_comment_types_read_as_words() {
+        for (subtype, words) in [("Squiggly", "Squiggly underline"), ("Caret", "Insertion mark"), ("FileAttachment", "Attached file"), ("3D", "3D model"), ("Text", "Note")] {
+            assert_eq!(super::friendly_kind(subtype), words);
+        }
     }
 }
 
@@ -315,7 +390,7 @@ fn fields(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, ac
         state.drafts_version = (tab.id, tab.version);
     }
     if tab.fields.is_empty() {
-        ui.weak("This document has no form fields. Use Tools ▸ Forms ▸ Detect fields, or the field tools in the toolbar.");
+        ui.weak("This document has no form fields. Use Tools ▸ Forms ▸ Detect fields automatically, or the field tools in the toolbar.");
         return;
     }
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -537,6 +612,9 @@ fn layers(ui: &mut egui::Ui, tab: &DocumentTab, state: &mut SidebarState, action
     ui.label(RichText::new(format!("Objects on page {}", page_index + 1)).strong());
     let objects = tab.page_objects(page_index);
     let owners = tab.object_layers(page_index);
+    // Objects on locked or hidden layers are listed but can't be picked or
+    // restacked here either, or the list would get round the lock.
+    let pickable: Vec<usize> = tab.pickable_objects(page_index).iter().map(|object| object.start).collect();
     if objects.is_empty() {
         ui.weak("No pictures or drawings on this page.");
         return;
@@ -546,8 +624,14 @@ fn layers(ui: &mut egui::Ui, tab: &DocumentTab, state: &mut SidebarState, action
         for object in objects.iter().rev() {
             ui.horizontal(|ui| {
                 let size = format!("{:.0}×{:.0} pt", object.bounds[2] - object.bounds[0], object.bounds[3] - object.bounds[1]);
-                let layer_name = owners.iter().find(|(start, _)| *start == object.start).and_then(|(_, id)| layers.iter().find(|layer| layer.id == *id)).map(|layer| format!(" · {}", layer.name)).unwrap_or_default();
+                let layer = owners.iter().find(|(start, _)| *start == object.start).and_then(|(_, id)| layers.iter().find(|layer| layer.id == *id));
+                let layer_name = layer.map(|layer| format!(" · {}", layer.name)).unwrap_or_default();
                 let label = format!("{} · {size}{layer_name}", object.kind.describe());
+                if !pickable.contains(&object.start) {
+                    let why = if layer.is_some_and(|layer| layer.locked) { "On a locked layer: unlock it to pick this" } else { "On a hidden layer: show it to pick this" };
+                    ui.add_enabled(false, egui::Button::selectable(false, label)).on_disabled_hover_text(why);
+                    return;
+                }
                 if ui.selectable_label(false, label).clicked() {
                     actions.push(SidebarAction::SelectObject { page_index, object: object.clone() });
                 }

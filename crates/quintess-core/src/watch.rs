@@ -13,7 +13,7 @@ use std::time::SystemTime;
 
 use anyhow::{Result, bail};
 
-use crate::batch::{Action, BatchState, run_steps_continuing};
+use crate::batch::{Action, BatchState, RunOptions, run_steps_continuing};
 
 /// Where things go.
 #[derive(Clone, Debug)]
@@ -22,6 +22,9 @@ pub struct WatchSettings {
     pub action: Action,
     /// Results; `inbox/Done` when not set.
     pub output: Option<PathBuf>,
+    /// Passwords and download permission for the action's steps. Results
+    /// never overwrite: a taken name gets a number.
+    pub options: RunOptions,
 }
 
 /// What happened to one file.
@@ -85,7 +88,7 @@ impl FolderWatcher {
         let result = (|| -> Result<PathBuf> {
             let bytes = std::fs::read(input)?;
             let name = input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let output_bytes = run_steps_continuing(bytes, &self.settings.action.steps, &name, &mut self.state)?;
+            let output_bytes = run_steps_continuing(bytes, &self.settings.action.steps, &name, &self.settings.options, &mut self.state)?;
             let stem = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
             let target = unused_path(&self.output, &format!("{stem}{}", self.settings.action.suffix));
             std::fs::write(&target, output_bytes)?;

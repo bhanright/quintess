@@ -11,7 +11,7 @@ fn settled_files_are_processed_once() {
     let _ = std::fs::remove_dir_all(&inbox);
     std::fs::create_dir_all(&inbox).unwrap();
     let action = Action::new(vec![Step::Watermark { text: "RECEIVED".into(), opacity: None, behind: false }]);
-    let mut watcher = FolderWatcher::new(WatchSettings { inbox: inbox.clone(), action, output: None }).unwrap();
+    let mut watcher = FolderWatcher::new(WatchSettings { inbox: inbox.clone(), action, output: None, options: Default::default() }).unwrap();
 
     text_to_pdf("An incoming letter.", &TextPageSettings::default()).unwrap().save(&inbox.join("letter.pdf"), &SaveSettings::default()).unwrap();
     std::fs::write(inbox.join("broken.pdf"), b"%PDF-1.7 this is not really a PDF").unwrap();
@@ -26,5 +26,5 @@ fn settled_files_are_processed_once() {
     assert!(events.iter().any(|e| matches!(e, WatchEvent::Failed { .. })));
     assert!(inbox.join("Failed").join("broken.pdf").exists() && inbox.join("Failed").join("broken.error.txt").exists());
     assert!(watcher.check().is_empty(), "nothing is handled twice");
-    assert!(FolderWatcher::new(WatchSettings { inbox: inbox.clone(), action: Action::new(Vec::new()), output: Some(inbox.clone()) }).is_err(), "results can't go back into the inbox");
+    assert!(FolderWatcher::new(WatchSettings { inbox: inbox.clone(), action: Action::new(Vec::new()), output: Some(inbox.clone()), options: Default::default() }).is_err(), "results can't go back into the inbox");
 }

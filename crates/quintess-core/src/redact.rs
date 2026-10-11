@@ -1193,8 +1193,12 @@ fn rasterize_page(pdf: &mut Pdf, page_number: u32, areas: &[RedactionArea], sett
     let fill = settings.fill.unwrap_or([1.0, 1.0, 1.0]);
     let fill_pixel = Rgba([(fill[0] * 255.0) as u8, (fill[1] * 255.0) as u8, (fill[2] * 255.0) as u8, 255]);
     let (display_width, display_height) = if rotation % 180 == 0 { (bounds[2] - bounds[0], bounds[3] - bounds[1]) } else { (bounds[3] - bounds[1], bounds[2] - bounds[0]) };
+    // The flattened page is drawn in display space (no rotation, origin at
+    // the bottom left), so the boxes' labels are placed there too.
+    let mut display_areas: Vec<[f32; 4]> = Vec::new();
     for area in areas.iter().filter(|a| a.page == page_number) {
         let corners = [(area.rect[0], area.rect[1]), (area.rect[2], area.rect[3])].map(|(x, y)| crate::pages::page_to_display_point(bounds, rotation, x, y));
+        display_areas.push([corners[0].0.min(corners[1].0), corners[0].1.min(corners[1].1), corners[0].0.max(corners[1].0), corners[0].1.max(corners[1].1)]);
         let to_pixel_x = |x: f32| (x / display_width * image_width as f32).clamp(0.0, image_width as f32) as u32;
         let to_pixel_y = |y: f32| ((1.0 - y / display_height) * image_height as f32).clamp(0.0, image_height as f32) as u32;
         let (x0, x1) = (to_pixel_x(corners[0].0.min(corners[1].0)), to_pixel_x(corners[0].0.max(corners[1].0)));
@@ -1206,14 +1210,23 @@ fn rasterize_page(pdf: &mut Pdf, page_number: u32, areas: &[RedactionArea], sett
         }
     }
     let embedded = crate::images::embed_decoded_image(&mut pdf.doc, &DynamicImage::ImageRgb8(image.to_rgb8()));
-    let content = format!("q {} 0 0 {} 0 0 cm /VlPage Do Q\n", number(display_width), number(display_height));
-    let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
+    let mut content = format!("q {} 0 0 {} 0 0 cm /VlPage Do Q\n", number(display_width), number(display_height)).into_bytes();
+    // The label in each box, drawn as text over the picture (there is
+    // nothing left under it to verify).
+    let label = box_content(&display_areas, settings, true);
+    let mut resources = dictionary! { "XObject" => dictionary! { "VlPage" => embedded.id } };
+    if !label.is_empty() {
+        content.extend(label);
+        let font_id = StandardFont::HelveticaBold.add_to(&mut pdf.doc);
+        resources.set("Font", dictionary! { "VlRedact" => font_id });
+    }
+    let content_id = pdf.doc.add_object(Stream::new(Dictionary::new(), content));
     let page = pdf.doc.get_dictionary_mut(page_id)?;
     page.set("MediaBox", rectangle_to_object([0.0, 0.0, display_width, display_height]));
     page.remove(b"CropBox");
     page.remove(b"Rotate");
     page.remove(b"Annots");
-    page.set("Resources", dictionary! { "XObject" => dictionary! { "VlPage" => embedded.id } });
+    page.set("Resources", resources);
     page.set("Contents", content_id);
     Ok(())
 }

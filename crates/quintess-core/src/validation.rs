@@ -137,6 +137,26 @@ pub fn certificates_from_bytes(bytes: &[u8]) -> Result<Vec<Vec<u8>>> {
     Ok(certificates)
 }
 
+/// Who a certificate names and who issued it, with its fingerprint, shown
+/// before someone decides to trust it.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct CertificateIdentity {
+    /// The subject's full distinguished name.
+    pub subject: String,
+    /// The issuer's full distinguished name (the same as the subject when self-signed).
+    pub issuer: String,
+    /// SHA-256 of the certificate as colon-separated hex pairs, the way
+    /// certificate viewers show it, to compare with what the signer reads out.
+    pub fingerprint: String,
+}
+
+/// Describes a certificate (DER) for a trust decision.
+pub fn certificate_identity(certificate_der: &[u8]) -> Result<CertificateIdentity> {
+    let (_, certificate) = x509_parser::parse_x509_certificate(certificate_der).map_err(|_| anyhow!("that is not a certificate"))?;
+    let fingerprint = Sha256::digest(certificate_der).iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":");
+    Ok(CertificateIdentity { subject: certificate.subject().to_string(), issuer: certificate.issuer().to_string(), fingerprint })
+}
+
 pub fn thumbprint(certificate_der: &[u8]) -> String {
     Sha256::digest(certificate_der).iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -488,6 +508,18 @@ mod tests {
         remove_trusted_certificate(&folder, &added[0].thumbprint[..12]).unwrap();
         assert!(list_trusted_certificates(&folder).is_empty());
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_certificate_is_described_before_it_is_trusted() {
+        let identity = crate::signatures::SigningIdentity::self_signed("Trust Test", "", "Example Co").unwrap();
+        let certificate = pem_blocks(&identity.certificate_pem, "CERTIFICATE").remove(0);
+        let described = certificate_identity(&certificate).unwrap();
+        assert!(described.subject.contains("CN=Trust Test") && described.subject.contains("Example Co"), "{described:?}");
+        assert_eq!(described.issuer, described.subject, "self-signed");
+        assert_eq!(described.fingerprint.len(), 32 * 3 - 1, "{}", described.fingerprint);
+        assert_eq!(described.fingerprint.replace(':', "").to_lowercase(), thumbprint(&certificate));
+        assert!(certificate_identity(b"hello").is_err());
     }
 
     #[test]

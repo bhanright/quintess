@@ -94,6 +94,9 @@ pub struct DocumentTab {
     pub signed: bool,
     /// The last edit was saved as an update that left the signatures valid.
     pub last_edit_kept_signatures: bool,
+    /// What the last edit of a signed document did to its signatures, until
+    /// the app has told the person (`take_signature_notice`).
+    pub signature_notice: Option<SignatureNotice>,
     /// The password protection the file had when opened (key, passwords and
     /// permissions), put back when it is saved unless taken off.
     pub original_encryption: Option<quintess_core::lopdf::EncryptionState>,
@@ -108,6 +111,9 @@ pub struct DocumentTab {
     object_layer_cache: RefCell<HashMap<usize, Rc<Vec<(usize, (u32, u16))>>>>,
     /// Per page, where the pictures that text wraps around are.
     wrap_cache: RefCell<HashMap<usize, Rc<Vec<([f32; 4], WrapOptions)>>>>,
+    /// The drawing's own scale at the last point asked about (page and
+    /// point), so measuring doesn't re-read the file every frame.
+    drawing_scale_cache: RefCell<Option<((usize, (f32, f32)), Option<quintess_core::measure::Scale>)>>,
     tag_cache: RefCell<Option<Rc<quintess_core::tag_tree::TagTree>>>,
     reading_order_cache: RefCell<HashMap<usize, Rc<Vec<quintess_core::tag_tree::ReadingOrderRegion>>>>,
     /// Number the tagged regions of each page in reading order (Tags panel).
@@ -143,6 +149,32 @@ pub struct DocumentTab {
     pub may_change_security: bool,
 }
 
+/// What an edit did to a signed document's signatures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SignatureNotice {
+    /// Added as an update after the signed bytes: the signatures stay valid.
+    KeptValid,
+    /// The whole file was rewritten, which invalidates the signatures, on
+    /// purpose for an edit that removes content and otherwise because the
+    /// edit couldn't be added as an update.
+    Invalidated { removed_content: bool },
+}
+
+impl SignatureNotice {
+    /// A sentence to add to the status line after the edit's own message.
+    pub fn sentence(self) -> &'static str {
+        match self {
+            SignatureNotice::KeptValid => "Saved as an update after the signatures, which stay valid.",
+            SignatureNotice::Invalidated { removed_content: true } => "The file was rewritten so nothing removed stays in it, which invalidates its digital signatures.",
+            SignatureNotice::Invalidated { removed_content: false } => "It couldn't be added as an update after the signatures, so the file was rewritten, which invalidates its digital signatures.",
+        }
+    }
+
+    pub fn invalidated(self) -> bool {
+        matches!(self, SignatureNotice::Invalidated { .. })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FitMode {
     /// Use `zoom` as given.
@@ -172,6 +204,7 @@ impl DocumentTab {
             attachments: Vec::new(),
             signed: false,
             last_edit_kept_signatures: false,
+            signature_notice: None,
             original_encryption: None,
             document: None,
             text_cache: RefCell::new(HashMap::new()),
@@ -181,6 +214,7 @@ impl DocumentTab {
             layer_cache: RefCell::new(None),
             object_layer_cache: RefCell::new(HashMap::new()),
             wrap_cache: RefCell::new(HashMap::new()),
+            drawing_scale_cache: RefCell::new(None),
             tag_cache: RefCell::new(None),
             reading_order_cache: RefCell::new(HashMap::new()),
             show_reading_order: false,
@@ -242,6 +276,7 @@ impl DocumentTab {
         *self.layer_cache.borrow_mut() = None;
         self.object_layer_cache.borrow_mut().clear();
         self.wrap_cache.borrow_mut().clear();
+        *self.drawing_scale_cache.borrow_mut() = None;
         *self.tag_cache.borrow_mut() = None;
         self.reading_order_cache.borrow_mut().clear();
         self.textures.clear();
@@ -281,13 +316,23 @@ impl DocumentTab {
     /// nothing removed survives inside it.
     pub fn replace_bytes_as(&mut self, label: &str, new_bytes: Vec<u8>, removes_content: bool) -> Result<()> {
         let mut new_bytes = new_bytes;
+        let was_signed = self.signed;
         self.last_edit_kept_signatures = false;
         if self.signed && !removes_content {
-            if let Ok(updated) = quintess_core::incremental::update_from_bytes(&self.bytes, &new_bytes, self.password.as_deref()) {
+            if is_incremental_update_of(&self.bytes, &new_bytes) {
+                // Already an update appended after the current bytes (a new
+                // signature is): rewriting it as another update would move
+                // its objects and break its byte range.
+                self.last_edit_kept_signatures = true;
+            } else if let Ok(updated) = quintess_core::incremental::update_from_bytes(&self.bytes, &new_bytes, self.password.as_deref()) {
                 new_bytes = updated;
                 self.last_edit_kept_signatures = true;
             }
         }
+        self.signature_notice = was_signed.then(|| match self.last_edit_kept_signatures {
+            true => SignatureNotice::KeptValid,
+            false => SignatureNotice::Invalidated { removed_content: removes_content },
+        });
         let previous = std::mem::replace(&mut self.bytes, Arc::new(new_bytes));
         self.undo_stack.push((label.to_string(), previous.clone()));
         if self.undo_stack.len() > UNDO_LIMIT {
@@ -298,12 +343,19 @@ impl DocumentTab {
         self.dirty = true;
         if let Err(error) = self.refresh() {
             self.bytes = previous;
+            self.signature_notice = None;
             self.undo_stack.pop();
             self.version += 1;
             self.refresh()?;
             return Err(error);
         }
         Ok(())
+    }
+
+    /// What the last edit did to the signatures, once: the app adds it to
+    /// the status line, whichever path (menu, dialog, background job) made it.
+    pub fn take_signature_notice(&mut self) -> Option<SignatureNotice> {
+        self.signature_notice.take()
     }
 
     pub fn undo_label(&self) -> Option<&str> {
@@ -396,7 +448,6 @@ impl DocumentTab {
         owners
     }
 
-    /// The objects on a page that can be picked: those not on a locked layer.
     /// The accessibility tag tree, with text read through PDFium.
     pub fn tag_tree(&self) -> Rc<quintess_core::tag_tree::TagTree> {
         if let Some(tree) = self.tag_cache.borrow().as_ref() {
@@ -448,15 +499,32 @@ impl DocumentTab {
         self.wrapping_pictures(page_index).iter().find(|(wrapped, _)| wrapped.iter().zip(bounds).all(|(a, b)| (a - b).abs() < 1.0)).map(|(_, options)| *options)
     }
 
+    /// The scale a measurement starting at `point` uses: the drawing's own
+    /// (CAD viewports) when it has one there, else `chosen`. The live value
+    /// and the saved measurement both use this, so they agree.
+    pub fn measuring_scale(&self, page_index: usize, point: (f32, f32), chosen: &quintess_core::measure::Scale) -> quintess_core::measure::Scale {
+        let key = (page_index, point);
+        if let Some((cached_key, scale)) = self.drawing_scale_cache.borrow().as_ref() {
+            if *cached_key == key {
+                return scale.clone().unwrap_or_else(|| chosen.clone());
+            }
+        }
+        let drawing = self.load_pdf().ok().and_then(|pdf| quintess_core::measure::viewport_scale(&pdf, page_index as u32 + 1, point));
+        *self.drawing_scale_cache.borrow_mut() = Some((key, drawing.clone()));
+        drawing.unwrap_or_else(|| chosen.clone())
+    }
+
     /// Whether text wraps around a picture at these bounds (within a point).
     pub fn text_wraps_around(&self, page_index: usize, bounds: [f32; 4]) -> bool {
         self.wrap_options_at(page_index, bounds).is_some()
     }
 
+    /// The objects on a page that can be picked: those not on a locked
+    /// layer, nor on a hidden one (which would be picked unseen).
     pub fn pickable_objects(&self, page_index: usize) -> Vec<quintess_core::objects::PageObject> {
-        let locked: Vec<(u32, u16)> = self.layers().iter().filter(|layer| layer.locked).map(|layer| layer.id).collect();
+        let out_of_reach: Vec<(u32, u16)> = self.layers().iter().filter(|layer| layer.locked || !layer.visible).map(|layer| layer.id).collect();
         let owners = self.object_layers(page_index);
-        self.page_objects(page_index).iter().filter(|object| !owners.iter().any(|(start, layer)| *start == object.start && locked.contains(layer))).cloned().collect()
+        self.page_objects(page_index).iter().filter(|object| !owners.iter().any(|(start, layer)| *start == object.start && out_of_reach.contains(layer))).cloned().collect()
     }
 
     pub fn pdfium_document(&self) -> Option<&PdfDocument<'static>> {
@@ -565,5 +633,70 @@ impl DocumentTab {
         self.path = Some(path);
         self.dirty = false;
         Ok(())
+    }
+}
+
+/// Whether `new` keeps `old` byte for byte and only adds to its end, as an
+/// incremental update (such as a new signature) does.
+pub fn is_incremental_update_of(old: &[u8], new: &[u8]) -> bool {
+    new.len() > old.len() && new.starts_with(old)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quintess_core::create::{TextPageSettings, text_to_pdf};
+    use quintess_core::signatures::{SignOptions, SigningIdentity, sign, verify};
+
+    fn signed_once() -> Vec<u8> {
+        let original = text_to_pdf("Agreement between the parties.", &TextPageSettings::default()).unwrap().to_bytes(&SaveSettings::default()).unwrap();
+        let alice = SigningIdentity::self_signed("Alice Example", "", "").unwrap();
+        sign(&original, &alice, &SignOptions { placement: Some((1, [72.0, 600.0, 300.0, 660.0])), ..Default::default() }).unwrap()
+    }
+
+    /// Signing a signed document goes through the same path as the app's
+    /// Sign command: the new bytes come back to the tab as an edit.
+    #[test]
+    fn a_second_signature_keeps_both_valid() {
+        let mut tab = DocumentTab::open(1, None, signed_once(), None).unwrap();
+        assert!(tab.signed);
+        let bob = SigningIdentity::self_signed("Bob Example", "", "").unwrap();
+        let twice = sign(&tab.bytes, &bob, &SignOptions { placement: Some((1, [320.0, 600.0, 540.0, 660.0])), ..Default::default() }).unwrap();
+        tab.replace_bytes_as("Signed by Bob Example", twice.clone(), false).unwrap();
+        assert_eq!(tab.bytes.as_ref(), &twice, "the signed bytes are kept exactly");
+        let checks = verify(&tab.bytes).unwrap();
+        assert_eq!(checks.len(), 2, "{checks:?}");
+        assert!(checks.iter().all(|check| check.intact), "{checks:?}");
+        assert_eq!(tab.take_signature_notice(), Some(SignatureNotice::KeptValid));
+        assert_eq!(tab.take_signature_notice(), None, "told once");
+    }
+
+    /// The live value and the saved measurement both ask this, so a CAD
+    /// drawing's own scale is used for both.
+    #[test]
+    fn measuring_uses_the_drawings_scale_where_it_has_one() {
+        use quintess_core::lopdf::{Object, dictionary};
+        use quintess_core::measure::Scale;
+        let mut pdf = quintess_core::create::blank_document(1, (612.0, 792.0)).unwrap();
+        let page_id = pdf.page_id(1).unwrap();
+        let measure = Scale::parse("1 in = 4 ft").unwrap().measure_dictionary();
+        let viewport = dictionary! { "Type" => "Viewport", "BBox" => vec![Object::Real(50.0), Object::Real(50.0), Object::Real(550.0), Object::Real(700.0)], "Measure" => measure };
+        pdf.doc.get_dictionary_mut(page_id).unwrap().set("VP", vec![Object::Dictionary(viewport)]);
+        let tab = DocumentTab::open(1, None, pdf.to_bytes(&SaveSettings::default()).unwrap(), None).unwrap();
+        let chosen = Scale::parse("1 in = 10 ft").unwrap();
+        assert_eq!(tab.measuring_scale(0, (300.0, 300.0), &chosen).label(), "1 in = 4 ft");
+        assert_eq!(tab.measuring_scale(0, (300.0, 300.0), &chosen).label(), "1 in = 4 ft", "from the cache too");
+        assert_eq!(tab.measuring_scale(0, (10.0, 10.0), &chosen).label(), "1 in = 10 ft", "outside the drawing");
+    }
+
+    #[test]
+    fn edits_of_signed_documents_leave_a_notice() {
+        let mut tab = DocumentTab::open(1, None, signed_once(), None).unwrap();
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.take_signature_notice(), Some(SignatureNotice::KeptValid));
+        assert!(verify(&tab.bytes).unwrap()[0].intact);
+        tab.apply_removing("Remove metadata", quintess_core::metadata::strip_metadata).unwrap();
+        assert_eq!(tab.take_signature_notice(), Some(SignatureNotice::Invalidated { removed_content: true }));
+        assert!(!verify(&tab.bytes).unwrap()[0].intact);
     }
 }

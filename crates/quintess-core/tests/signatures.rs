@@ -5,6 +5,17 @@ use quintess_core::signatures::{SignOptions, SigningIdentity, sign, verify};
 use quintess_core::{SaveSettings, engine};
 
 #[test]
+fn protected_files_are_checked_with_their_password() {
+    use quintess_core::security::{ProtectionSettings, protect};
+    let mut pdf = text_to_pdf("Agreement between the parties.", &TextPageSettings::default()).unwrap();
+    protect(&mut pdf, &ProtectionSettings { user_password: "open sesame".into(), owner_password: "owner".into(), ..Default::default() }).unwrap();
+    let bytes = pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false }).unwrap();
+    assert!(verify(&bytes).is_err(), "can't even be read without the password");
+    let checks = quintess_core::signatures::verify_protected(&bytes, Some("open sesame")).unwrap();
+    assert!(checks.is_empty(), "read, and holds no signatures");
+}
+
+#[test]
 fn signatures_verify_and_detect_tampering() {
     let folder = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("signatures");
     std::fs::create_dir_all(&folder).unwrap();

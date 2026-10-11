@@ -28,6 +28,32 @@ fn verdict_of(check: &RedactionCheck, place: &str) -> Verdict {
 }
 
 #[test]
+fn unchecked_places_keep_the_headline_from_saying_all_clear() {
+    use quintess_core::redaction_check::CheckedPlace;
+    let clear = CheckedPlace { place: "Text under the boxes", verdict: Verdict::Clear, details: Vec::new() };
+    let unchecked = CheckedPlace { place: "Attachments", verdict: Verdict::NotChecked, details: vec!["photo.jpg is a picture".into()] };
+    let all_checked = RedactionCheck { texts: vec!["John Smith".into()], places: vec![clear.clone()] };
+    assert_eq!(all_checked.headline(), "Nothing redacted was found anywhere in the file.");
+    let partly_checked = RedactionCheck { texts: vec!["John Smith".into()], places: vec![clear, unchecked] };
+    assert_eq!(partly_checked.verdict(), Verdict::Clear);
+    assert!(!partly_checked.headline().contains("anywhere"), "{}", partly_checked.headline());
+    assert!(partly_checked.headline().contains("couldn't be checked"));
+    assert!(partly_checked.to_text().contains("not checked"));
+}
+
+#[test]
+fn each_match_is_listed_with_its_text() {
+    let mut pdf = text_to_pdf("Patient: John Smith\nVisit on Tuesday.", &TextPageSettings::default()).unwrap();
+    let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+    let document = engine::open_document(bytes, None).unwrap();
+    let areas = find_areas(&document, &[engine::search_pattern("Tuesday", false, false, false).unwrap()]).unwrap();
+    let mut areas_with_blank = areas.clone();
+    areas_with_blank.push(RedactionArea { page: 1, rect: [500.0, 10.0, 520.0, 20.0] });
+    let texts = quintess_core::redaction_check::area_texts(&document, &areas_with_blank).unwrap();
+    assert_eq!(texts, ["Tuesday", ""]);
+}
+
+#[test]
 fn a_plain_redaction_comes_out_clear() {
     let mut pdf = text_to_pdf("Patient: John Smith\nVisit on Tuesday.\nSigned, John Smith", &TextPageSettings::default()).unwrap();
     let (_, _, check) = redact_name(&pdf.to_bytes(&SaveSettings::default()).unwrap(), "John Smith");

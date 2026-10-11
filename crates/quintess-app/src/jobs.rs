@@ -24,7 +24,8 @@ pub enum JobOutcome {
     /// Pages from the scanner, made into a PDF; OCR follows if asked for.
     Scanned { bytes: Vec<u8>, pages: usize, recognize_text: bool },
     /// `manual` checks report even when nothing is new.
-    UpdateChecked { found: Option<quintess_core::updates::Release>, manual: bool },
+    /// `reached`: GitHub answered (a failed automatic check is quiet).
+    UpdateChecked { found: Option<quintess_core::updates::Release>, manual: bool, reached: bool },
     UpdateDownloaded { path: std::path::PathBuf, verified: bool, version: String },
 }
 
@@ -33,6 +34,8 @@ pub struct Job {
     /// (done, total) for jobs that can count their work.
     pub progress: Arc<Mutex<(u32, u32)>>,
     result: Receiver<anyhow::Result<JobOutcome>>,
+    /// A step for the action being recorded, noted only if the job succeeds.
+    pub record_on_success: Option<quintess_core::batch::Step>,
 }
 
 impl Job {
@@ -53,7 +56,7 @@ impl Job {
             let _ = sender.send(result);
             ctx.request_repaint();
         });
-        Self { label: label.into(), progress, result: receiver }
+        Self { label: label.into(), progress, result: receiver, record_on_success: None }
     }
 
     /// The outcome if the job has finished.

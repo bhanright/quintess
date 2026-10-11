@@ -30,9 +30,18 @@ pub enum AppRequest {
     CompleteText(PendingText),
     OpenUrlConfirmed(String),
     UnlockAndOpen { path: PathBuf, bytes: Vec<u8>, password: String },
-    CloseTabDiscarding(usize),
-    StartOptimize(quintess_core::optimize::OptimizeSettings),
-    StartBatch { action: PathBuf, inputs: Vec<PathBuf> },
+    /// Remove the protection, with the permissions password typed for it.
+    RemoveProtection { owner_password: String },
+    /// Compare with an older version that needs this password to open.
+    CompareWithPassword { path: PathBuf, password: String },
+    /// Save these documents (by tab id), then close them, or quit when
+    /// `quitting`. Stops at the first one not saved.
+    SaveAndClose { tab_ids: Vec<u64>, quitting: bool },
+    /// Close these documents (by tab id) without saving, or quit when `quitting`.
+    CloseDiscarding { tab_ids: Vec<u64>, quitting: bool },
+    /// Reduce the file size; `step` is recorded once it succeeds.
+    StartOptimize { settings: quintess_core::optimize::OptimizeSettings, step: Step },
+    StartBatch { action: PathBuf, inputs: Vec<PathBuf>, options: quintess_core::batch::RunOptions },
     SettingsChanged(quintess_core::settings::Settings),
     IdentityCreated(PathBuf),
     ApplyAccessibilityFixes,
@@ -63,6 +72,8 @@ pub enum AppRequest {
     Convert(Box<ConvertDialog>),
     /// Trust a certificate (DER) from now on, then check the signatures again.
     TrustCertificate(Vec<u8>),
+    /// Stop trusting the certificate with this SHA-256 thumbprint (hex).
+    RemoveTrustedCertificate(String),
     /// Ask the certificates' issuers whether any was revoked (online).
     CheckRevocation,
     /// Store certificates and revocation answers in the document.
@@ -70,7 +81,7 @@ pub enum AppRequest {
     SetMeasureScale(quintess_core::measure::Scale),
     /// Turn to a page and outline a box there (display points from the top left).
     ShowOnPage { page_index: usize, display_rect: [f32; 4] },
-    StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf> },
+    StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf>, options: quintess_core::batch::RunOptions },
     /// A step just applied, for the action being recorded (ignored otherwise).
     Record(quintess_core::batch::Step),
     /// Open a file (or switch to it) at a page, with the search shown.
@@ -104,6 +115,8 @@ pub struct FormMergeJob {
     /// A folder for separate files, or one combined file.
     pub folder: Option<PathBuf>,
     pub combined_file: Option<PathBuf>,
+    /// For separate files: what to do when a name is taken in the folder.
+    pub existing: quintess_core::document::ExistingFiles,
 }
 
 /// Choices in the "Fill from spreadsheet" dialog.
@@ -115,11 +128,12 @@ pub struct FormMergeDialog {
     pub name_pattern: String,
     pub flatten: bool,
     pub combine: bool,
+    pub existing: quintess_core::document::ExistingFiles,
 }
 
 impl FormMergeDialog {
     pub fn new(fields: Vec<String>) -> Self {
-        Self { data_path: None, table: None, plan: None, fields, name_pattern: "{row}".into(), flatten: false, combine: false }
+        Self { data_path: None, table: None, plan: None, fields, name_pattern: "{row}".into(), flatten: false, combine: false, existing: Default::default() }
     }
 
     /// Reads a spreadsheet and matches its columns to the form's fields.
@@ -140,7 +154,7 @@ pub enum Dialog {
     ImageStamp { path: Option<PathBuf>, settings: ImageStamp, pages: String },
     Protect { user_password: String, owner_password: String, aes128: bool, allowed: AllowedActions, generated_owner: Option<String> },
     Properties { info: DocumentInfo, loaded: bool },
-    Redact { query: String, use_regex: bool, match_case: bool, presets: Vec<(String, bool)>, label: String, strip_metadata: bool, include_marks: bool, found: Option<Vec<RedactionArea>> },
+    Redact { query: String, use_regex: bool, match_case: bool, presets: Vec<(String, bool)>, label: String, strip_metadata: bool, include_marks: bool, found: Option<FoundRedactions> },
     RotatePages { pages: String, degrees: i64 },
     DeletePages { pages: String },
     ExtractPages { pages: String },
@@ -155,12 +169,18 @@ pub enum Dialog {
     Text(PendingText),
     ConfirmLink(String),
     Password { path: PathBuf, bytes: Vec<u8>, password: String, error: String },
-    UnsavedChanges { tab_index: usize, title: String },
+    /// Asks for the permissions (owner) password before protection comes off.
+    PermissionsPassword { password: String, error: String },
+    /// Asks for the password of the older version chosen for Compare.
+    ComparePassword { path: PathBuf, password: String, error: String },
+    /// Closing a document, or quitting, with changes not saved. Tabs are
+    /// named by id, since closing others moves their positions.
+    UnsavedChanges { tab_ids: Vec<u64>, titles: Vec<String>, quitting: bool },
     About,
     Preferences(quintess_core::settings::Settings),
     Optimize { preset: usize, dpi: f32, quality: u8, grayscale: bool, remove_metadata: bool },
     /// `steps` describes the chosen action's steps.
-    Batch { action: Option<PathBuf>, inputs: Vec<PathBuf>, steps: Vec<String> },
+    Batch { action: Option<PathBuf>, inputs: Vec<PathBuf>, steps: Vec<String>, run: RunChoices },
     CreateIdentity { name: String, email: String, organization: String },
     TextResult { title: String, text: String },
     SignatureResults(Vec<quintess_core::signatures::SignatureCheck>),
@@ -184,7 +204,9 @@ pub enum Dialog {
     /// Making a PDF from another kind of file, or a web page.
     Convert(Box<ConvertDialog>),
     AccessibilityResults(Vec<quintess_core::accessibility::Check>),
-    PreflightResults(Vec<quintess_core::preflight::PreflightIssue>),
+    /// After Convert to PDF/A-2b: whether the file is now marked as
+    /// PDF/A-2b, and the problems the check still lists.
+    PdfAConversion { issues: Vec<quintess_core::preflight::PreflightIssue>, marked: bool },
     ComparisonResult { summary: String, report_path: PathBuf },
     Print(PrintDialog),
     FindReplace { find: String, replace: String, use_regex: bool, match_case: bool },
@@ -193,6 +215,8 @@ pub enum Dialog {
     FolderSearch { folder: Option<PathBuf>, text: String, use_regex: bool, match_case: bool, whole_words: bool, subfolders: bool },
     FolderResults(Box<FolderResults>),
     QrCode(quintess_core::qr::FoundCode),
+    /// Asks before a certificate is trusted, naming it.
+    ConfirmTrust { certificate_der: Vec<u8>, identity: quintess_core::validation::CertificateIdentity },
     /// Asks before downloading the OCR models, when they weren't installed.
     /// Adding and removing spelling languages.
     Dictionaries { filter: String },
@@ -200,8 +224,98 @@ pub enum Dialog {
     MeasureScale { text: String, calibrated_points: Option<f32>, length: String, unit: String },
     DownloadOcrModels,
     QrResults(Vec<quintess_core::qr::FoundCode>),
-    Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
+    Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String>, run: RunChoices },
     CheckForText { texts: String },
+}
+
+/// Choices made when an action starts rather than stored in it: what to do
+/// with file names already taken (batch runs), the passwords Protect steps
+/// apply, and leave to download the OCR models. Passwords live only here,
+/// for this run, never in the action file.
+#[derive(Default)]
+pub struct RunChoices {
+    pub existing: quintess_core::document::ExistingFiles,
+    pub needs_passwords: bool,
+    pub needs_model_download: bool,
+    pub user_password: String,
+    pub owner_password: String,
+    pub allow_model_download: bool,
+}
+
+impl RunChoices {
+    /// The questions an action needs answered before it runs.
+    pub fn for_action(action: &quintess_core::batch::Action) -> Self {
+        RunChoices { needs_passwords: action.needs_passwords(), needs_model_download: action.needs_model_download(), ..Default::default() }
+    }
+
+    /// Shows the questions; `offer_existing` for runs that name their
+    /// results (a watched folder always adds a number).
+    fn show(&mut self, ui: &mut egui::Ui, offer_existing: bool) {
+        if offer_existing {
+            ui.label("When a result's file already exists");
+            ui.indent("existing files", |ui| {
+                for choice in quintess_core::document::ExistingFiles::ALL {
+                    ui.radio_value(&mut self.existing, choice, choice.label());
+                }
+            });
+        }
+        if self.needs_passwords {
+            ui.add_space(4.0);
+            ui.label(RichText::new("Passwords for the protect step").strong());
+            ui.weak("Asked for each run and never saved in the action file.");
+            egui::Grid::new("run passwords").num_columns(2).show(ui, |ui| {
+                ui.label("Owner password");
+                ui.add(egui::TextEdit::singleline(&mut self.owner_password).password(true).hint_text("lifts the restrictions (required)"));
+                ui.end_row();
+                ui.label("Open password");
+                ui.add(egui::TextEdit::singleline(&mut self.user_password).password(true).hint_text("optional"));
+                ui.end_row();
+            });
+        }
+        if self.needs_model_download {
+            ui.add_space(4.0);
+            ui.checkbox(&mut self.allow_model_download, "Download the recognition models the OCR step needs (about 12 MB, from the ocrs project)");
+        }
+    }
+
+    /// The choices for running, or why they aren't complete.
+    fn options(&self) -> anyhow::Result<quintess_core::batch::RunOptions> {
+        if self.needs_passwords && self.owner_password.is_empty() {
+            anyhow::bail!("enter the owner password for the protect step");
+        }
+        if self.needs_model_download && !self.allow_model_download {
+            anyhow::bail!("the OCR step needs the recognition models: tick the box to download them, or install them with Quintess");
+        }
+        let passwords = self.needs_passwords.then(|| quintess_core::batch::ProtectPasswords { user_password: self.user_password.clone(), owner_password: self.owner_password.clone() });
+        Ok(quintess_core::batch::RunOptions { existing: self.existing, allow_model_download: self.allow_model_download, passwords })
+    }
+}
+
+/// Loads an action chosen in the Batch or Watch dialog: its steps in words
+/// and the questions it needs answered before running.
+fn load_chosen_action(path: &std::path::Path) -> anyhow::Result<(Vec<String>, RunChoices)> {
+    let action = quintess_core::batch::Action::load(path)?;
+    Ok((action.steps.iter().map(Step::describe).collect(), RunChoices::for_action(&action)))
+}
+
+/// Matches found in the Find and redact dialog, with the search that found
+/// them: changing the search clears them, so Redact never removes the
+/// matches of a search no longer shown.
+pub struct FoundRedactions {
+    pub areas: Vec<RedactionArea>,
+    /// The text under each area, in the same order (empty over no text).
+    pub texts: Vec<String>,
+    pub search: String,
+}
+
+/// Page numbers in words: "page 2", "pages 2 and 5", "pages 2, 5 and 9".
+pub fn page_list(pages: &[u32]) -> String {
+    let numbers: Vec<String> = pages.iter().map(u32::to_string).collect();
+    match numbers.as_slice() {
+        [] => String::new(),
+        [one] => format!("page {one}"),
+        [rest @ .., last] => format!("pages {} and {last}", rest.join(", ")),
+    }
 }
 
 /// Choices in the Print dialog.
@@ -263,6 +377,9 @@ impl Dialog {
             },
             Dialog::ConfirmLink(_) => "Open link?",
             Dialog::Password { .. } => "Password required",
+            Dialog::ConfirmTrust { .. } => "Trust this certificate?",
+            Dialog::PermissionsPassword { .. } => "Permissions password required",
+            Dialog::ComparePassword { .. } => "Password required",
             Dialog::UnsavedChanges { .. } => "Unsaved changes",
             Dialog::About => "About Quintess",
             Dialog::Preferences(_) => "Preferences",
@@ -288,7 +405,7 @@ impl Dialog {
             Dialog::Convert(convert) if convert.web_page => "Create a PDF from a web page",
             Dialog::Convert(_) => "Create a PDF from a file",
             Dialog::AccessibilityResults(_) => "Accessibility check",
-            Dialog::PreflightResults(_) => "PDF/A check",
+            Dialog::PdfAConversion { .. } => "Convert to PDF/A-2b",
             Dialog::ComparisonResult { .. } => "Comparison",
             Dialog::Print(_) => "Print",
             Dialog::FindReplace { .. } => "Find and replace text",
@@ -574,12 +691,12 @@ fn redaction_check_body(ui: &mut egui::Ui, check: &quintess_core::redaction_chec
     let amber = egui::Color32::from_rgb(200, 130, 20);
     let red = egui::Color32::from_rgb(200, 50, 50);
     ui.set_min_width(560.0);
-    let (headline, color) = match check.verdict() {
-        Verdict::Clear => ("Nothing redacted was found anywhere in the file.", green),
-        Verdict::Review => ("No redacted text survives in the file, but some items need a look.", amber),
-        _ => ("Text that should be gone is still in the file.", red),
+    let color = match check.verdict() {
+        Verdict::Clear if !check.has_unchecked_places() => green,
+        Verdict::Clear | Verdict::Review => amber,
+        _ => red,
     };
-    ui.colored_label(color, RichText::new(headline).strong());
+    ui.colored_label(color, RichText::new(check.headline()).strong());
     if check.texts.is_empty() {
         ui.weak("The boxes covered no text, so only the areas themselves were checked.");
     } else {
@@ -610,7 +727,7 @@ fn redaction_check_body(ui: &mut egui::Ui, check: &quintess_core::redaction_chec
     });
     if check.verdict() == Verdict::Found {
         ui.add_space(4.0);
-        ui.label("Redact ▸ Find and redact removes text from the pages (tick \"Remove document properties and metadata too\" for the properties); the Comments, Fields, Bookmarks and Files panels remove the rest. Run the check again afterwards with Redact ▸ Check for leftover text.");
+        ui.label("Tools ▸ Redact ▸ Find and redact removes text from the pages (tick \"Remove document properties and metadata too\" for the properties); the Comments, Fields, Bookmarks and Files panels remove the rest. Run the check again afterwards with Tools ▸ Redact ▸ Check for leftover text.");
     }
     ui.separator();
     ui.horizontal(|ui| {
@@ -694,6 +811,12 @@ fn form_merge_body(ui: &mut egui::Ui, merge: &mut FormMergeDialog, tab: &mut Doc
     ui.radio_value(&mut merge.combine, true, "One combined PDF, a bookmark per copy (flattened)");
     ui.add_enabled_ui(!merge.combine, |ui| {
         ui.checkbox(&mut merge.flatten, "Flatten each copy so its values can't be changed");
+        ui.label("When a file of the same name is already in the folder");
+        ui.indent("existing copies", |ui| {
+            for choice in quintess_core::document::ExistingFiles::ALL {
+                ui.radio_value(&mut merge.existing, choice, choice.label());
+            }
+        });
     });
     if buttons(ui, &format!("Fill {} copies…", table.rows.len()), outcome) {
         form_merge::check_name_pattern(&merge.name_pattern, &table.columns)?;
@@ -708,7 +831,7 @@ fn form_merge_body(ui: &mut egui::Ui, merge: &mut FormMergeDialog, tab: &mut Doc
         };
         if folder.is_some() || combined_file.is_some() {
             let settings = form_merge::MergeSettings { name_pattern: merge.name_pattern.clone(), flatten: merge.flatten || merge.combine };
-            outcome.requests.push(AppRequest::StartFormMerge(FormMergeJob { template: tab.bytes.clone(), password: tab.password.clone(), table: table.clone(), plan: plan.clone(), settings, folder, combined_file }));
+            outcome.requests.push(AppRequest::StartFormMerge(FormMergeJob { template: tab.bytes.clone(), password: tab.password.clone(), table: table.clone(), plan: plan.clone(), settings, folder, combined_file, existing: merge.existing }));
             outcome.keep_open = false;
         }
     }
@@ -828,6 +951,24 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 });
                 ui.end_row();
             });
+            ui.add_space(6.0);
+            ui.label(RichText::new("Trusted certificates").strong());
+            let trusted = quintess_core::validation::list_trusted_certificates(&quintess_core::validation::trusted_certificates_folder());
+            if trusted.is_empty() {
+                ui.weak("None of your own. Signatures are checked against the system's and Mozilla's root certificates; Trust in a signature's results adds one here.");
+            }
+            egui::ScrollArea::vertical().max_height(140.0).id_salt("trusted certificates").show(ui, |ui| {
+                for certificate in &trusted {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Remove").on_hover_text("Stop trusting this certificate (takes effect at once)").clicked() {
+                            outcome.requests.push(AppRequest::RemoveTrustedCertificate(certificate.thumbprint.clone()));
+                        }
+                        ui.label(&certificate.name);
+                        let until = certificate.expires.get(..10).unwrap_or(&certificate.expires);
+                        ui.weak(format!("until {until} · SHA-256 {}…", certificate.thumbprint.get(..16).unwrap_or(&certificate.thumbprint).to_uppercase()));
+                    });
+                }
+            });
             if buttons(ui, "Save", outcome) {
                 outcome.requests.push(AppRequest::SettingsChanged(settings.clone()));
                 outcome.keep_open = false;
@@ -930,7 +1071,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             return Ok(());
         }
         Dialog::CreateIdentity { name, email, organization } => {
-            ui.label("A self-signed identity lets you sign documents. Readers will show your signature as intact but your identity as unverified, unless they choose to trust it.");
+            ui.label("A self-signed identity lets you sign documents, and receive documents encrypted for your certificate. Readers will show your signature as intact but your identity as unverified, unless they choose to trust it.");
+            ui.colored_label(egui::Color32::from_rgb(200, 90, 30), "The identity file holds your private key, unencrypted. Keep it private: anyone with a copy can sign as you and open documents encrypted for you.");
             egui::Grid::new("identity").num_columns(2).show(ui, |ui| {
                 ui.label("Name");
                 ui.text_edit_singleline(name);
@@ -947,21 +1089,22 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     anyhow::bail!("enter your name");
                 }
                 if let Some(path) = rfd::FileDialog::new().add_filter("Quintess identity", &["json"]).set_file_name(format!("{} signing identity.json", name.trim())).save_file() {
-                    quintess_core::signatures::SigningIdentity::self_signed(name.trim(), email.trim(), organization.trim())?.save(&path)?;
+                    // RSA, so the same identity signs and receives encrypted documents.
+                    quintess_core::signatures::SigningIdentity::create(name.trim(), email.trim(), organization.trim())?.save(&path)?;
                     outcome.requests.push(AppRequest::IdentityCreated(path));
                     outcome.keep_open = false;
                 }
             }
             return Ok(());
         }
-        Dialog::Batch { action, inputs, steps } => {
+        Dialog::Batch { action, inputs, steps, run } => {
             ui.label("An action is a list of steps, such as OCR, redaction, watermark and optimize, run on every file. Record one with Tools ▸ Record an action.");
             ui.horizontal(|ui| -> anyhow::Result<()> {
                 if ui.button("Choose action…").clicked() {
                     *action = rfd::FileDialog::new().add_filter("Action", &["json"]).pick_file();
-                    *steps = match action {
-                        Some(path) => quintess_core::batch::Action::load(path)?.steps.iter().map(quintess_core::batch::Step::describe).collect(),
-                        None => Vec::new(),
+                    (*steps, *run) = match action {
+                        Some(path) => load_chosen_action(path)?,
+                        None => (Vec::new(), RunChoices::default()),
                     };
                 }
                 ui.label(action.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "No action chosen".into()));
@@ -979,6 +1122,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 }
                 ui.label(format!("{} files", inputs.len()));
             });
+            ui.add_space(4.0);
+            run.show(ui, true);
             ui.collapsing("Example action", |ui| {
                 ui.monospace("{ \"steps\": [\n  { \"step\": \"ocr\" },\n  { \"step\": \"redact\", \"sensitive\": true },\n  { \"step\": \"watermark\", \"text\": \"DRAFT\" },\n  { \"step\": \"optimize\", \"preset\": \"smallest\" }\n], \"suffix\": \"-processed\" }");
             });
@@ -987,7 +1132,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 if inputs.is_empty() {
                     anyhow::bail!("choose files to process");
                 }
-                outcome.requests.push(AppRequest::StartBatch { action, inputs: inputs.clone() });
+                let options = run.options()?;
+                outcome.requests.push(AppRequest::StartBatch { action, inputs: inputs.clone(), options });
                 outcome.keep_open = false;
             }
             return Ok(());
@@ -1025,8 +1171,8 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             }
             return Ok(());
         }
-        Dialog::Watch { folder, action, output, steps } => {
-            ui.label("While Quintess is open, PDFs dropped into the folder are run through an action and saved to the results folder. Originals move to a \"Processed\" folder inside it (or \"Failed\", with a note saying why).");
+        Dialog::Watch { folder, action, output, steps, run } => {
+            ui.label("While Quintess is open, PDFs dropped into the folder are run through an action and saved to the results folder (a result whose name is taken gets a number). Originals move to a \"Processed\" folder inside the watched folder (or \"Failed\", with a note saying why).");
             egui::Grid::new("watch").num_columns(2).show(ui, |ui| -> anyhow::Result<()> {
                 if ui.button("Folder to watch…").clicked() {
                     if let Some(chosen) = rfd::FileDialog::new().set_title("Folder to watch").pick_folder() {
@@ -1037,9 +1183,9 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 ui.end_row();
                 if ui.button("Action…").clicked() {
                     *action = rfd::FileDialog::new().add_filter("Action", &["json"]).pick_file();
-                    *steps = match action {
-                        Some(path) => quintess_core::batch::Action::load(path)?.steps.iter().map(quintess_core::batch::Step::describe).collect(),
-                        None => Vec::new(),
+                    (*steps, *run) = match action {
+                        Some(path) => load_chosen_action(path)?,
+                        None => (Vec::new(), RunChoices::default()),
                     };
                 }
                 ui.label(action.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "none chosen (record one with Tools ▸ Record an action)".into()));
@@ -1055,10 +1201,12 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             for (number, step) in steps.iter().enumerate() {
                 ui.weak(format!("{}. {step}", number + 1));
             }
+            run.show(ui, false);
             if buttons(ui, "Start watching", outcome) {
                 let folder = folder.clone().ok_or_else(|| anyhow::anyhow!("choose the folder to watch"))?;
                 let action = action.clone().ok_or_else(|| anyhow::anyhow!("choose the action to run"))?;
-                outcome.requests.push(AppRequest::StartWatch { folder, action, output: output.clone() });
+                let options = run.options()?;
+                outcome.requests.push(AppRequest::StartWatch { folder, action, output: output.clone(), options });
                 outcome.keep_open = false;
             }
             return Ok(());
@@ -1170,11 +1318,14 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                                 }
                             });
                         }
-                        if !check.trusted {
+                        // Trust can't mend a signature whose bytes changed, so it isn't offered there.
+                        if !check.trusted && check.verdict != SignatureVerdict::Invalid {
                             if let Some(top) = check.chain.last() {
                                 if ui.button(format!("Trust {}…", top.name)).on_hover_text("Trust this certificate from now on, for every document it signs").clicked() {
-                                    outcome.requests.push(AppRequest::TrustCertificate(top.der.clone()));
-                                    outcome.keep_open = false;
+                                    match quintess_core::validation::certificate_identity(&top.der) {
+                                        Ok(identity) => outcome.requests.push(AppRequest::OpenDialog(Box::new(Dialog::ConfirmTrust { certificate_der: top.der.clone(), identity }))),
+                                        Err(error) => outcome.error = Some(format!("{error:#}")),
+                                    }
                                 }
                             }
                         }
@@ -1258,20 +1409,22 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             return Ok(());
         }
-        Dialog::PreflightResults(issues) => {
-            if issues.is_empty() {
-                ui.label("No PDF/A problems were found by this check. A full validator such as veraPDF examines more rules.");
-            }
+        Dialog::PdfAConversion { issues, marked } => {
+            let headline = match (*marked, issues.is_empty()) {
+                (true, true) => "Converted and marked as PDF/A-2b. Save to keep it.",
+                (true, false) => "Converted and marked as PDF/A-2b; save to keep it. The check still lists these items, which Quintess could not settle:",
+                (false, _) => "Converted what could be fixed, but the document is not marked as PDF/A-2b, because these problems remain:",
+            };
+            ui.label(RichText::new(headline).strong());
             for issue in issues.iter() {
                 ui.label(RichText::new(issue.rule).strong());
                 ui.label(&issue.detail);
                 ui.add_space(4.0);
             }
+            if *marked {
+                ui.weak("A full validator such as veraPDF examines more rules than this check.");
+            }
             ui.horizontal(|ui| {
-                if issues.iter().any(|i| i.fixable) && ui.button("Convert to PDF/A-2b").clicked() {
-                    outcome.requests.push(AppRequest::ConvertToPdfA);
-                    outcome.keep_open = false;
-                }
                 if ui.button("Close").clicked() {
                     outcome.keep_open = false;
                 }
@@ -1316,11 +1469,77 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             }
             return Ok(());
         }
-        Dialog::UnsavedChanges { tab_index, title } => {
-            ui.label(format!("{title} has changes that are not saved."));
+        Dialog::ConfirmTrust { certificate_der, identity } => {
+            ui.set_max_width(560.0);
+            ui.label("From now on, every signature made with this certificate, or with a certificate it issued, will show as valid. Trust it only if you know it belongs to who it names, for example by comparing the fingerprint with the signer over the phone.");
+            ui.add_space(4.0);
+            egui::Grid::new("trust certificate").num_columns(2).show(ui, |ui| {
+                ui.strong("Issued to");
+                ui.label(&identity.subject);
+                ui.end_row();
+                ui.strong("Issued by");
+                ui.label(if identity.issuer == identity.subject { "itself (self-signed)".to_string() } else { identity.issuer.clone() });
+                ui.end_row();
+                ui.strong("SHA-256 fingerprint");
+                ui.monospace(&identity.fingerprint);
+                ui.end_row();
+            });
+            ui.weak("Edit ▸ Preferences lists the certificates you trust, and removes them.");
+            if buttons(ui, "Trust", outcome) {
+                outcome.requests.push(AppRequest::TrustCertificate(certificate_der.clone()));
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::ComparePassword { path, password, error } => {
+            ui.label(format!("{} is protected. Enter its password to compare with it.", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
+            let response = ui.add(egui::TextEdit::singleline(password).password(true).desired_width(f32::INFINITY));
+            response.request_focus();
+            if !error.is_empty() {
+                ui.colored_label(egui::Color32::from_rgb(200, 60, 60), error.as_str());
+            }
+            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if buttons(ui, "Compare", outcome) || pressed_enter {
+                outcome.requests.push(AppRequest::CompareWithPassword { path: path.clone(), password: password.clone() });
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::PermissionsPassword { password, error } => {
+            ui.label("This file's author restricted what readers may do. Enter its permissions password to remove the protection.");
+            let response = ui.add(egui::TextEdit::singleline(password).password(true).desired_width(f32::INFINITY));
+            response.request_focus();
+            if !error.is_empty() {
+                ui.colored_label(egui::Color32::from_rgb(200, 60, 60), error.as_str());
+            }
+            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if buttons(ui, "Remove protection", outcome) || pressed_enter {
+                outcome.requests.push(AppRequest::RemoveProtection { owner_password: password.clone() });
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::UnsavedChanges { tab_ids, titles, quitting } => {
+            if let [title] = titles.as_slice() {
+                ui.label(format!("{title} has changes that are not saved."));
+            } else {
+                ui.label("These documents have changes that are not saved:");
+                for title in titles.iter() {
+                    ui.label(format!("  • {title}"));
+                }
+            }
+            if *quitting {
+                ui.weak("Quintess closes once you choose.");
+            }
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
+                let save_label = if titles.len() > 1 { "Save all" } else { "Save" };
+                if crate::theme::primary_button(ui, save_label).clicked() {
+                    outcome.requests.push(AppRequest::SaveAndClose { tab_ids: tab_ids.clone(), quitting: *quitting });
+                    outcome.keep_open = false;
+                }
                 if ui.button("Close without saving").clicked() {
-                    outcome.requests.push(AppRequest::CloseTabDiscarding(*tab_index));
+                    outcome.requests.push(AppRequest::CloseDiscarding { tab_ids: tab_ids.clone(), quitting: *quitting });
                     outcome.keep_open = false;
                 }
                 if ui.button("Cancel").clicked() {
@@ -1613,9 +1832,16 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.checkbox(&mut allowed.assemble_pages, "Insert, rotate and delete pages");
             allowed.print_high_quality = allowed.print;
             ui.checkbox(aes128, "Use AES-128 for readers older than Acrobat 9");
+            if tab.certificate_protection.is_some() {
+                ui.colored_label(egui::Color32::from_rgb(200, 90, 30), "This replaces the certificate encryption chosen earlier: a file has one kind of protection, and the last one chosen is used.");
+            } else {
+                ui.weak("A file has one kind of protection: this replaces any certificate encryption.");
+            }
             if buttons(ui, "Protect", outcome) {
                 let owner = if owner_password.is_empty() { security::random_password() } else { owner_password.clone() };
                 tab.protection = Some(ProtectionSettings { user_password: user_password.clone(), owner_password: owner.clone(), cipher: if *aes128 { Cipher::Aes128 } else { Cipher::Aes256 }, allowed: allowed.clone(), leave_metadata_unencrypted: false });
+                // Whichever protection was chosen last wins.
+                tab.certificate_protection = None;
                 tab.dirty = true;
                 outcome.requests.push(AppRequest::Status("Protection will be applied when you save.".into()));
                 if owner_password.is_empty() {
@@ -1698,6 +1924,12 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             ui.checkbox(strip_metadata, "Remove document properties and metadata too");
             ui.separator();
+            // Everything that decides the matches; a change clears them.
+            let chosen_presets: Vec<&str> = presets.iter().filter(|(_, on)| *on).map(|(name, _)| name.as_str()).collect();
+            let search = format!("{query}\u{1}{use_regex}\u{1}{match_case}\u{1}{include_marks}\u{1}{}", chosen_presets.join("\u{1}"));
+            if found.as_ref().is_some_and(|found| found.search != search) {
+                *found = None;
+            }
             if ui.button("Find matches").clicked() {
                 let mut patterns = Vec::new();
                 if !query.trim().is_empty() {
@@ -1716,20 +1948,54 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 if *include_marks {
                     areas.extend(redact::marked_areas(&tab.load_pdf()?));
                 }
-                *found = Some(areas);
+                let texts = match tab.pdfium_document() {
+                    Some(document) => quintess_core::redaction_check::area_texts(document, &areas)?,
+                    None => vec![String::new(); areas.len()],
+                };
+                *found = Some(FoundRedactions { areas, texts, search });
             }
-            if let Some(areas) = found {
-                let pages: std::collections::BTreeSet<u32> = areas.iter().map(|a| a.page).collect();
-                ui.label(format!("{} areas on {} pages will be removed permanently.", areas.len(), pages.len()));
-                if !areas.is_empty() {
-                    ui.colored_label(egui::Color32::from_rgb(200, 90, 30), "This cannot be undone once the file is saved. Keep a copy of the original.");
+            let warning = egui::Color32::from_rgb(200, 90, 30);
+            match found.as_ref() {
+                Some(matches) => {
+                    let pages: std::collections::BTreeSet<u32> = matches.areas.iter().map(|a| a.page).collect();
+                    let area_word = if matches.areas.len() == 1 { "area" } else { "areas" };
+                    let page_word = if pages.len() == 1 { "page" } else { "pages" };
+                    ui.label(format!("{} {area_word} on {} {page_word} will be removed permanently:", matches.areas.len(), pages.len()));
+                    egui::ScrollArea::vertical().max_height(150.0).id_salt("redaction matches").show(ui, |ui| {
+                        for (area, text) in matches.areas.iter().zip(&matches.texts) {
+                            let shown = if text.is_empty() { "(a marked area with no text)" } else { text.as_str() };
+                            ui.horizontal(|ui| {
+                                ui.weak(format!("Page {}", area.page));
+                                ui.label(shown);
+                            });
+                        }
+                    });
+                    if !matches.areas.is_empty() {
+                        ui.colored_label(warning, "This cannot be undone once the file is saved. Keep a copy of the original.");
+                    }
+                }
+                None => {
+                    ui.weak("Press Find matches to see what will be removed.");
                 }
             }
-            if buttons(ui, "Redact", outcome) {
-                let areas = found.clone().unwrap_or_default();
-                if areas.is_empty() {
-                    anyhow::bail!("press Find matches first, or nothing matched");
+            if tab.signed {
+                ui.colored_label(warning, "This document is signed. Redacting rewrites it so nothing removed stays inside, which invalidates its signatures.");
+            }
+            let can_redact = found.as_ref().is_some_and(|matches| !matches.areas.is_empty());
+            ui.separator();
+            let mut redact_pressed = false;
+            ui.horizontal(|ui| {
+                let response = ui.add_enabled_ui(can_redact, |ui| crate::theme::primary_button(ui, "Redact")).inner;
+                if response.on_disabled_hover_text("Press Find matches first").clicked() {
+                    redact_pressed = true;
                 }
+                if ui.button("Cancel").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
+            if redact_pressed {
+                let Some(matches) = found.as_ref() else { return Ok(()) };
+                let areas = matches.areas.clone();
                 let settings = RedactionSettings { overlay_text: label.clone(), remove_metadata: *strip_metadata, ..Default::default() };
                 // What lies under the boxes now, to look for everywhere afterwards.
                 let texts = match tab.pdfium_document() {
@@ -1744,7 +2010,9 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 if let Some(report) = report {
                     let mut message = format!("Redacted: {} characters, {} images changed, {} removed, {} annotations removed.", report.glyphs_removed, report.images_altered, report.images_removed, report.annotations_removed);
                     if !report.pages_rasterized.is_empty() {
-                        message.push_str(&format!(" Pages {:?} were flattened to images to guarantee removal.", report.pages_rasterized));
+                        let pages = page_list(&report.pages_rasterized);
+                        let verb = if report.pages_rasterized.len() == 1 { "was" } else { "were" };
+                        message.push_str(&format!(" To be sure nothing shows through, {pages} {verb} turned into pictures."));
                     }
                     outcome.requests.push(AppRequest::Status(message));
                 }
@@ -1998,8 +2266,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     2 => Step::Optimize { preset: "smallest".into() },
                     _ => Step::OptimizeCustom { settings: settings.clone() },
                 };
-                outcome.requests.push(AppRequest::StartOptimize(settings));
-                outcome.requests.push(AppRequest::Record(step));
+                outcome.requests.push(AppRequest::StartOptimize { settings, step });
                 outcome.keep_open = false;
             }
         }
@@ -2291,7 +2558,7 @@ impl SignDialog {
         if self.source == SignSource::OwnIdentity {
             ui.horizontal(|ui| {
                 ui.add_space(20.0);
-                ui.label(self.identity_file.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "none yet: create one in Protect ▸ Create signing identity".into()));
+                ui.label(self.identity_file.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "none yet: create one in Tools ▸ Sign ▸ Create signing identity".into()));
                 if ui.button("Choose…").clicked() {
                     if let Some(path) = rfd::FileDialog::new().add_filter("Quintess identity", &["json"]).pick_file() {
                         self.identity_file = Some(path);
@@ -2345,12 +2612,21 @@ impl ConvertDialog {
     pub fn new(web_page: bool, file: Option<std::path::PathBuf>) -> Self {
         let providers = quintess_core::conversion::available_providers();
         let mut dialog = ConvertDialog { web_page, file, address: String::new(), providers, provider: None, allow_office: false };
-        dialog.provider = dialog.suitable().first().map(|info| info.provider);
-        // Prefer a higher-fidelity converter when one is installed.
-        if let Some(better) = dialog.suitable().into_iter().find(|info| info.provider != quintess_core::conversion::Provider::BuiltIn && info.provider != quintess_core::conversion::Provider::MicrosoftOffice) {
-            dialog.provider = Some(better.provider);
-        }
+        dialog.provider = dialog.preferred_provider();
         dialog
+    }
+
+    /// The converter to start with: the most faithful installed one for
+    /// this kind of file (LibreOffice for documents, the built-in one for
+    /// plain text), except Microsoft Office, which is used only when chosen
+    /// by hand.
+    fn preferred_provider(&self) -> Option<quintess_core::conversion::Provider> {
+        use quintess_core::conversion::Provider;
+        let suitable = self.suitable();
+        let installed = |provider: Provider| provider != Provider::MicrosoftOffice && suitable.iter().any(|info| info.provider == provider);
+        let by_preference = self.format().and_then(|format| format.preference().iter().copied().find(|provider| installed(*provider)));
+        let any_but_office = || suitable.iter().map(|info| info.provider).filter(|provider| *provider != Provider::MicrosoftOffice);
+        by_preference.or_else(|| any_but_office().find(|provider| *provider != Provider::BuiltIn)).or_else(|| any_but_office().next()).or(suitable.first().map(|info| info.provider))
     }
 
     fn format(&self) -> Option<quintess_core::conversion::InputFormat> {
@@ -2383,11 +2659,10 @@ impl ConvertDialog {
                     ui.weak(format.description());
                 }
                 if ui.button("Choose…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().add_filter("Documents", &["docx", "doc", "odt", "rtf", "xlsx", "xls", "xlsb", "ods", "csv", "tsv", "pptx", "ppt", "odp", "html", "htm", "md", "txt"]).pick_file() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Documents and pictures", quintess_core::conversion::InputFormat::EXTENSIONS).pick_file() {
                         self.file = Some(path);
-                        let suitable = self.suitable();
-                        if !suitable.iter().any(|info| Some(info.provider) == self.provider) {
-                            self.provider = suitable.first().map(|info| info.provider);
+                        if !self.suitable().iter().any(|info| Some(info.provider) == self.provider) {
+                            self.provider = self.preferred_provider();
                         }
                     }
                 }
@@ -2396,7 +2671,9 @@ impl ConvertDialog {
         ui.add_space(6.0);
         ui.label(RichText::new("Converter").strong());
         let suitable = self.suitable();
-        if suitable.is_empty() {
+        if suitable.is_empty() && self.web_page {
+            ui.label("Web pages are printed with Microsoft Edge or Google Chrome, and neither was found. Install one of them to make PDFs from web pages.");
+        } else if suitable.is_empty() {
             ui.label("No installed converter handles this kind of file. Installing LibreOffice (free) adds presentations, older Office files and more.");
         }
         for info in &suitable {
@@ -2414,7 +2691,13 @@ impl ConvertDialog {
         if self.provider == Some(Provider::MicrosoftOffice) {
             ui.checkbox(&mut self.allow_office, "Let Quintess open this document in Microsoft Office to convert it");
         }
-        ui.weak("Converters run with the network blocked for files on your computer and are stopped after two minutes. Quintess says which one it used and what it left out.");
+        let network_note = match self.provider {
+            _ if self.web_page => "The browser fetches the page from the internet.",
+            Some(Provider::MicrosoftOffice) => "Microsoft Office opens the document as it normally would, network included.",
+            Some(Provider::BuiltIn) => "The built-in converter never uses the network.",
+            _ => "It runs with the network blocked.",
+        };
+        ui.weak(format!("{network_note} Converters are stopped after two minutes. Quintess says which one it used and what it left out."));
     }
 
     fn check(&self) -> anyhow::Result<()> {

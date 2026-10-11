@@ -82,6 +82,26 @@ mod hard_cases {
     }
 
     #[test]
+    fn a_flattened_page_keeps_the_box_label() {
+        let width = 612u32;
+        let height = 792u32;
+        let row_bytes = width.div_ceil(8) as usize;
+        let image = Stream::new(dictionary! { "Type" => "XObject", "Subtype" => "Image", "Width" => width as i64, "Height" => height as i64, "ColorSpace" => "DeviceGray", "BitsPerComponent" => 1 }, vec![0u8; row_bytes * height as usize]);
+        let mut pdf = page("q 612 0 0 792 0 0 cm /Im Do Q", Some(image));
+        let settings = RedactionSettings { overlay_text: "REDACTED".into(), ..Default::default() };
+        let report = apply_redactions(&mut pdf, &[RedactionArea { page: 1, rect: [100.0, 600.0, 300.0, 700.0] }], &settings).unwrap();
+        assert_eq!(report.pages_rasterized, [1], "{report:?}");
+        let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();
+        let document = engine::open_document(bytes, None).unwrap();
+        let text = engine::page_text(&document, 0).unwrap();
+        let label = text.find(&regex::Regex::new("REDACTED").unwrap());
+        assert_eq!(label.len(), 1, "the label is on the flattened page");
+        // Inside the box, which spans 600 to 700 up the page.
+        let rect = label[0].rects[0];
+        assert!(rect[0] >= 100.0 && rect[2] <= 300.0 && rect[1] >= 600.0 && rect[3] <= 700.0, "{rect:?}");
+    }
+
+    #[test]
     fn shapes_reaching_into_a_box_are_cut_or_flattened() {
         // A simple rectangle crossing the box's edge is clipped to outside the box.
         let mut pdf = page("0 g 50 650 300 40 re f", None);

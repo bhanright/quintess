@@ -114,6 +114,33 @@ fn passwords_are_required_after_protection() {
 }
 
 #[test]
+fn the_owner_password_is_recognized_after_opening_and_editing() {
+    use quintess_core::security::{AllowedActions, Cipher, is_owner_password, restricts_permissions};
+    for cipher in [Cipher::Aes256, Cipher::Aes128] {
+        for user_password in ["", "open sesame"] {
+            let mut pdf = text_to_pdf("Secret plans.", &TextPageSettings::default()).unwrap();
+            let settings = ProtectionSettings { user_password: user_password.into(), owner_password: "boss".into(), cipher, allowed: AllowedActions { print: false, ..Default::default() }, leave_metadata_unencrypted: false };
+            protect(&mut pdf, &settings).unwrap();
+            let bytes = pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false }).unwrap();
+            let opened = Pdf::from_bytes(&bytes, Some(user_password).filter(|p| !p.is_empty())).unwrap();
+            let encryption = opened.original_encryption().expect("opened as protected");
+            assert!(restricts_permissions(&encryption));
+            // After an edit (the app re-reads its saved bytes) the check still holds.
+            let mut edited = opened;
+            quintess_core::pages::rotate_pages(&mut edited, &[1], 90).unwrap();
+            let edited = Pdf::from_bytes(&edited.to_bytes(&SaveSettings::default()).unwrap(), None).unwrap();
+            assert!(is_owner_password(&edited, &encryption, "boss"), "{cipher:?}, user password {user_password:?}");
+            assert!(!is_owner_password(&edited, &encryption, "wrong"), "{cipher:?}");
+            assert!(!is_owner_password(&edited, &encryption, user_password), "the open password is not the owner's ({cipher:?})");
+        }
+    }
+    let mut open_only = text_to_pdf("Secret plans.", &TextPageSettings::default()).unwrap();
+    protect(&mut open_only, &ProtectionSettings { user_password: "open".into(), owner_password: "boss".into(), ..Default::default() }).unwrap();
+    let bytes = open_only.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false }).unwrap();
+    assert!(!restricts_permissions(&Pdf::from_bytes(&bytes, Some("open")).unwrap().original_encryption().unwrap()));
+}
+
+#[test]
 fn search_finds_text_with_positions() {
     let mut pdf = text_to_pdf("Invoice number 12345\nTotal due: $99.50", &TextPageSettings::default()).unwrap();
     let bytes = pdf.to_bytes(&SaveSettings::default()).unwrap();

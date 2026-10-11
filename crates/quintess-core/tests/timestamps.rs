@@ -8,7 +8,7 @@ use quintess_core::validation::TrustStore;
 use support::{FakeServices, LeafOptions, Pki, TSA_URL, sample_document};
 
 fn trusting(pki: &Pki) -> VerifyOptions {
-    VerifyOptions { trust: TrustStore::empty().with_certificate(pki.root.der.clone()), now: chrono::Utc::now() }
+    VerifyOptions { trust: TrustStore::empty().with_certificate(pki.root.der.clone()), now: chrono::Utc::now(), password: None }
 }
 
 fn timestamped() -> SignOptions {
@@ -31,7 +31,7 @@ fn a_signature_carries_a_timestamp_token_over_its_signature_value() {
     assert!(check.reasons.iter().any(|r| r.contains("timestamped by Quintess Test Timestamp Authority")), "{:?}", check.reasons);
 
     // Without trusting the root, the signature is intact but the timestamp is not trusted.
-    let check = &verify_with(&signed, &VerifyOptions { trust: TrustStore::empty(), now: chrono::Utc::now() }).unwrap()[0];
+    let check = &verify_with(&signed, &VerifyOptions { trust: TrustStore::empty(), now: chrono::Utc::now(), password: None }).unwrap()[0];
     assert!(check.timestamp.as_ref().unwrap().intact && !check.timestamp.as_ref().unwrap().trusted);
     assert_eq!(check.verdict, SignatureVerdict::ValidButUntrusted);
 }

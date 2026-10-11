@@ -56,10 +56,13 @@ impl QuintessApp {
             return;
         };
         let descriptions: Vec<String> = steps.iter().map(Step::describe).collect();
-        let result = Action::new(steps).save(&path);
+        let action = Action::new(steps);
+        let run = crate::dialogs::RunChoices::for_action(&action);
+        let result = action.save(&path);
         if self.report(result).is_some() {
-            self.info(format!("Saved the action to {}. Choose files to run it on.", path.display()));
-            self.dialogs.push(Dialog::Batch { action: Some(path), inputs: Vec::new(), steps: descriptions });
+            let passwords_note = if run.needs_passwords { " Its protect step asks for the passwords each time it runs; they aren't saved in the file." } else { "" };
+            self.info(format!("Saved the action to {}.{passwords_note} Choose files to run it on.", path.display()));
+            self.dialogs.push(Dialog::Batch { action: Some(path), inputs: Vec::new(), steps: descriptions, run });
         }
     }
 

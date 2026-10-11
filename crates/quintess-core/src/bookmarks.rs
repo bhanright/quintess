@@ -190,3 +190,109 @@ pub fn flatten_bookmarks(entries: &[BookmarkEntry]) -> Vec<(usize, &BookmarkEntr
     walk(entries, 0, &mut output);
     output
 }
+
+// Editing the tree in the Bookmarks panel. A bookmark is named by its path:
+// its index at the top level, then among its parent's children, and so on.
+
+/// Adds a top-level bookmark before the first one that points to a later
+/// page, leaving the order of the others as it was (even an order set by
+/// hand that isn't by page).
+pub fn insert_by_page(entries: &mut Vec<BookmarkEntry>, entry: BookmarkEntry) {
+    let position = entries.iter().position(|existing| existing.page > entry.page).unwrap_or(entries.len());
+    entries.insert(position, entry);
+}
+
+/// The list holding the bookmark at `path`, and its index there.
+fn parent_list<'a>(entries: &'a mut Vec<BookmarkEntry>, path: &[usize]) -> Option<(&'a mut Vec<BookmarkEntry>, usize)> {
+    match path {
+        [] => None,
+        [index] => (*index < entries.len()).then_some((entries, *index)),
+        [first, rest @ ..] => parent_list(&mut entries.get_mut(*first)?.children, rest),
+    }
+}
+
+/// Removes the bookmark at `path`. With `keep_children`, the bookmarks
+/// under it take its place; otherwise they go with it.
+pub fn remove_bookmark(entries: &mut Vec<BookmarkEntry>, path: &[usize], keep_children: bool) -> Option<BookmarkEntry> {
+    let (list, index) = parent_list(entries, path)?;
+    let mut removed = list.remove(index);
+    if keep_children {
+        let children = std::mem::take(&mut removed.children);
+        list.splice(index..index, children);
+    }
+    Some(removed)
+}
+
+/// Gives the bookmark at `path` a new title (blank titles are refused).
+pub fn rename_bookmark(entries: &mut Vec<BookmarkEntry>, path: &[usize], title: &str) -> bool {
+    let title = title.trim();
+    match parent_list(entries, path) {
+        Some((list, index)) if !title.is_empty() => {
+            list[index].title = title.to_string();
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Moves the bookmark at `path` one place up or down among its siblings,
+/// with the bookmarks under it. Returns its new path.
+pub fn move_bookmark(entries: &mut Vec<BookmarkEntry>, path: &[usize], up: bool) -> Option<Vec<usize>> {
+    let (list, index) = parent_list(entries, path)?;
+    let target = if up { index.checked_sub(1)? } else { index + 1 };
+    if target >= list.len() {
+        return None;
+    }
+    list.swap(index, target);
+    let mut moved = path.to_vec();
+    *moved.last_mut()? = target;
+    Some(moved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(title: &str, page: u32, children: Vec<BookmarkEntry>) -> BookmarkEntry {
+        BookmarkEntry { title: title.into(), page, children }
+    }
+
+    fn titles(entries: &[BookmarkEntry]) -> Vec<&str> {
+        entries.iter().map(|e| e.title.as_str()).collect()
+    }
+
+    #[test]
+    fn adding_keeps_an_order_set_by_hand() {
+        // Appendix first on purpose, though it points to page 9.
+        let mut entries = vec![entry("Appendix", 9, vec![]), entry("Intro", 1, vec![]), entry("Body", 4, vec![])];
+        insert_by_page(&mut entries, entry("Summary", 6, vec![]));
+        assert_eq!(titles(&entries), ["Summary", "Appendix", "Intro", "Body"], "goes before the first later page, nothing re-sorted");
+        let mut ordered = vec![entry("Intro", 1, vec![]), entry("Body", 4, vec![])];
+        insert_by_page(&mut ordered, entry("Middle", 2, vec![]));
+        insert_by_page(&mut ordered, entry("End", 8, vec![]));
+        assert_eq!(titles(&ordered), ["Intro", "Middle", "Body", "End"]);
+    }
+
+    #[test]
+    fn parents_can_be_deleted_renamed_and_moved() {
+        let tree = || vec![entry("Part 1", 1, vec![entry("Chapter 1", 1, vec![]), entry("Chapter 2", 3, vec![])]), entry("Part 2", 5, vec![])];
+        let mut kept = tree();
+        remove_bookmark(&mut kept, &[0], true).unwrap();
+        assert_eq!(titles(&kept), ["Chapter 1", "Chapter 2", "Part 2"], "the children take its place");
+        let mut gone = tree();
+        remove_bookmark(&mut gone, &[0], false).unwrap();
+        assert_eq!(titles(&gone), ["Part 2"]);
+        let mut renamed = tree();
+        assert!(rename_bookmark(&mut renamed, &[0, 1], "  The second chapter "));
+        assert_eq!(renamed[0].children[1].title, "The second chapter");
+        assert!(!rename_bookmark(&mut renamed, &[0, 1], "   "), "a blank title is refused");
+        let mut moved = tree();
+        assert_eq!(move_bookmark(&mut moved, &[1], true), Some(vec![0]));
+        assert_eq!(titles(&moved), ["Part 2", "Part 1"]);
+        assert_eq!(moved[1].children.len(), 2, "its children move with it");
+        assert_eq!(move_bookmark(&mut moved, &[0], true), None, "already first");
+        assert_eq!(move_bookmark(&mut moved, &[1, 0], false), Some(vec![1, 1]));
+        assert_eq!(titles(&moved[1].children), ["Chapter 2", "Chapter 1"]);
+        assert!(remove_bookmark(&mut moved, &[7], false).is_none());
+    }
+}

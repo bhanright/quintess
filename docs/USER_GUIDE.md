@@ -67,11 +67,11 @@ Quintess saves through a temporary file that replaces the old one at the end, wh
 
 **Keep a copy of the original** before work that removes content for good: redaction, flattening, replacing tags, **Smallest** compression and recorded actions run on many files. The safest habit is **Save as…** under a new name before you start.
 
-Closing a tab with unsaved changes asks first. Quitting Quintess (File ▸ Quit or the window's close button) does not ask, so save your documents before you quit.
+Closing a tab with unsaved changes asks first: **Save**, **Close without saving** or **Cancel**. Quitting Quintess (File ▸ Quit or the window's close button) asks once for all the documents with unsaved changes, listing them, with **Save all**, **Close without saving** and **Cancel**. If a save is canceled or fails, nothing is closed.
 
 ## Studio and Classic
 
-Quintess has two looks. **Studio** (the default) has a slim header with the menus and a command field, and a floating dock of tools at the bottom of the page. **Classic** has a traditional menu bar and toolbar. Switch in **Edit ▸ Preferences…** under **Look**, or with **View ▸ Studio or classic look**. Both looks have dark and light modes (**View ▸ Dark interface**).
+Quintess has two looks. **Studio** (the default) has a slim header with the menus and a command field, and a floating dock of tools at the bottom of the page. **Classic** has a traditional menu bar and toolbar. Switch in **Edit ▸ Preferences…** under **Look**, with **View ▸ Studio look**, or with **Studio or classic look** in the command palette. Both looks have dark and light modes (**View ▸ Dark interface**). The View menu shows these and the other display toggles (split view, organizing pages, the sidebar, night reading) as checkboxes.
 
 In Studio, the dock holds the common tools. **More tools** (the ⋯ button) holds the rest, and **Organize pages** is at its right end.
 
@@ -116,10 +116,10 @@ With the **Select** tool, drag across text to select it, then press **Ctrl+C** (
 
 The sidebar's **Bookmarks** section lists the document's bookmarks; click one to go to its page.
 
-- To add one, go to the page, type a title in the **New bookmark title** field and click **Add**. New bookmarks go at the top level, in page order.
-- To delete one, right-click it and choose **Delete bookmark**. A bookmark that has others nested under it can't be deleted this way.
+- To add one, go to the page, type a title in the **New bookmark title** field and click **Add**. It goes at the top level, before the first bookmark that points to a later page; the others keep their order.
+- Right-click a bookmark to **Rename** it (type the new title and press Enter; Esc leaves it as it was), **Move up** or **Move down** among the bookmarks at its level (with any nested under it), or delete it. A bookmark with others nested under it offers **Delete, keeping the bookmarks under it** (they take its place) and **Delete with the bookmarks under it**.
 
-Quintess can't rename, move or nest bookmarks yet.
+Quintess can't nest a bookmark under another yet.
 
 ## Searching
 
@@ -131,7 +131,7 @@ Quintess can't rename, move or nest bookmarks yet.
 **View ▸ Read out loud** reads the document with your computer's own voices. Nothing is sent anywhere.
 
 - **Read this page** (Ctrl+Shift+V) or **Read to the end** (Ctrl+Shift+B). The paragraph being read is outlined, and pages turn as reading moves on.
-- The bar at the bottom has **Pause** and **Resume** (Ctrl+Shift+C), **Skip** to the next paragraph, **Stop** (Ctrl+Shift+E), a speed slider and a voice list. **Resume** starts the current paragraph again from its beginning.
+- The bar at the bottom has **Pause** and **Resume** (Ctrl+Shift+C), **Skip** to the next paragraph, **Stop** (Ctrl+Shift+E), a speed slider and a voice list. **Resume** starts the current paragraph again from its beginning. While paused, **Skip**, a new speed or a new voice wait for **Resume**.
 - On Windows, more voices can be added in Windows Settings ▸ Time & language ▸ Speech. On Linux, reading aloud needs the `speech-dispatcher` package, and its voices come from the speech engines installed for it (such as `espeak-ng`).
 - Scanned pages have no text to read until **Tools ▸ Recognize text (OCR)** adds it.
 
@@ -159,7 +159,7 @@ All of these are under **File ▸ Create**. Each new PDF opens in a new tab, uns
 
 ## Office documents and web pages
 
-**From a file (Word, Excel, PowerPoint, web page…)…** turns Word, OpenDocument, RTF, spreadsheets, CSV, presentations, web pages, text and Markdown into PDFs. Choose the file, then pick a converter from the list. The list shows the converters on your computer and how faithful each is. **Built-in** is selected first; choose another if it's installed and you want higher fidelity.
+**From a file (Word, Excel, PowerPoint, web page…)…** turns Word, OpenDocument, RTF, spreadsheets, CSV, presentations, web pages, text, Markdown and pictures into PDFs. Choose the file, then pick a converter from the list. The list shows the converters on your computer and how faithful each is. The most faithful one installed for that kind of file is selected first (LibreOffice for Office documents when it's installed, **Built-in** for text and Markdown); Microsoft Office is used only when you choose it.
 
 - **Built-in** is always there and never uses the network. Word documents (.docx) get a built-in page layout: approximate, and fonts you don't have are replaced. OpenDocument text, simple web pages and Markdown become a simplified document. Spreadsheets and CSV become a table of their values: formulas show their last saved results, and colors, merged cells, charts and pictures are left out. It can't convert presentations, .doc or .rtf files.
 - **LibreOffice** (free to install) handles Word, OpenDocument, RTF, spreadsheets, presentations and web pages with higher fidelity. It runs with macros off and the network blocked, so pictures the document links to on the web are missing.
@@ -168,7 +168,7 @@ All of these are under **File ▸ Create**. Each new PDF opens in a new tab, uns
 
 On Linux, install LibreOffice for Office documents and presentations, and Chromium or Chrome for web pages.
 
-External converters are stopped after two minutes. When conversion finishes, the status bar names the converter and lists what it left out.
+External converters are stopped after two minutes. When conversion finishes, the status bar names the converter and lists what it left out. If neither Edge nor Chrome is installed, **From a web page…** says so.
 
 **From a web page…** prints a page from the internet with Edge, Chrome or Chromium. Enter an address starting with http:// or https://. This loads the page over the network.
 
@@ -308,12 +308,12 @@ From the command line: `quintess wrap file.pdf --around left,bottom,right,top --
 Some documents group their content into layers, such as one for each language or one for dimensions on a drawing. The sidebar's **Layers** section lists them.
 
 - The eye button shows or hides a layer, and the printer button chooses whether it prints. The visibility you set is what readers see when they open the document.
-- The lock button stops the layer's pictures and shapes from being picked on the page with **Edit pictures and shapes**. It is a convenience while editing, not protection: anyone can unlock it, and a locked object can still be selected from the list below.
+- The lock button stops the layer's pictures and shapes from being picked with **Edit pictures and shapes**, on the page or from the list below. It is a convenience while editing, not protection: anyone can unlock it. A hidden layer's pictures and shapes can't be picked either, until you show it again.
 - Double-click a name to rename the layer. The up and down arrows change the order of the layer list; they don't change which objects are drawn on top.
 - **New layer** adds an empty layer. To fill it, select pictures or shapes with **Edit pictures and shapes**, then choose the layer under **Move selection to**.
 - The ⋯ menu on a layer has **Delete, keeping its drawing** (the content stays on the page, outside any layer), **Delete with its drawing** (the content is removed), and **Merge into** another layer.
 
-Below the layers, **Objects on page** lists the current page's pictures and drawings, top of the stack first, with each one's layer. Click one to select it; **Bring forward** and **Send backward** change the stacking.
+Below the layers, **Objects on page** lists the current page's pictures and drawings, top of the stack first, with each one's layer. Click one to select it; **Bring forward** and **Send backward** change the stacking. Objects on a locked or hidden layer are listed grayed out.
 
 ## The object inspector
 
@@ -349,7 +349,7 @@ The **Measure** tool (in **More tools**, or **Tools ▸ Measure**) measures on t
 2. Click points on the page. A distance needs two clicks; for a perimeter or area, double-click or press **Enter** to finish. **Backspace** removes the last point and **Esc** starts over.
 3. The value shows beside the pointer while you measure, and the finished measurement is added to the page as a comment labeled with the result, which Acrobat and other readers also recognize.
 
-**The scale.** **Set scale…** takes a scale such as `1 in = 10 ft`, `1 cm = 2 m` or `1:100 m`, or one of the presets. To match a drawing, choose **Calibrate**, click both ends of a length you know, and type its real length. Drawings exported from CAD programs often carry their own scale; inside the drawing's area, Quintess uses it for the saved measurement.
+**The scale.** **Set scale…** takes a scale such as `1 in = 10 ft`, `1 cm = 2 m` or `1:100 m`, or one of the presets. To match a drawing, choose **Calibrate**, click both ends of a length you know, and type its real length. Drawings exported from CAD programs often carry their own scale; when a measurement starts inside the drawing's area, Quintess uses that scale, both for the value shown while you measure and for the saved measurement.
 
 ## Flattening and removing comments
 
@@ -398,12 +398,12 @@ Quintess can't yet create radio buttons, drop-down lists or list boxes, or chang
 1. Click **Choose spreadsheet…**. The first row holds the column names. In a workbook, only the first sheet is used.
 2. Check which field each column fills. Columns match the field with the same name (capitalization, spaces and punctuation don't matter, and a field's tooltip counts too). Reassign any column, or set it to **(not used)**. Fields no column fills are listed.
 3. Under **File names**, write a pattern such as `{Last name}, {First name}` or `{row}`.
-4. Choose **A folder of separate PDFs** (optionally flattened, so the values can't be changed) or **One combined PDF, a bookmark per copy**. The combined PDF is always flattened.
+4. Choose **A folder of separate PDFs** (optionally flattened, so the values can't be changed) or **One combined PDF, a bookmark per copy**. The combined PDF is always flattened. For separate PDFs, choose what happens when a file of the same name is already in the folder: **Add a number to the new file's name** (the default, such as "Roe, Jane (2).pdf"), **Skip it, keeping the existing file**, or **Overwrite the existing file**.
 5. Click **Fill N copies…**.
 
 For example, a spreadsheet with the columns `First name`, `Last name` and `Total` fills fields named `first_name`, `last_name` and `total`, and the pattern `{Last name}, {First name}` names one copy "Roe, Jane.pdf".
 
-Values that need a look (a choice the field doesn't offer, a required field left empty, a value the form refuses) are listed by row afterward. They are still filled in, so check those copies. Files in the folder with the same names as new copies are replaced.
+Values that need a look (a choice the field doesn't offer, a required field left empty, a value the form refuses) are listed by row afterward. They are still filled in, so check those copies. The message afterward also counts any copies skipped because their files existed.
 
 ## Clearing and flattening fields
 
@@ -435,13 +435,13 @@ Placing marks doesn't remove anything. Content is removed only when you apply th
 3. To find more, type words or a pattern in **Text or pattern to remove**, and tick any of the kinds under **Also find**: email addresses, US phone numbers, Social Security numbers, credit card numbers, dates, IP addresses, US ZIP codes and web addresses.
 4. Keep **Apply redaction marks already placed in the document** ticked to include your marks. (If you untick it, marks on pages that have matches are deleted without being applied.)
 5. Optionally type a **Label in each box**, such as "REDACTED", and tick **Remove document properties and metadata too**.
-6. Click **Find matches**. Quintess says how many areas on how many pages will be removed. The kinds under **Also find** can match more than you expect (a ZIP code is any five-digit number), so check the count. If you change the search, click **Find matches** again.
-7. Click **Redact**. Text, pictures and shapes under the boxes are removed. Comments, links and form fields that touch a box are removed too, and a form field there loses its value.
+6. Click **Find matches**. Quintess says how many areas on how many pages will be removed and lists each one with its page and the text under it. The kinds under **Also find** can match more than you expect (a ZIP code is any five-digit number), so check the list. Changing the search, its options or the kinds clears the matches, and **Redact** stays unavailable until you click **Find matches** again.
+7. Click **Redact**. Text, pictures and shapes under the boxes are removed. Comments, links and form fields that touch a box are removed too, and a form field there loses its value. On a signed document the dialog warns first, and the status line says afterward that the signatures are no longer valid.
 8. Read the check that follows (see below), look over the pages, then save.
 
 Notes:
 
-- A page whose content can't be cut out precisely (such as a picture in an unusual format, or a complex drawing crossing a box) is turned into a picture with the boxes painted in. Such a page loses its selectable text, links and comments, and no label is drawn on it. The message after redacting lists these pages.
+- A page whose content can't be cut out precisely (such as a picture in an unusual format, or a complex drawing crossing a box) is turned into a picture with the boxes painted in, and the label drawn in each box. Such a page loses its selectable text, links and comments. The message after redacting names these pages.
 - Redacting a signed document rewrites the file so nothing removed stays in it. This invalidates its signatures.
 - Bookmarks, attachments and tags are not changed by redaction. The check below tells you if the removed text still appears there.
 
@@ -456,7 +456,7 @@ After redacting, Quintess looks for the text that was under the boxes everywhere
 - Text inside pictures can't be read, so pictures under the boxes are always "not checked". For a scanned document, run **Tools ▸ Recognize text (OCR)** before searching, so the words can be found and checked.
 - Attachments are searched only if they are PDFs or plain-text kinds (such as .txt, .csv, .html or .xml). Other attachments are marked "not checked"; open them to check.
 - The check looks for each removed passage as a whole, not for parts of it.
-- The headline doesn't count places marked "not checked", so read the whole list, and look at the pages yourself before you share the document.
+- When some places are marked "not checked", the headline says that nothing was found in the parts checked, not anywhere. Read the whole list, and look at the pages yourself before you share the document.
 
 # Protecting documents
 
@@ -467,6 +467,7 @@ After redacting, Quintess looks for the text that was under the boxes everywhere
 - **Password to open** is optional. Without it, anyone can open the file, with the restrictions you choose.
 - **Allow readers to** lists what readers may do: print, copy, change the document, add comments, fill in forms, and insert, rotate and delete pages.
 - The **Permissions password** lifts the restrictions. If you leave it empty, Quintess makes one and shows it once; keep it somewhere safe.
+- A file has one kind of protection. Password protection replaces encryption for certificates chosen earlier, and the other way around: whichever you chose last is applied when you save. The dialogs say so.
 
 Restrictions depend on the reader program honoring them. Many readers do, but some don't, and Quintess itself doesn't enforce them. Only a password to open, or encryption for certificates, controls who can read the document.
 
@@ -475,15 +476,16 @@ Restrictions depend on the reader program honoring them. Many readers do, but so
 **Tools ▸ Protect ▸ Encrypt for certificates…** lets only chosen people open the file, by their digital certificates (the .cer, .crt or .pem files they send you), with no shared password. Only RSA certificates work.
 
 - Click **Add a certificate…** for each person. Each person has their own **What they may do** permissions, including **Change or remove the protection later**.
-- Add your own certificate too, or you won't be able to open the file yourself. **Add my own** uses your signing identity, but it needs an RSA key; identities made with **Create signing identity…** use a different kind of key, so add an RSA certificate of your own with **Add a certificate…** instead.
+- Add your own certificate too, or you won't be able to open the file yourself. **Add my own** adds your signing identity. Identities made with **Create signing identity…** in Quintess 0.2.0 and later have RSA keys and work here; identities made by earlier versions sign but can't receive encrypted files, so create a new one.
+- A certificate that can't receive an encrypted document (not RSA, or not meant for encryption) is refused when you add it, with the reason.
 - Encryption for certificates hasn't been tested with Adobe Acrobat yet.
 
-To open a file encrypted for you, choose your certificate with its private key: a .pfx or .p12 file (with its password, which is never saved), or a .pem file holding both. Certificates in the Windows certificate store can't open these files.
+To open a file encrypted for you, choose your certificate with its private key: a .pfx or .p12 file (with its password, which is never saved), a .pem file holding both, or your Quintess identity file. Certificates in the Windows certificate store can't open these files. Opening a file this way doesn't change which identity you sign with.
 
 ## Keeping and removing protection
 
 - Files keep their protection when you edit and save them, whether it is a password or certificates.
-- **Tools ▸ Protect ▸ Remove protection** takes it off when you save. For a certificate file, it works only if your certificate allows changing the protection.
+- **Tools ▸ Protect ▸ Remove protection** takes it off when you save. If the file restricts what readers may do, Quintess asks for its permissions password first, unless you opened the file with that password. For a certificate file, it works only if your certificate allows changing the protection.
 - **Tools ▸ Protect ▸ Remove metadata** clears the document properties (title, author and so on) and the document's and pages' XMP metadata. Metadata inside pictures, comment authors, attachments and bookmarks are not changed.
 - **File ▸ Properties…** shows and edits the title, author, subject, keywords and creator, and shows the security in use.
 
@@ -495,7 +497,7 @@ Choose **Tools ▸ Sign ▸ Sign here (draw a box)**, or the **Sign here** tool,
 
 - **A certificate file (.pfx or .p12) from a certificate authority**, with its password. The password is used for this signature only and never saved.
 - **A certificate installed in Windows (including smart cards)**: on Windows, when you have certificates with private keys. Windows may ask for your PIN. On Linux, sign with a certificate file.
-- **My own Quintess identity**. **Tools ▸ Sign ▸ Create signing identity…** makes one and saves it as a file. Keep that file private: it holds your signing key and isn't password-protected. Other programs show such signatures as not verified, since no authority vouches for them.
+- **My own Quintess identity**. **Tools ▸ Sign ▸ Create signing identity…** makes one (an RSA key, which can also receive files encrypted for its certificate) and saves it as a file. Keep that file private: it holds your private key and isn't password-protected. Other programs show such signatures as not verified, since no authority vouches for them.
 
 Add a **Reason** and an optional **Location**. The signature shows your name from the certificate, the date, the reason and the location.
 
@@ -503,11 +505,11 @@ Tick **Add a trusted timestamp** to have a timestamp server vouch for when you s
 
 ## Editing after signing
 
-Quintess tries to save later edits as an update after the signed version, which keeps the signature valid, and readers show that the document changed after signing. Edits that remove content (redaction, deleting pages, removing comments, metadata or attachments, reducing file size) rewrite the whole file instead and invalidate the signature. An encrypted signed file is also rewritten when saved. Sign last, after all other changes.
+Quintess tries to save later edits as an update after the signed version, which keeps the signature valid, and readers show that the document changed after signing. Edits that remove content (redaction, deleting pages, removing comments, metadata or attachments, reducing file size) rewrite the whole file instead and invalidate the signature. After every edit of a signed document, whether from a menu, a dialog or a task in the background, the status line says whether the signatures stayed valid. A second signature is added after the first, and both stay valid. An encrypted signed file is also rewritten when saved. Sign last, after all other changes.
 
 ## Checking signatures
 
-**Tools ▸ Sign ▸ Check signatures** shows each signature as:
+**Tools ▸ Sign ▸ Check signatures** shows each signature as (a protected file is checked with the password it was opened with):
 
 - **Valid**: the signed version is unchanged and the signer's certificate leads to an authority you trust.
 - **Intact, but the signer isn't trusted**: the signed version is unchanged, but no trusted authority vouches for the signer, or the certificate had expired or wasn't meant for signing when the signature was made. The reasons are listed.
@@ -519,9 +521,9 @@ Quintess trusts the authorities that Firefox trusts for websites and, on Windows
 
 ## Trusting a certificate
 
-When a signer isn't trusted, the result offers **Trust** with the certificate's name. It trusts the top certificate of the chain shown, which may be the authority that issued the signer's certificate rather than the signer; every signature from that authority then shows as trusted. Check the certificate in the **Certificates** section before you click, since it applies right away and to future documents.
+When a signer isn't trusted, the result offers **Trust…** with the certificate's name (not on an **INVALID** signature, which trust can't mend). It trusts the top certificate of the chain shown, which may be the authority that issued the signer's certificate rather than the signer; every signature from that authority then shows as trusted. Quintess asks first, showing who the certificate is issued to and by and its SHA-256 fingerprint. Trust it only if you know it belongs to who it names, for example by comparing the fingerprint with the signer.
 
-Trusted certificates are kept in the `trusted-certificates` folder in the settings folder. To remove one, run `quintess trust list` and `quintess trust remove <thumbprint>`, or delete its file there.
+**Edit ▸ Preferences…** lists the certificates you trust under **Trusted certificates**; **Remove** stops trusting one at once. They are kept in the `trusted-certificates` folder in the settings folder, and `quintess trust list` and `quintess trust remove <thumbprint>` manage them from the command line.
 
 ## Revocation and long-term validation
 
@@ -532,7 +534,7 @@ Trusted certificates are kept in the `trusted-certificates` folder in the settin
 
 **Tools ▸ Recognize text (OCR)** reads the text in scanned pages and lays it invisibly over the page, so you can search, select and copy it while the page looks as before. Recognition runs on your computer and works best on Latin-script text.
 
-- Pages that already have text are skipped. If every page has text, Quintess says so and changes nothing.
+- Pages that already have text are skipped, and the message afterward says how many. If every page has text, Quintess says so and changes nothing.
 - The OCR models are included with the installer and the Linux packages. A copy built from source asks before downloading them once (about 12 MB).
 - Check recognized text before relying on it, especially for redaction: OCR can misread words.
 
@@ -540,7 +542,7 @@ Trusted certificates are kept in the `trusted-certificates` folder in the settin
 
 ## Comparing versions
 
-**Tools ▸ Compare with another version…** asks for the other file and lists the text added and removed on each page, and the pages that look different. **Open visual report** opens an overlay report in your browser.
+**Tools ▸ Compare with another version…** asks for the other file (and its password, if it needs one) and lists the text added and removed on each page, and the pages that look different. **Open visual report** opens an overlay report in your browser.
 
 ## Text, Word, Markdown and web pages
 
@@ -643,7 +645,7 @@ Reducing file size rewrites the file, which invalidates any signatures.
 - **PDF/A-3b** and **3u**: like 2b and 2u, and files of any type may be attached.
 - **PDF/A-4** (based on PDF 2.0) and **4f** (with attached files).
 
-**Check** lists the problems; **Convert** fixes what Quintess can (color profile, identification, scripts and forbidden actions, compression) and lists plainly what it can't, such as fonts that aren't embedded or transparency under PDF/A-1b. Converting removes scripts, so form calculations stop working. **Tools ▸ Standards ▸ Convert to PDF/A-2b** converts in one step and shows what remains.
+**Check** lists the problems; **Convert** fixes what Quintess can (color profile, identification, scripts and forbidden actions, compression) and lists plainly what it can't, such as fonts that aren't embedded or transparency under PDF/A-1b. Afterward it says outright whether the document is now marked as the level you chose, read back from the converted file. Converting removes scripts, so form calculations stop working. **Tools ▸ Standards ▸ Convert to PDF/A-2b** converts in one step and says the same, with anything that remains.
 
 ## PDF/X
 
@@ -687,7 +689,7 @@ An action is a list of steps (OCR, redaction, watermarks, page changes, reducing
 
 ## Recording an action
 
-Recording makes real edits: each step is applied to the open document as you go. Record on a copy, or don't save the document afterward.
+Recording makes real edits: each step is applied to the open document as you go. Record on a copy, or don't save the document afterward. A step joins the action only once it succeeds: a canceled or failed OCR, file size reduction, accessibility fix or PDF/A conversion isn't recorded.
 
 1. Choose **Tools ▸ Record an action (start or stop)**. A red bar shows **Recording an action** and lists the steps.
 2. Apply the steps you want: page, stamp, redaction, cleanup and conversion steps. Text edits, comments, signing and form filling aren't recorded, since they belong to one document. **Forget last step** leaves the last step out of the action (the document keeps it).
@@ -697,17 +699,19 @@ Recording makes real edits: each step is applied to the open document as you go.
 
 Choose **Tools ▸ Run an action on files…**, then **Choose action…** and **Choose files…**, and click **Run**.
 
-- Each result is saved next to its original as `name-processed.pdf`. **Keep a copy of the original** anyway: an existing `-processed.pdf` file with the same name is replaced without asking.
-- The results window lists each file with its result or error. A failure doesn't stop the other files.
+- Each result is saved next to its original as `name-processed.pdf`. When that file already exists, choose under **When a result's file already exists**: **Add a number to the new file's name** (the default, such as `name-processed (2).pdf`), **Skip it, keeping the existing file**, or **Overwrite the existing file**.
+- An action with a password step asks for its passwords when it runs: the **Owner password** (required, it lifts the restrictions) and an optional **Open password**. Action files never hold passwords; files saved by Quintess 0.1 that do still run.
+- An OCR step needs the recognition models. If they aren't installed, tick the box to download them (about 12 MB) before running.
+- The results window lists each file with its result, error, or that it was skipped. A failure doesn't stop the other files.
 - Bates numbers continue from file to file.
 
 ## Watching a folder
 
 **Tools ▸ Watch a folder…** runs an action on every PDF that arrives in a folder, while Quintess is open.
 
-1. Choose the **Folder to watch…**, the **Action…**, and optionally a **Results folder…** (by default a "Done" folder inside the watched one).
+1. Choose the **Folder to watch…**, the **Action…**, and optionally a **Results folder…** (by default a "Done" folder inside the watched one). An action with a password or OCR step asks for the passwords, or leave to download the models, as when running it on files.
 2. Click **Start watching**. PDFs already in the folder are processed too; subfolders are not watched.
-3. Results go to the results folder, never replacing a file there. Originals move to a "Processed" folder inside the watched folder, or to "Failed" with a note saying why.
+3. Results go to the results folder, never replacing a file there (a name already taken gets a number). Originals move to a "Processed" folder inside the watched folder, or to "Failed" with a note saying why.
 
 The status bar shows the count and a **Stop** button; **Tools ▸ Stop watching the folder** also stops it.
 
@@ -724,6 +728,8 @@ The `quintess` command does most of what the app does, for scripts and batch wor
 
 Commands that edit a PDF usually overwrite the input. Use `-o` to save a separate copy, and check each command's `--help`. Set the `QUINTESS_PASSWORD` environment variable to open protected files without typing the password on the command line.
 
+Commands that write many files, `batch` and `form merge`, never replace a file silently: a name already taken gets a number unless you pass `--overwrite` or `--skip-existing`, and `form merge --combined` refuses an existing file without `--overwrite`. For actions with a password step, give `--owner-password` (or set `QUINTESS_OWNER_PASSWORD`, which keeps it off the command line) and optionally `--user-password` (`QUINTESS_USER_PASSWORD`); for an OCR step without installed models, pass `--download-models`. `batch` and `watch` stop before touching any file when one of these is missing.
+
 # Preferences and troubleshooting
 
 ## Preferences
@@ -731,13 +737,14 @@ Commands that edit a PDF usually overwrite the input. Use `-o` to save a separat
 **Edit ▸ Preferences…** has:
 
 - **Your name**, used as the author of comments and in a new signing identity.
-- **Document language**, which **Fix automatically** uses for documents with no language.
+- **Document language**, which **Fix automatically** and **Add tags to document** use for documents with no language.
 - **Look**: Studio or Classic, and dark or light.
 - **Spelling**: checking while typing, the dictionary, and **Add a language…**.
 - **Page memory** (see **Reading and searching**).
 - **Graphics**: **Automatic** (OpenGL, which uses about half the memory, or DirectX or Vulkan if OpenGL can't start) or **DirectX / Vulkan**. Change it if pages draw wrongly; it takes effect when Quintess next starts.
 - **Updates**: whether to check GitHub for new versions once a day.
 - **Signing identity**: the identity file used for signing and **Add my own**.
+- **Trusted certificates**: the certificates you chose to trust, each with **Remove** (see **Trusting a certificate**).
 
 ## Where Quintess keeps its files
 
@@ -779,12 +786,12 @@ If Quintess hits an internal error it can't recover from, it tries to save your 
 
 Quintess doesn't send your documents anywhere. It contacts the internet only for these features:
 
-- **Checking for updates.** On first run, Quintess asks whether to check automatically; if you agree, it asks GitHub at most once a day whether a newer version exists. **Help ▸ Check for updates…** checks at any time. The request names the Quintess version and nothing about you or your documents, though GitHub sees your network address, as with any website.
+- **Checking for updates.** On first run, Quintess asks whether to check automatically; if you agree, it asks GitHub at most once a day whether a newer version exists (a check that couldn't reach GitHub is tried again the next time Quintess starts). **Help ▸ Check for updates…** checks at any time. The request names the Quintess version and nothing about you or your documents, though GitHub sees your network address, as with any website.
 - **Downloading an update** (on Windows), when you choose to. Quintess checks it against the checksum published with the release, when there is one.
 - **Downloading a spelling dictionary** fetches it from the open-source dictionaries project on GitHub.
 - **Creating a PDF from a web page** loads that page. On Windows, **Microsoft Office** conversion isn't blocked from the network.
 - **Trusted timestamps** send a fingerprint of the signature (not the document) to the timestamp server, and **checking revocation** or **adding long-term validation** asks the certificates' issuers whether they were revoked.
-- A copy of Quintess built from source asks before downloading the OCR models once; the installer and the Linux packages include them.
+- A copy of Quintess built from source asks before downloading the OCR models once (a batch action asks too, and the command line needs `--download-models`); the installer and the Linux packages include them.
 
 Opening a link or QR code opens your browser, after showing you where it goes.
 

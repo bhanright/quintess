@@ -93,6 +93,74 @@ struct Output {
     compact: bool,
 }
 
+/// What to do when a result's file name is taken, for commands that write
+/// many files. Without either flag a number is added ("name (2).pdf").
+#[derive(Args, Clone)]
+struct ExistingFlags {
+    /// Replace files that already exist.
+    #[arg(long, conflicts_with = "skip_existing")]
+    overwrite: bool,
+    /// Leave files that already exist and don't write those results.
+    #[arg(long)]
+    skip_existing: bool,
+}
+
+impl ExistingFlags {
+    fn choice(&self) -> quintess_core::document::ExistingFiles {
+        use quintess_core::document::ExistingFiles;
+        match (self.overwrite, self.skip_existing) {
+            (true, _) => ExistingFiles::Overwrite,
+            (_, true) => ExistingFiles::Skip,
+            _ => ExistingFiles::AddNumber,
+        }
+    }
+}
+
+/// Choices for running an action that are never stored in it.
+#[derive(Args, Clone)]
+struct RunFlags {
+    /// Let OCR steps download the recognition models (about 12 MB) when
+    /// they aren't installed; without it such steps fail.
+    #[arg(long)]
+    download_models: bool,
+    /// Owner password for Protect steps, which lifts the restrictions (or set
+    /// QUINTESS_OWNER_PASSWORD, which keeps it out of the command line).
+    /// Action files don't hold passwords.
+    #[arg(long, env = "QUINTESS_OWNER_PASSWORD", hide_env_values = true)]
+    owner_password: Option<String>,
+    /// Password needed to open the files Protect steps write (or set
+    /// QUINTESS_USER_PASSWORD); none when left out.
+    #[arg(long, env = "QUINTESS_USER_PASSWORD", hide_env_values = true)]
+    user_password: Option<String>,
+}
+
+impl RunFlags {
+    fn options(&self, existing: quintess_core::document::ExistingFiles) -> quintess_core::batch::RunOptions {
+        let passwords = self.owner_password.clone().map(|owner_password| quintess_core::batch::ProtectPasswords { owner_password, user_password: self.user_password.clone().unwrap_or_default() });
+        quintess_core::batch::RunOptions { existing, allow_model_download: self.download_models, passwords }
+    }
+}
+
+/// Stops before any file is touched when the action needs a password or a
+/// download that wasn't given.
+fn check_run_flags(action: &quintess_core::batch::Action, run: &RunFlags) -> Result<()> {
+    if action.needs_passwords() && run.owner_password.is_none() {
+        bail!("the action protects files with a password: give it with --owner-password (or QUINTESS_OWNER_PASSWORD), and --user-password if opening should need one");
+    }
+    if action.needs_model_download() && !run.download_models {
+        bail!("the action recognizes text, and the recognition models aren't installed: pass --download-models to download them (about 12 MB)");
+    }
+    Ok(())
+}
+
+/// Refuses to replace an existing file unless `--overwrite` was given.
+fn refuse_to_overwrite(path: &Path, overwrite: bool) -> Result<()> {
+    if path.exists() && !overwrite {
+        bail!("{} already exists; pass --overwrite to replace it", path.display());
+    }
+    Ok(())
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Show page count, sizes, properties, security and structure.
@@ -552,12 +620,15 @@ enum Command {
         /// The action (JSON) to run on each file.
         #[arg(long)]
         action: PathBuf,
-        /// Where results go; a "Done" folder inside the watched one by default.
+        /// Where results go; a "Done" folder inside the watched one by
+        /// default. A result whose name is taken gets a number.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Seconds between looks at the folder.
         #[arg(long, default_value_t = 2.0)]
         interval: f32,
+        #[command(flatten)]
+        run: RunFlags,
     },
     /// Ask GitHub whether a newer version of Quintess has been released.
     CheckUpdates,
@@ -811,6 +882,8 @@ enum FormAction {
         /// Don't run the form's calculation and format scripts on each copy.
         #[arg(long)]
         no_scripts: bool,
+        #[command(flatten)]
+        existing: ExistingFlags,
     },
     /// Find blanks (____) and boxes and turn them into fields.
     Detect {
@@ -857,7 +930,7 @@ fn main() {
 /// Prints the redaction check (in full unless all clear) and saves it when asked.
 fn print_redaction_check(check: &quintess_core::redaction_check::RedactionCheck, report: Option<&Path>) -> Result<()> {
     let text = check.to_text();
-    if check.verdict() == quintess_core::redaction_check::Verdict::Clear {
+    if check.verdict() == quintess_core::redaction_check::Verdict::Clear && !check.has_unchecked_places() {
         println!("redaction check: nothing redacted was found anywhere in the file");
     } else {
         println!("{text}");
@@ -961,7 +1034,7 @@ fn save_removing(pdf: &mut Pdf, input: &Input, output: &Output) -> Result<PathBu
 pub(crate) fn save_edit(pdf: &mut Pdf, input: &Input, output: &Output, edit: Edit) -> Result<PathBuf> {
     let target = output.output.clone().unwrap_or_else(|| input.input.clone());
     let original = std::fs::read(&input.input).unwrap_or_default();
-    let signed = !original.is_empty() && quintess_core::signatures::verify(&original).is_ok_and(|checks| !checks.is_empty());
+    let signed = !original.is_empty() && quintess_core::signatures::verify_protected(&original, input.password.as_deref()).is_ok_and(|checks| !checks.is_empty());
     if edit == Edit::Unprotects {
         pdf.forget_encryption();
     } else if pdf.original_encryption().is_none() {
@@ -1380,10 +1453,12 @@ fn run(cli: Cli) -> Result<()> {
             }
             println!("{} matches", matches.len());
         }
-        Command::Watch { folder, action, out, interval } => {
+        Command::Watch { folder, action, out, interval, run } => {
             use quintess_core::watch::{FolderWatcher, WatchEvent, WatchSettings};
             let action = quintess_core::batch::Action::load(&action)?;
-            let mut watcher = FolderWatcher::new(WatchSettings { inbox: folder, action, output: out })?;
+            check_run_flags(&action, &run)?;
+            let options = run.options(quintess_core::document::ExistingFiles::AddNumber);
+            let mut watcher = FolderWatcher::new(WatchSettings { inbox: folder, action, output: out, options })?;
             println!("watching {}; results go to {} (Ctrl+C stops)", watcher.inbox().display(), watcher.output().display());
             loop {
                 for event in watcher.check() {
@@ -1776,7 +1851,7 @@ fn form(action: FormAction) -> Result<()> {
             };
             write_or_print(&text, &output)?;
         }
-        FormAction::Merge { input, data, out_dir, name, flatten, combined, dry_run, no_scripts } => {
+        FormAction::Merge { input, data, out_dir, name, flatten, combined, dry_run, no_scripts, existing } => {
             use quintess_core::form_merge::{self, MergeSettings, Table};
             let table = Table::read(&data)?;
             let template = std::fs::read(&input.input)?;
@@ -1806,13 +1881,14 @@ fn form(action: FormAction) -> Result<()> {
             };
             let count = match &combined {
                 Some(target) => {
+                    refuse_to_overwrite(target, existing.overwrite)?;
                     let mut copies = Vec::new();
                     form_merge::fill_rows_with(&template, input.password.as_deref(), &table, &plan, &settings, !no_scripts, &|_, _| {}, |copy| {
                         report(&copy);
                         copies.push((copy.file_name, copy.bytes));
                         Ok(())
                     })?;
-                    std::fs::write(target, form_merge::combine(&copies)?)?;
+                    write_file_safely(target, &form_merge::combine(&copies)?)?;
                     println!("wrote {} copies into {}", copies.len(), target.display());
                     copies.len()
                 }
@@ -1820,12 +1896,19 @@ fn form(action: FormAction) -> Result<()> {
                     let stem = input.input.file_stem().and_then(|s| s.to_str()).unwrap_or("form").to_string();
                     let folder = out_dir.unwrap_or_else(|| input.input.with_file_name(format!("{stem} filled")));
                     std::fs::create_dir_all(&folder)?;
+                    let mut skipped = 0;
                     let count = form_merge::fill_rows_with(&template, input.password.as_deref(), &table, &plan, &settings, !no_scripts, &|_, _| {}, |copy| {
                         report(&copy);
-                        std::fs::write(folder.join(&copy.file_name), &copy.bytes)?;
+                        match quintess_core::document::output_path(&folder.join(&copy.file_name), existing.choice()) {
+                            Some(target) => write_file_safely(&target, &copy.bytes)?,
+                            None => skipped += 1,
+                        }
                         Ok(())
                     })?;
-                    println!("wrote {count} copies to {}", folder.display());
+                    println!("wrote {} copies to {}", count - skipped, folder.display());
+                    if skipped > 0 {
+                        println!("skipped {skipped} whose files already existed");
+                    }
                     count
                 }
             };

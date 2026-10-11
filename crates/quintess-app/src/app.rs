@@ -79,6 +79,12 @@ pub struct QuintessApp {
     update_startup_done: bool,
     /// A folder being watched (see `watching.rs`).
     watch: Option<watching::RunningWatch>,
+    /// The person chose to quit despite unsaved changes (or saved them), so
+    /// the window's next close request is let through.
+    close_confirmed: bool,
+    /// The status line as the frame began, to tell whether this frame's
+    /// edit wrote its own message (see `announce_signature_changes`).
+    status_at_frame_start: String,
 }
 
 /// A developer aid: with `QUINTESS_SCREENSHOT=<file.png>` the app sets itself
@@ -92,7 +98,12 @@ pub struct QuintessApp {
 /// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`,
 /// `tool=edit-objects`, `select-object=x;y` (page points), then
 /// `wrap=square|tight|top-and-bottom|off` (applies a wrap style to the
-/// selected picture) and `wrap-menu` (opens its Wrap text menu).
+/// selected picture), `wrap-menu` (opens its Wrap text menu),
+/// `unsaved` (marks the documents changed and shows the quit question),
+/// `close-window` (marks them changed and asks the window to close),
+/// `redact-search=words` (Find and redact with its matches found),
+/// `batch=action.json` (the Run an action dialog with that action),
+/// `confirm-trust` (the question Trust asks), `permissions-password`.
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -144,6 +155,8 @@ impl QuintessApp {
             update_window: None,
             update_startup_done: false,
             watch: None,
+            close_confirmed: false,
+            status_at_frame_start: String::new(),
         };
         app.tool_settings.author = app.settings.author.clone();
         app.configure_spelling();
@@ -305,7 +318,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 "watch" => {
                     // folder;action
                     if let Some((folder, action)) = value.split_once(';') {
-                        self.start_watch(PathBuf::from(folder), PathBuf::from(action), None);
+                        self.start_watch(PathBuf::from(folder), PathBuf::from(action), None, Default::default());
                     }
                 }
                 "command" => {
@@ -314,6 +327,23 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 "split" => self.split_view = true,
+                "close-window" => {
+                    // Marks every open document changed and closes the window
+                    // as its close button would, to check the close is caught.
+                    for tab in &mut self.tabs {
+                        tab.dirty = true;
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                "unsaved" => {
+                    // Marks every open document changed and asks as quitting would.
+                    for tab in &mut self.tabs {
+                        tab.dirty = true;
+                    }
+                    let tab_ids = self.tabs.iter().map(|tab| tab.id).collect();
+                    let titles = self.tabs.iter().map(|tab| tab.title.clone()).collect();
+                    self.dialogs.push(Dialog::UnsavedChanges { tab_ids, titles, quitting: true });
+                }
                 "reading-order" => {
                     if let Some(tab) = self.tab() {
                         tab.show_reading_order = true;
@@ -376,6 +406,47 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         _ => sidebar::SidebarPage::Thumbnails,
                     }
                 }
+                "batch" => {
+                    // An action file, opened in the Run an action dialog.
+                    let path = PathBuf::from(value);
+                    if let Ok(action) = quintess_core::batch::Action::load(&path) {
+                        let steps = action.steps.iter().map(quintess_core::batch::Step::describe).collect();
+                        let run = dialogs::RunChoices::for_action(&action);
+                        self.dialogs.push(Dialog::Batch { action: Some(path), inputs: Vec::new(), steps, run });
+                    }
+                }
+                "confirm-trust" => {
+                    // The question Trust asks, for the first signature's certificate.
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        if let Ok(checks) = quintess_core::signatures::verify_protected(&tab.bytes, tab.password.as_deref()) {
+                            if let Some(top) = checks.first().and_then(|check| check.chain.last()) {
+                                if let Ok(identity) = quintess_core::validation::certificate_identity(&top.der) {
+                                    self.dialogs.push(Dialog::SignatureResults(checks.clone()));
+                                    self.dialogs.push(Dialog::ConfirmTrust { certificate_der: top.der.clone(), identity });
+                                }
+                            }
+                        }
+                    }
+                }
+                "permissions-password" => self.dialogs.push(Dialog::PermissionsPassword { password: String::new(), error: String::new() }),
+                "redact-search" => {
+                    let mut dialog = Dialog::redact();
+                    if let (Dialog::Redact { query, found, .. }, Some(tab)) = (&mut dialog, self.tabs.get(self.active)) {
+                        *query = value.to_string();
+                        if let (Ok(pattern), Some(document)) = (quintess_core::engine::search_pattern(value, false, false, false), tab.pdfium_document()) {
+                            if let Ok(mut areas) = quintess_core::redact::find_areas(document, &[pattern]) {
+                                if let Ok(pdf) = tab.load_pdf() {
+                                    areas.extend(quintess_core::redact::marked_areas(&pdf));
+                                }
+                                let texts = quintess_core::redaction_check::area_texts(document, &areas).unwrap_or_default();
+                                // The same search the dialog builds, so it isn't cleared at once.
+                                let search = format!("{value}\u{1}false\u{1}false\u{1}true\u{1}");
+                                *found = Some(dialogs::FoundRedactions { areas, texts, search });
+                            }
+                        }
+                    }
+                    self.dialogs.push(dialog);
+                }
                 "dialog" => match value {
                     "watermark" => self.dialogs.push(Dialog::watermark()),
                     "redact" => self.dialogs.push(Dialog::redact()),
@@ -409,6 +480,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             if let Some(buffer) = image::RgbaImage::from_raw(width as u32, height as u32, pixels) {
                 let _ = buffer.save(&check.path);
             }
+            self.close_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
@@ -519,16 +591,82 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn save(&mut self, choose_location: bool) {
-        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        self.save_tab(self.active, choose_location);
+    }
+
+    /// Saves one document, asking where when it has no file yet (or
+    /// `choose_location`). Returns whether it was saved.
+    fn save_tab(&mut self, index: usize, choose_location: bool) -> bool {
+        let Some(tab) = self.tabs.get_mut(index) else { return false };
         let path = match (&tab.path, choose_location) {
             (Some(path), false) => Some(path.clone()),
             _ => rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(&tab.title).save_file(),
         };
-        if let Some(path) = path {
-            let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
-            let result = tab.save_to(path.clone());
-            if self.report(result).is_some() {
-                self.info(format!("Saved {}", path.display()));
+        let Some(path) = path else { return false };
+        let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
+        let result = tab.save_to(path.clone());
+        if self.report(result).is_some() {
+            self.info(format!("Saved {}", path.display()));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn tab_index(&self, id: u64) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == id)
+    }
+
+    /// Stops the window closing while documents have unsaved changes, and
+    /// asks what to do with them instead. The answer comes back as
+    /// `SaveAndClose` or `CloseDiscarding`, which close the window again.
+    fn intercept_close_request(&mut self, ctx: &egui::Context) {
+        if self.close_confirmed || !ctx.input(|i| i.viewport().close_requested()) {
+            return;
+        }
+        let unsaved: Vec<&DocumentTab> = self.tabs.iter().filter(|tab| tab.dirty).collect();
+        if unsaved.is_empty() {
+            return;
+        }
+        let tab_ids = unsaved.iter().map(|tab| tab.id).collect();
+        let titles = unsaved.iter().map(|tab| tab.title.clone()).collect();
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        let already_asking = self.dialogs.iter().any(|dialog| matches!(dialog, Dialog::UnsavedChanges { quitting: true, .. }));
+        if !already_asking {
+            self.dialogs.push(Dialog::UnsavedChanges { tab_ids, titles, quitting: true });
+        }
+    }
+
+    /// Closes the window for good, once unsaved changes are dealt with.
+    fn quit_now(&mut self) {
+        self.close_confirmed = true;
+        self.worker_context.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// Saves each document, then closes them (or quits). Stops at the first
+    /// one that isn't saved, such as when its Save as is cancelled, and
+    /// closes nothing.
+    fn save_and_close(&mut self, tab_ids: Vec<u64>, quitting: bool) {
+        for id in &tab_ids {
+            let Some(index) = self.tab_index(*id) else { continue };
+            if !self.save_tab(index, false) {
+                if !self.status_is_error {
+                    let title = self.tabs[index].title.clone();
+                    self.info(format!("{title} wasn't saved, so nothing was closed."));
+                }
+                return;
+            }
+        }
+        self.close_discarding(tab_ids, quitting);
+    }
+
+    fn close_discarding(&mut self, tab_ids: Vec<u64>, quitting: bool) {
+        if quitting {
+            return self.quit_now();
+        }
+        for id in tab_ids {
+            if let Some(index) = self.tab_index(id) {
+                self.close_tab(index, true);
             }
         }
     }
@@ -538,7 +676,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             return;
         }
         if self.tabs[index].dirty && !force {
-            self.dialogs.push(Dialog::UnsavedChanges { tab_index: index, title: self.tabs[index].title.clone() });
+            let tab = &self.tabs[index];
+            self.dialogs.push(Dialog::UnsavedChanges { tab_ids: vec![tab.id], titles: vec![tab.title.clone()], quitting: false });
             return;
         }
         let tab = self.tabs.remove(index);
@@ -601,13 +740,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
 
     fn make_edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>, removes_content: bool) -> bool {
         let Some(tab) = self.tabs.get_mut(self.active) else { return false };
-        let was_signed = tab.signed;
         let result = if removes_content { tab.apply_removing(label, change) } else { tab.apply(label, change) };
-        let kept = tab.last_edit_kept_signatures;
         if self.report(result).is_none() {
             return false;
         }
-        self.report_edit(label, was_signed, kept);
+        self.report_edit(label);
         true
     }
 
@@ -689,6 +826,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             let counts = &self.scroll_test;
             let total = (counts.sharp + counts.preview + counts.blank).max(1) as f32;
             eprintln!("scroll test at {rate} pages/s over {} pages: sharp {:.0}%, preview only {:.0}%, blank {:.0}% of {} frames", tab.pages.len(), counts.sharp as f32 / total * 100.0, counts.preview as f32 / total * 100.0, counts.blank as f32 / total * 100.0, total as usize);
+            self.close_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
@@ -864,19 +1002,29 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         self.jobs.push(Job::start(label, ctx, work));
     }
 
+    /// A job whose step joins the action being recorded once it succeeds
+    /// (not when it fails or is cancelled).
+    fn start_recorded_job(&mut self, ctx: &egui::Context, label: &str, step: quintess_core::batch::Step, work: impl FnOnce(&dyn Fn(u32, u32)) -> anyhow::Result<JobOutcome> + Send + 'static) {
+        let mut job = Job::start(label, ctx, work);
+        job.record_on_success = Some(step);
+        self.jobs.push(job);
+    }
+
     /// The active tab's id, bytes and password, for handing to a job.
     fn job_input(&self) -> Option<(u64, std::sync::Arc<Vec<u8>>, Option<String>, String)> {
         self.tabs.get(self.active).map(|t| (t.id, t.bytes.clone(), t.password.clone(), t.title.clone()))
     }
 
-    fn start_ocr(&mut self, ctx: &egui::Context) {
+    /// Recognizes text in the active document; `record` adds the step to an
+    /// action being recorded once it succeeds.
+    fn start_ocr(&mut self, ctx: &egui::Context, record: bool) {
         // Installed copies include the models; otherwise ask before downloading.
         if !quintess_core::ocr::models_present() {
             self.dialogs.push(Dialog::DownloadOcrModels);
             return;
         }
         let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
-        self.start_job(ctx, "Recognizing text", move |progress| {
+        let work = move |progress: &dyn Fn(u32, u32)| {
             let document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
             let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
             let pages: Vec<u32> = (1..=pdf.page_count()).collect();
@@ -885,13 +1033,25 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             if report.pages_recognized.is_empty() {
                 return Ok(JobOutcome::Message("Every page already has text; nothing to recognize.".into()));
             }
-            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words)", report.words), bytes: pdf.to_bytes(&SaveSettings::default())?, removes_content: false })
-        });
+            // Pages that already had text are left alone; say so.
+            let pages = |count: usize| if count == 1 { "1 page".to_string() } else { format!("{count} pages") };
+            let skipped = match report.pages_skipped.len() {
+                0 => String::new(),
+                1 => format!("; page {} already had text", report.pages_skipped[0]),
+                count => format!("; {} already had text", pages(count)),
+            };
+            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Recognize text ({} words on {}{skipped})", report.words, pages(report.pages_recognized.len())), bytes: pdf.to_bytes(&SaveSettings::default())?, removes_content: false })
+        };
+        if record {
+            self.start_recorded_job(ctx, "Recognizing text", quintess_core::batch::Step::Ocr { dpi: None }, work);
+        } else {
+            self.start_job(ctx, "Recognizing text", work);
+        }
     }
 
-    fn start_optimize(&mut self, ctx: &egui::Context, settings: quintess_core::optimize::OptimizeSettings) {
+    fn start_optimize(&mut self, ctx: &egui::Context, settings: quintess_core::optimize::OptimizeSettings, step: quintess_core::batch::Step) {
         let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
-        self.start_job(ctx, "Reducing file size", move |_| {
+        self.start_recorded_job(ctx, "Reducing file size", step, move |_| {
             let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
             let (optimized, report) = quintess_core::optimize::optimize(&mut pdf, &settings)?;
             if optimized.len() >= bytes.len() {
@@ -902,10 +1062,21 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn start_compare(&mut self, ctx: &egui::Context) {
-        let Some((_, bytes, password, title)) = self.job_input() else { return };
         let Some(other) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_title("Compare with which version?").pick_file() else { return };
+        let Some(other_bytes) = self.report(std::fs::read(&other).map_err(anyhow::Error::from)) else { return };
+        // A protected older version needs its own password first.
+        if quintess_core::security::inspect_security(&other_bytes).needs_password_to_open {
+            self.dialogs.push(Dialog::ComparePassword { path: other, password: String::new(), error: String::new() });
+            return;
+        }
+        self.compare_with(ctx, other, other_bytes, None);
+    }
+
+    /// Compares the active document with an older version of it.
+    fn compare_with(&mut self, ctx: &egui::Context, other: PathBuf, other_bytes: Vec<u8>, other_password: Option<String>) {
+        let Some((_, bytes, password, title)) = self.job_input() else { return };
         self.start_job(ctx, "Comparing", move |_| {
-            let old_document = quintess_core::engine::open_document(std::fs::read(&other)?, None)?;
+            let old_document = quintess_core::engine::open_document(other_bytes, other_password.as_deref())?;
             let new_document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
             let result = quintess_core::compare::compare(&old_document, &new_document, 100.0)?;
             let other_name = other.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -952,22 +1123,25 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         anyhow::bail!("no tables were found in this document");
                     }
                     for (index, table) in tables.iter().enumerate() {
-                        std::fs::write(path.join(format!("{stem} page {} table {}.csv", table.page_index + 1, index + 1)), table.to_csv()?)?;
+                        let file = path.join(format!("{stem} page {} table {}.csv", table.page_index + 1, index + 1));
+                        quintess_core::document::write_file_safely(&file, table.to_csv()?.as_bytes())?;
                     }
                     return Ok(JobOutcome::Message(format!("Wrote {} table{} to {}", tables.len(), if tables.len() == 1 { "" } else { "s" }, path.display())));
                 }
                 _ => {}
             }
             let structure = quintess_core::convert::analyze(&document, true)?;
-            match format {
-                "docx" => std::fs::write(&path, quintess_core::convert::to_docx(&structure)?)?,
-                "html" => std::fs::write(&path, quintess_core::convert::to_html(&structure, &stem))?,
+            // Through a temporary file, so a failure midway never leaves half a file.
+            let bytes = match format {
+                "docx" => quintess_core::convert::to_docx(&structure)?,
+                "html" => quintess_core::convert::to_html(&structure, &stem).into_bytes(),
                 _ => {
                     let folder = path.with_file_name(format!("{stem}-images"));
                     let link = format!("{stem}-images/");
-                    std::fs::write(&path, quintess_core::convert::to_markdown(&structure, Some((folder.as_path(), link.as_str())))?)?
+                    quintess_core::convert::to_markdown(&structure, Some((folder.as_path(), link.as_str())))?.into_bytes()
                 }
-            }
+            };
+            quintess_core::document::write_file_safely(&path, &bytes)?;
             Ok(JobOutcome::Message(format!("Exported to {}", path.display())))
         });
     }
@@ -975,20 +1149,36 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// Applies a bytes-to-bytes text edit to the active tab as one undoable step.
     fn edit_page_text(&mut self, label: &str, change: impl FnOnce(&[u8], Option<&str>) -> anyhow::Result<Vec<u8>>) {
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
-        let was_signed = tab.signed;
         let result = change(&tab.bytes, tab.password.as_deref()).and_then(|bytes| tab.replace_bytes(label, bytes));
-        let kept = tab.last_edit_kept_signatures;
         if self.report(result).is_some() {
-            self.report_edit(label, was_signed, kept);
+            self.report_edit(label);
         }
     }
 
-    /// The status line after an edit, saying what became of any signatures.
-    fn report_edit(&mut self, label: &str, was_signed: bool, kept_signatures: bool) {
-        match (was_signed, kept_signatures) {
-            (true, true) => self.info(format!("{label} done, saved as an update after the signatures, which stay valid. Ctrl+Z undoes it.")),
-            (true, false) => self.error(format!("{label} done. The file was rewritten so nothing removed stays in it, which invalidates its digital signatures. Ctrl+Z undoes it.")),
-            _ => self.info(format!("{label} done. Ctrl+Z undoes it.")),
+    /// The status line after an edit. What became of any signatures is
+    /// added by `announce_signature_changes`.
+    fn report_edit(&mut self, label: &str) {
+        self.info(format!("{label} done. Ctrl+Z undoes it."));
+    }
+
+    /// Adds to the status line what the frame's edits did to signed
+    /// documents' signatures. Every edit path (menus, dialogs, background
+    /// jobs, the spelling panel) leaves its notice on the tab, so none can
+    /// break signatures without saying so.
+    fn announce_signature_changes(&mut self) {
+        let notices: Vec<(String, crate::tab::SignatureNotice)> = self.tabs.iter_mut().filter_map(|tab| tab.take_signature_notice().map(|notice| (tab.title.clone(), notice))).collect();
+        for (title, notice) in notices {
+            let sentence = if self.tabs.len() > 1 { format!("{title}: {}", notice.sentence()) } else { notice.sentence().to_string() };
+            // Joined to this frame's own message about the edit, never to an older one.
+            let edit_wrote_a_message = self.status != self.status_at_frame_start && !self.status.is_empty();
+            let message = if edit_wrote_a_message { format!("{} {sentence}", self.status) } else { sentence };
+            if notice.invalidated() {
+                self.error(message);
+            } else {
+                let keep_error_color = self.status_is_error;
+                self.info(message);
+                self.status_is_error = keep_error_color;
+            }
         }
     }
 
@@ -1045,21 +1235,23 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         });
     }
 
-    fn apply_job_outcome(&mut self, outcome: JobOutcome) {
+    /// Applies what a finished job handed back; false when that failed (or
+    /// its document was closed meanwhile).
+    fn apply_job_outcome(&mut self, outcome: JobOutcome) -> bool {
         match outcome {
             JobOutcome::ReplaceBytes { tab_id, label, bytes, removes_content } => {
-                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
-                    let result = tab.replace_bytes_as(&label, bytes, removes_content);
-                    if self.report(result).is_some() {
-                        self.info(format!("{label}. Ctrl+Z undoes it."));
-                    }
+                let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) else { return false };
+                let result = tab.replace_bytes_as(&label, bytes, removes_content);
+                if self.report(result).is_none() {
+                    return false;
                 }
+                self.info(format!("{label}. Ctrl+Z undoes it."));
             }
             JobOutcome::ShowText { title, text } => self.dialogs.push(Dialog::TextResult { title, text }),
             JobOutcome::Comparison { summary, report_path } => self.dialogs.push(Dialog::ComparisonResult { summary, report_path }),
             JobOutcome::Message(message) => self.info(message),
             JobOutcome::FolderSearch(results) => self.dialogs.push(Dialog::FolderResults(results)),
-            JobOutcome::UpdateChecked { found, manual } => self.update_checked(found, manual),
+            JobOutcome::UpdateChecked { found, manual, reached } => self.update_checked(found, manual, reached),
             JobOutcome::UpdateDownloaded { path, verified, version } => self.update_window = Some(updates::UpdateWindow::Ready { path, verified, version }),
             JobOutcome::Spelling { tab_id, found } => self.spelling_checked(tab_id, found),
             JobOutcome::Signatures(checks) => self.dialogs.push(Dialog::SignatureResults(checks)),
@@ -1072,7 +1264,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 self.info(format!("Scanned {pages} page{}.", if pages == 1 { "" } else { "s" }));
                 if recognize_text {
                     let ctx = self.worker_context.clone();
-                    self.start_ocr(&ctx);
+                    self.start_ocr(&ctx, false);
                 }
             }
             JobOutcome::QrCodes { tab_id, version, codes } => {
@@ -1089,6 +1281,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
             }
         }
+        true
     }
 
     fn check_accessibility(&mut self) {
@@ -1154,7 +1347,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 self.command_buttons(ui, "Edit");
             });
             ui.menu_button("View", |ui| {
-                self.command_buttons(ui, "View");
+                // These toggles are the checkboxes below; as commands they stay in the palette.
+                const SHOWN_AS_CHECKBOXES: [&str; 6] = ["Split view (on or off)", "Organize pages (on or off)", "Sidebar (on or off)", "Night reading (on or off)", "Dark interface (on or off)", "Studio or classic look"];
+                self.command_buttons_except(ui, "View", &SHOWN_AS_CHECKBOXES);
                 ui.menu_button("Read out loud", |ui| self.command_buttons(ui, "View ▸ Read out loud"));
                 ui.separator();
                 ui.checkbox(&mut self.organizer, "Organize pages");
@@ -1299,7 +1494,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let before = tab.bytes.len();
         let result = tab.load_pdf().and_then(|mut pdf| {
             let bytes = pdf.to_bytes(&SaveSettings { compress_streams: true, use_object_streams: true, remove_unused_objects: true })?;
-            std::fs::write(&path, &bytes)?;
+            quintess_core::document::write_file_safely(&path, &bytes)?;
             Ok(bytes.len())
         });
         if let Some(after) = self.report(result) {
@@ -1378,7 +1573,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let Some(tab) = self.tabs.get(self.active) else { return };
         let fields: Vec<String> = tab.fields.iter().filter(|f| !f.read_only && !matches!(f.field_type, forms::FieldType::PushButton | forms::FieldType::Signature)).map(|f| f.name.clone()).collect();
         if fields.is_empty() {
-            self.error("This document has no form fields to fill. Forms ▸ Detect fields automatically can add them.");
+            self.error("This document has no form fields to fill. Tools ▸ Forms ▸ Detect fields automatically can add them.");
             return;
         }
         self.dialogs.push(Dialog::FormMerge(Box::new(dialogs::FormMergeDialog::new(fields))));
@@ -1418,9 +1613,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let dictionary = opened.pdf.certificate_encryption_dictionary();
         opened.pdf.forget_encryption();
         let Some(plain) = self.report(opened.pdf.to_bytes(&quintess_core::SaveSettings::default())) else { return };
-        if self.settings.signing_certificate_file.is_none() {
-            self.settings.signing_certificate_file = Some(identity_path);
-        }
+        // The key file is not made the signing default: it may be a kind
+        // signing can't read, and opening a file is no choice to sign with it.
         self.settings.remember_file(choice.path.clone());
         let _ = self.settings.save();
         if self.add_tab(Some(choice.path), plain, None) {
@@ -1433,6 +1627,41 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             if !restricted.is_empty() {
                 self.info(format!("Opened with your certificate. The author did not allow: {}.", restricted.join(", ")));
             }
+        }
+    }
+
+    /// Takes the protection off the active document (written when it is
+    /// saved). A file whose permissions are restricted needs its owner
+    /// password first, unless it was opened with that password; otherwise
+    /// anyone allowed to open it could lift its restrictions.
+    pub(super) fn remove_protection(&mut self, owner_password: Option<String>) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if !tab.may_change_security {
+            return self.error("The certificate you opened this file with doesn't allow changing its security.");
+        }
+        let restricted = tab.certificate_dictionary.is_none() && tab.original_encryption.as_ref().is_some_and(quintess_core::security::restricts_permissions);
+        if restricted {
+            let typed = owner_password.is_some();
+            let candidate = owner_password.or_else(|| tab.password.clone()).unwrap_or_default();
+            let is_owner = match (tab.load_pdf(), tab.original_encryption.as_ref()) {
+                (Ok(pdf), Some(encryption)) => quintess_core::security::is_owner_password(&pdf, encryption, &candidate),
+                _ => false,
+            };
+            if !is_owner {
+                let error = if typed { "That isn't the permissions password." } else { "" };
+                self.dialogs.push(Dialog::PermissionsPassword { password: String::new(), error: error.into() });
+                return;
+            }
+        }
+        let Some(tab) = self.tab() else { return };
+        tab.protection = None;
+        tab.certificate_protection = None;
+        tab.certificate_dictionary = None;
+        tab.original_encryption = None;
+        // Re-writing the bytes stores them without encryption.
+        let result = tab.apply("Remove protection", |_| Ok(()));
+        if self.report(result).is_some() {
+            self.info("Protection removed. Save to write the unprotected file.");
         }
     }
 
@@ -1472,8 +1701,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// Tags the document from its layout, reading text through PDFium, and
     /// says what was guessed.
     fn auto_tag(&mut self, replace_existing_tags: bool) {
-        // Used only when the document names no language: the one chosen for spelling.
-        let language = Some(self.settings.spelling_language.clone()).filter(|language| !language.is_empty());
+        // Used only when the document names no language: the Document language
+        // preference, the same one Fix automatically uses.
+        let language = Some(self.settings.language.clone()).filter(|language| !language.trim().is_empty());
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let options = quintess_core::auto_tag::AutoTagOptions { language, replace_existing_tags };
         let result = tab.load_pdf().and_then(|mut pdf| {
@@ -1846,7 +2076,6 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 ViewerAction::MoveText { page_index, bounds, offset } => self.edit_page_text("Move text", |bytes, password| quintess_core::edit_text::move_text(bytes, password, page_index, bounds, offset)),
                 ViewerAction::ReplaceParagraph { paragraph, rich, style, precomputed } => {
                     let Some(tab) = self.tabs.get_mut(self.active) else { continue };
-                    let was_signed = tab.signed;
                     // The preview already did the work when it matches this edit.
                     let edited = match precomputed {
                         Some(done) => Ok(done),
@@ -1874,13 +2103,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         for stand_in in &report.stand_ins {
                             message.push_str(&format!(" {} stands in for {}.", stand_in.stand_in, stand_in.original));
                         }
-                        let broke_signatures = was_signed && !self.tabs.get(self.active).is_some_and(|t| t.last_edit_kept_signatures);
-                        if broke_signatures {
-                            message.push_str(" This invalidated the document's signatures.");
-                        } else if was_signed {
-                            message.push_str(" Saved as an update after the signatures, which stay valid.");
-                        }
-                        if report.overlaps || broke_signatures {
+                        if report.overlaps {
                             self.error(message);
                         } else {
                             self.info(message);
@@ -1933,10 +2156,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 ViewerAction::AddMeasurement { page_index, kind, points } => {
-                    // A drawing's own scale wins over the one chosen here.
+                    // A drawing's own scale wins over the one chosen here,
+                    // as in the live value shown while measuring.
                     let page = page_index as u32 + 1;
-                    let drawing_scale = self.tab().and_then(|tab| tab.load_pdf().ok()).and_then(|pdf| quintess_core::measure::viewport_scale(&pdf, page, points[0]));
-                    let scale = drawing_scale.unwrap_or_else(|| self.tool_settings.measure.scale.clone());
+                    let chosen = self.tool_settings.measure.scale.clone();
+                    let Some(scale) = self.tabs.get(self.active).map(|tab| tab.measuring_scale(page_index, points[0], &chosen)) else { continue };
                     let annotation = quintess_core::annotations::NewAnnotation::new(quintess_core::annotations::AnnotationKind::Measurement { kind, points, scale, border_width: self.tool_settings.stroke_width.min(2.0) }).with_color(self.tool_settings.color);
                     self.edit("Measure", |pdf| quintess_core::annotations::add_annotation(pdf, page, &annotation).map(|_| ()));
                 }
@@ -2071,19 +2295,31 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: "That password is not correct.".into() });
                     }
                 }
-                AppRequest::CloseTabDiscarding(index) => self.close_tab(index, true),
-                AppRequest::StartOptimize(settings) => {
+                AppRequest::RemoveProtection { owner_password } => self.remove_protection(Some(owner_password)),
+                AppRequest::CompareWithPassword { path, password } => {
+                    let Some(bytes) = self.report(std::fs::read(&path).map_err(anyhow::Error::from)) else { continue };
+                    if quintess_core::Pdf::from_bytes(&bytes, Some(&password)).is_err() {
+                        self.dialogs.push(Dialog::ComparePassword { path, password: String::new(), error: "That password is not correct.".into() });
+                        continue;
+                    }
                     let ctx = self.worker_context.clone();
-                    self.start_optimize(&ctx, settings);
+                    self.compare_with(&ctx, path, bytes, Some(password));
                 }
-                AppRequest::StartBatch { action, inputs } => {
+                AppRequest::SaveAndClose { tab_ids, quitting } => self.save_and_close(tab_ids, quitting),
+                AppRequest::CloseDiscarding { tab_ids, quitting } => self.close_discarding(tab_ids, quitting),
+                AppRequest::StartOptimize { settings, step } => {
+                    let ctx = self.worker_context.clone();
+                    self.start_optimize(&ctx, settings, step);
+                }
+                AppRequest::StartBatch { action, inputs, options } => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Running action", move |progress| {
                         let action = quintess_core::batch::Action::load(&action)?;
-                        let results = quintess_core::batch::run_action(&action, &inputs, |done, total, _| progress(done as u32, total as u32));
+                        let results = quintess_core::batch::run_action(&action, &inputs, &options, |done, total, _| progress(done as u32, total as u32));
                         let mut text = String::new();
                         for result in results {
                             match (result.output, result.error) {
+                                (Some(output), _) if result.skipped => text.push_str(&format!("– {} skipped: {} already exists\n", result.input.display(), output.display())),
                                 (Some(output), _) => text.push_str(&format!("✔ {} → {}\n", result.input.display(), output.display())),
                                 (_, Some(error)) => text.push_str(&format!("✘ {}: {error}\n", result.input.display())),
                                 _ => {}
@@ -2106,7 +2342,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let name = quintess_core::spelling::language_name(&tag).unwrap_or(&tag).to_string();
                     self.start_job(&ctx, &format!("Downloading the {name} dictionary"), move |_| {
                         quintess_core::spelling::download_dictionary(&tag)?;
-                        Ok(JobOutcome::Message(format!("Added the {name} dictionary. Choose it in Preferences ▸ Spelling.")))
+                        Ok(JobOutcome::Message(format!("Added the {name} dictionary. Choose it under Spelling in Edit ▸ Preferences.")))
                     });
                 }
                 AppRequest::SetMeasureScale(scale) => {
@@ -2185,21 +2421,30 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let folder = quintess_core::validation::trusted_certificates_folder();
                     let result = quintess_core::validation::add_trusted_certificates(&folder, &certificate);
                     if self.report(result).is_some() {
-                        self.info("Trusted. Signatures by this certificate, or certificates it issued, now show as valid.");
+                        self.info("Trusted. Signatures by this certificate, or certificates it issued, now show as valid. Edit ▸ Preferences can remove it.");
                         if let Some(tab) = self.tabs.get(self.active) {
-                            let checks = quintess_core::signatures::verify(&tab.bytes);
+                            let checks = quintess_core::signatures::verify_protected(&tab.bytes, tab.password.as_deref());
                             if let Some(checks) = self.report(checks) {
+                                // The results shown before trusting give way to fresh ones.
+                                self.dialogs.retain(|dialog| !matches!(dialog, Dialog::SignatureResults(_)));
                                 self.dialogs.push(Dialog::SignatureResults(checks));
                             }
                         }
                     }
                 }
+                AppRequest::RemoveTrustedCertificate(thumbprint) => {
+                    let folder = quintess_core::validation::trusted_certificates_folder();
+                    let result = quintess_core::validation::remove_trusted_certificate(&folder, &thumbprint);
+                    if let Some(removed) = self.report(result) {
+                        self.info(format!("No longer trusting {}.", removed.name));
+                    }
+                }
                 AppRequest::CheckRevocation => {
                     let Some(tab) = self.tabs.get(self.active) else { continue };
-                    let bytes = tab.bytes.clone();
+                    let (bytes, password) = (tab.bytes.clone(), tab.password.clone());
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Checking for revocation", move |_| {
-                        let mut checks = quintess_core::signatures::verify(&bytes)?;
+                        let mut checks = quintess_core::signatures::verify_protected(&bytes, password.as_deref())?;
                         let transport = quintess_core::net::NetworkTransport::new(std::time::Duration::from_secs(20));
                         for check in &mut checks {
                             quintess_core::signatures::check_revocation_online(check, &transport);
@@ -2228,7 +2473,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         viewer::go_to_page(tab, page_index);
                     }
                 }
-                AppRequest::StartWatch { folder, action, output } => self.start_watch(folder, action, output),
+                AppRequest::StartWatch { folder, action, output, options } => self.start_watch(folder, action, output, options),
                 AppRequest::StartFolderSearch(query) => {
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Searching the folder", move |progress| {
@@ -2243,10 +2488,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.start_job(&ctx, "Filling copies", move |progress| {
                         let mut problems: Vec<String> = Vec::new();
                         let mut copies = Vec::new();
+                        let mut skipped = 0;
                         let count = quintess_core::form_merge::fill_rows(&job.template, job.password.as_deref(), &job.table, &job.plan, &job.settings, progress, |copy| {
                             problems.extend(copy.problems.iter().map(|problem| format!("Row {} ({}): {problem}", copy.row, copy.file_name)));
                             match &job.folder {
-                                Some(folder) => std::fs::write(folder.join(&copy.file_name), &copy.bytes)?,
+                                Some(folder) => match quintess_core::document::output_path(&folder.join(&copy.file_name), job.existing) {
+                                    Some(target) => quintess_core::document::write_file_safely(&target, &copy.bytes)?,
+                                    None => skipped += 1,
+                                },
                                 None => copies.push((copy.file_name, copy.bytes)),
                             }
                             Ok(())
@@ -2254,15 +2503,20 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         let place = match (&job.folder, &job.combined_file) {
                             (Some(folder), _) => folder.display().to_string(),
                             (None, Some(file)) => {
-                                std::fs::write(file, quintess_core::form_merge::combine(&copies)?)?;
+                                // The save dialog has already asked about replacing it.
+                                quintess_core::document::write_file_safely(file, &quintess_core::form_merge::combine(&copies)?)?;
                                 file.display().to_string()
                             }
                             (None, None) => String::new(),
                         };
+                        let mut summary = format!("Filled {} copies into {place}.", count - skipped);
+                        if skipped > 0 {
+                            summary.push_str(&format!(" Skipped {skipped} whose files already existed."));
+                        }
                         if problems.is_empty() {
-                            Ok(JobOutcome::Message(format!("Filled {count} copies into {place}.")))
+                            Ok(JobOutcome::Message(summary))
                         } else {
-                            Ok(JobOutcome::ShowText { title: "Filled copies".into(), text: format!("Filled {count} copies into {place}.\n\n{} values need a look:\n{}\n", problems.len(), problems.join("\n")) })
+                            Ok(JobOutcome::ShowText { title: "Filled copies".into(), text: format!("{summary}\n\n{} values need a look:\n{}\n", problems.len(), problems.join("\n")) })
                         }
                     });
                 }
@@ -2282,7 +2536,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 AppRequest::IdentityCreated(path) => {
                     self.settings.signing_identity = Some(path.clone());
                     let _ = self.settings.save();
-                    self.info(format!("Created {}. Keep it private: it holds your signing key. Use Tools ▸ Sign ▸ Sign here.", path.display()));
+                    self.info(format!("Created {}. Keep it private: it holds your signing key. Use Tools ▸ Sign ▸ Sign here (draw a box).", path.display()));
                 }
                 AppRequest::StartPrint(settings) => {
                     let Some((_, bytes, password, title)) = self.job_input() else { continue };
@@ -2291,7 +2545,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.start_job(&ctx, "Printing", move |progress| {
                         let document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
                         quintess_core::print::print(&document, &title, &settings, |done, total| progress(done, total))?;
-                        Ok(JobOutcome::Message(format!("Sent {} sheets to {printer}.", settings.pages.len() as u32 * settings.copies.max(1))))
+                        // Pages, not sheets: two-sided and fit settings change the sheet count.
+                        let pages = settings.pages.len();
+                        let copies = settings.copies.max(1);
+                        let copies_note = if copies > 1 { format!(", {copies} copies") } else { String::new() };
+                        Ok(JobOutcome::Message(format!("Sent {pages} page{}{copies_note} to {printer}.", if pages == 1 { "" } else { "s" })))
                     });
                 }
                 AppRequest::StartFindReplace { pattern, replacement } => {
@@ -2309,10 +2567,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let title = self.tabs.get(self.active).map(|t| t.title.trim_end_matches(".pdf").to_string()).unwrap_or_default();
                     let language = self.settings.language.clone();
                     let mut fixed = Vec::new();
-                    self.edit("Accessibility fixes", |pdf| {
+                    let done = self.try_edit("Accessibility fixes", |pdf| {
                         fixed = quintess_core::accessibility::fix(pdf, &title, &language)?;
                         Ok(())
                     });
+                    if !done {
+                        continue;
+                    }
+                    self.record(quintess_core::batch::Step::AccessibilityFix);
                     self.check_accessibility();
                     if !fixed.is_empty() {
                         self.info(format!("Fixed: {}", fixed.join("; ")));
@@ -2320,11 +2582,17 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
                 AppRequest::ConvertToPdfA => {
                     let mut remaining = Vec::new();
-                    self.edit("Convert to PDF/A-2b", |pdf| {
+                    let done = self.try_edit("Convert to PDF/A-2b", |pdf| {
                         remaining = quintess_core::preflight::convert_to_pdfa(pdf)?;
                         Ok(())
                     });
-                    self.dialogs.push(Dialog::PreflightResults(remaining));
+                    if !done {
+                        continue;
+                    }
+                    self.record(quintess_core::batch::Step::PdfA);
+                    // Read back from the converted file rather than guessed from the list.
+                    let marked = self.tabs.get(self.active).and_then(|tab| tab.load_pdf().ok()).is_some_and(|pdf| quintess_core::preflight::declares_pdfa_level(&pdf, quintess_core::preflight::PdfALevel::A2b));
+                    self.dialogs.push(Dialog::PdfAConversion { issues: remaining, marked });
                 }
             }
         }
@@ -2403,25 +2671,33 @@ impl eframe::App for QuintessApp {
                 eprintln!("frame {}: {:?}", ctx.cumulative_pass_nr(), causes);
             }
         }
+        self.status_at_frame_start = self.status.clone();
         self.receive_rendered_pages(&ctx);
         self.run_scroll_test(&ctx);
         self.receive_watch_events();
         crate::crash::note_unsaved(self.tabs.iter().filter(|t| t.dirty).map(|t| (t.title.clone(), t.bytes.clone())).collect());
         self.run_self_check(&ctx);
+        self.intercept_close_request(&ctx);
         if self.self_check.is_none() {
             self.remember_reading_positions(&ctx);
         }
         let mut finished = Vec::new();
-        self.jobs.retain(|job| match job.poll() {
+        self.jobs.retain_mut(|job| match job.poll() {
             Some(result) => {
-                finished.push((job.label.clone(), result));
+                finished.push((job.label.clone(), job.record_on_success.take(), result));
                 false
             }
             None => true,
         });
-        for (label, result) in finished {
+        for (label, step, result) in finished {
             match result {
-                Ok(outcome) => self.apply_job_outcome(outcome),
+                Ok(outcome) => {
+                    if self.apply_job_outcome(outcome) {
+                        if let Some(step) = step {
+                            self.record(step);
+                        }
+                    }
+                }
                 Err(error) => self.error(format!("{label} failed: {error:#}")),
             }
         }
@@ -2563,6 +2839,7 @@ impl eframe::App for QuintessApp {
             }
             self.apply_app_requests(outcome.requests);
         }
+        self.announce_signature_changes();
     }
 }
 

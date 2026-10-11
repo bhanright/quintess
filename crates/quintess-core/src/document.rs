@@ -5,7 +5,7 @@
 //! PDFium instead (see `engine`), which reads the bytes this module writes.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, SaveOptions, Stream};
@@ -550,6 +550,50 @@ pub fn write_file_safely(path: &Path, bytes: &[u8]) -> Result<()> {
         let _ = std::fs::remove_file(&partial);
         format!("could not replace {}", path.display())
     })
+}
+
+/// What to do when a result's file name is already taken, for tools that
+/// write many files at once (batch actions, filling from a spreadsheet).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExistingFiles {
+    /// Replace the existing file.
+    Overwrite,
+    /// Write "name (2).pdf", "name (3).pdf" and so on instead.
+    #[default]
+    AddNumber,
+    /// Leave the existing file and don't write this one.
+    Skip,
+}
+
+impl ExistingFiles {
+    pub const ALL: [ExistingFiles; 3] = [ExistingFiles::AddNumber, ExistingFiles::Skip, ExistingFiles::Overwrite];
+
+    /// The choice as offered in the app.
+    pub fn label(self) -> &'static str {
+        match self {
+            ExistingFiles::AddNumber => "Add a number to the new file's name",
+            ExistingFiles::Skip => "Skip it, keeping the existing file",
+            ExistingFiles::Overwrite => "Overwrite the existing file",
+        }
+    }
+}
+
+/// Where to write a file meant for `wanted`, given what to do when it
+/// exists: `wanted` itself, a numbered name beside it, or `None` to skip.
+pub fn output_path(wanted: &Path, existing: ExistingFiles) -> Option<PathBuf> {
+    if !wanted.exists() {
+        return Some(wanted.to_path_buf());
+    }
+    match existing {
+        ExistingFiles::Overwrite => Some(wanted.to_path_buf()),
+        ExistingFiles::Skip => None,
+        ExistingFiles::AddNumber => {
+            let stem = wanted.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let extension = wanted.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            (2..).map(|number| wanted.with_file_name(format!("{stem} ({number}){extension}"))).find(|candidate| !candidate.exists())
+        }
+    }
 }
 
 /// Encrypts an unprotected file with the same key, passwords and

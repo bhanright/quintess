@@ -62,7 +62,16 @@ pub struct SigningIdentity {
 }
 
 impl SigningIdentity {
-    /// A new self-signed identity (ECDSA P-256). Readers will show the
+    /// A new self-signed identity of the kind the app's Create signing
+    /// identity and the CLI's `identity` make: an RSA 2048 key, which signs
+    /// and can also receive certificate-encrypted documents (ECDSA keys
+    /// can't). Generating it takes a moment.
+    pub fn create(name: &str, email: &str, organization: &str) -> Result<Self> {
+        crate::public_key::generate_rsa_identity(name, email, organization, 2048)
+    }
+
+    /// A new self-signed identity (ECDSA P-256), quick to make; it signs
+    /// but can't receive encrypted documents. Readers will show the
     /// signature as valid but the signer as unverified until they trust it.
     pub fn self_signed(name: &str, email: &str, organization: &str) -> Result<Self> {
         let key = KeyPair::generate()?;
@@ -659,12 +668,19 @@ pub struct VerifyOptions {
     pub trust: TrustStore,
     /// The moment `certificate_valid_now` refers to.
     pub now: chrono::DateTime<chrono::Utc>,
+    /// The password a protected file opens with.
+    pub password: Option<String>,
 }
 
 impl Default for VerifyOptions {
     fn default() -> Self {
-        Self { trust: TrustStore::standard(), now: chrono::Utc::now() }
+        Self { trust: TrustStore::standard(), now: chrono::Utc::now(), password: None }
     }
+}
+
+/// [`verify`] for a file that may be password protected.
+pub fn verify_protected(bytes: &[u8], password: Option<&str>) -> Result<Vec<SignatureCheck>> {
+    verify_with(bytes, &VerifyOptions { password: password.map(str::to_string), ..Default::default() })
 }
 
 /// Checks every signature in a file against Mozilla's roots, the system's
@@ -675,7 +691,7 @@ pub fn verify(bytes: &[u8]) -> Result<Vec<SignatureCheck>> {
 
 /// [`verify`] with the trust and the clock given explicitly.
 pub fn verify_with(bytes: &[u8], options: &VerifyOptions) -> Result<Vec<SignatureCheck>> {
-    let pdf = crate::Pdf::from_bytes(bytes, None)?;
+    let pdf = crate::Pdf::from_bytes(bytes, options.password.as_deref())?;
     let stored = validation::read_stored_validation_data(&pdf);
     let mut checks = Vec::new();
     for field in crate::forms::list_fields(&pdf).into_iter().filter(|f| f.field_type == crate::forms::FieldType::Signature) {
@@ -716,8 +732,11 @@ pub fn verify_with(bytes: &[u8], options: &VerifyOptions) -> Result<Vec<Signatur
     Ok(checks)
 }
 
-/// The byte ranges a signature covers, validated.
-fn signed_ranges<'a>(bytes: &'a [u8], signature: &lopdf::Dictionary, check: &mut SignatureCheck) -> Result<[&'a [u8]; 2]> {
+/// The byte ranges a signature covers, validated, and the signature value
+/// read from the gap between them. The value is taken from the file's own
+/// bytes because a protected file's signature value is never encrypted,
+/// while its other strings are (and the reader decrypts them all).
+fn signed_ranges<'a>(bytes: &'a [u8], signature: &lopdf::Dictionary, check: &mut SignatureCheck) -> Result<([&'a [u8]; 2], Vec<u8>)> {
     // [start of the first part, its length, start of the second part, its length]
     let numbers: Vec<i64> = signature.get(b"ByteRange")?.as_array()?.iter().map(|v| v.as_i64().unwrap_or(-1)).collect();
     if numbers.len() != 4 || numbers.iter().any(|n| *n < 0) {
@@ -738,7 +757,9 @@ fn signed_ranges<'a>(bytes: &'a [u8], signature: &lopdf::Dictionary, check: &mut
         bail!("the signature leaves bytes other than its own value unsigned");
     }
     check.covers_whole_document = second_end == bytes.len();
-    Ok([&bytes[range[0]..range[0] + range[1]], &bytes[range[2]..range[2] + range[3]]])
+    let digits: Vec<u8> = gap[1..gap.len() - 1].iter().copied().filter(u8::is_ascii_hexdigit).collect();
+    let value = digits.chunks(2).map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap_or("0"), 16).unwrap_or(0) << if pair.len() == 1 { 4 } else { 0 }).collect();
+    Ok(([&bytes[range[0]..range[0] + range[1]], &bytes[range[2]..range[2] + range[3]]], value))
 }
 
 /// Reads a PDF date such as `D:20261011143000-04'00'`.
@@ -779,9 +800,10 @@ fn archived_revocation_data(signer: &cms::SignerInfo) -> (Vec<Vec<u8>>, Vec<Vec<
 }
 
 fn check_one(bytes: &[u8], signature: &lopdf::Dictionary, check: &mut SignatureCheck, stored: &StoredValidationData, options: &VerifyOptions) -> Result<()> {
-    let signed_parts = signed_ranges(bytes, signature, check)?;
-    let Object::String(contents, _) = signature.get(b"Contents")? else { bail!("the signature has no contents") };
-    check.contents = contents.clone();
+    let (signed_parts, value) = signed_ranges(bytes, signature, check)?;
+    let Object::String(_, _) = signature.get(b"Contents")? else { bail!("the signature has no contents") };
+    check.contents = value;
+    let contents = &check.contents.clone();
     let sub_filter = signature.get(b"SubFilter").ok().and_then(|s| s.as_name().ok()).unwrap_or(b"");
     if sub_filter == b"ETSI.RFC3161" {
         return check_document_timestamp(contents, &signed_parts, check, stored, options);
