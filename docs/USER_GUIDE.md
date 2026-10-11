@@ -118,8 +118,19 @@ The **Edit pictures and shapes** tool (the picture button in the dock, or **Edit
 - **Drag a handle** to resize. Corner handles keep the proportions; hold **Shift** to stretch freely.
 - The toolbar above the selection rotates left or right, flips, **crops** (choose Crop, then drag over the part to keep), **replaces** a picture with another file (fitted into the same space), brings to the front or sends to the back, and deletes. **Delete** on the keyboard deletes too.
 - **Edit ▸ Add picture…** places a picture from a file on the current page, ready to move and resize.
+- **Opacity** in the toolbar makes the selection see-through (0 to 100%) and sets its **blend mode** (Multiply, Screen, Overlay and the rest, as in image editors).
 
 Every change is a normal edit you can undo. Cropping hides the rest of the picture without removing it from the file; to remove content for good, use redaction.
+
+# Measuring
+
+The **Measure** tool (in the dock's More tools, or **Tools ▸ Measure**) measures on the page at a drawing's scale.
+
+1. Choose **Distance**, **Perimeter** or **Area** in the bar above the page.
+2. Click points on the page. A distance needs two clicks; for a perimeter or area, double-click or press **Enter** to finish. **Backspace** removes the last point and **Escape** starts over.
+3. The value shows beside the pointer while you measure, and the finished measurement is added to the page as a comment labeled with the result, which Acrobat and other readers also recognize.
+
+**The scale.** **Set scale…** takes a scale such as `1 in = 10 ft`, `1 cm = 2 m` or `1:100 m` (with presets). To match a drawing, choose **Calibrate**, click both ends of a length you know, and type its real length. Drawings exported from CAD programs often carry their own scale; Quintess uses it automatically inside the drawing's area.
 
 # Comments and markup
 

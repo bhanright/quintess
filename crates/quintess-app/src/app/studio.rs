@@ -23,7 +23,7 @@ const DOCK_TOOLS: [(Tool, char, &str); 12] = [
     (Tool::Inspect, icon::INSPECT, "ⓘ"),
 ];
 
-const MORE_TOOLS: [(Tool, char, &str); 11] = [
+const MORE_TOOLS: [(Tool, char, &str); 12] = [
     (Tool::Underline, icon::UNDERLINE, "U"),
     (Tool::StrikeOut, icon::STRIKETHROUGH, "S"),
     (Tool::Squiggly, icon::UNDERLINE, "~"),
@@ -31,6 +31,7 @@ const MORE_TOOLS: [(Tool, char, &str); 11] = [
     (Tool::Line, icon::LINE, "—"),
     (Tool::Arrow, icon::ARROW, "→"),
     (Tool::Stamp, icon::STAMP, "🔖"),
+    (Tool::Measure, icon::MEASURE, "📏"),
     (Tool::Link, icon::LINK, "🔗"),
     (Tool::RedactArea, icon::REDACT, "▇"),
     (Tool::TextField, icon::FIELD, "▭"),

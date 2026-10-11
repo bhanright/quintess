@@ -47,6 +47,7 @@ pub enum AppRequest {
     DownloadOcrModels,
     /// Download a spelling dictionary (a language tag such as "pt-PT").
     DownloadDictionary(String),
+    SetMeasureScale(quintess_core::measure::Scale),
     /// Turn to a page and outline a box there (display points from the top left).
     ShowOnPage { page_index: usize, display_rect: [f32; 4] },
     StartWatch { folder: PathBuf, action: PathBuf, output: Option<PathBuf> },
@@ -156,6 +157,8 @@ pub enum Dialog {
     /// Asks before downloading the OCR models, when they weren't installed.
     /// Adding and removing spelling languages.
     Dictionaries { filter: String },
+    /// Choosing the measuring scale, typed or from a measured known length.
+    MeasureScale { text: String, calibrated_points: Option<f32>, length: String, unit: String },
     DownloadOcrModels,
     QrResults(Vec<quintess_core::qr::FoundCode>),
     Watch { folder: Option<PathBuf>, action: Option<PathBuf>, output: Option<PathBuf>, steps: Vec<String> },
@@ -238,6 +241,8 @@ impl Dialog {
             Dialog::QrResults(_) => "QR codes",
             Dialog::DownloadOcrModels => "Download the recognition models?",
             Dialog::Dictionaries { .. } => "Spelling languages",
+            Dialog::MeasureScale { calibrated_points: Some(_), .. } => "Calibrate the scale",
+            Dialog::MeasureScale { .. } => "Measuring scale",
             Dialog::Watch { .. } => "Watch a folder",
             Dialog::CheckForText { .. } => "Check for leftover text",
         };
@@ -747,6 +752,45 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             });
             if buttons(ui, "Save", outcome) {
                 outcome.requests.push(AppRequest::SettingsChanged(settings.clone()));
+                outcome.keep_open = false;
+            }
+            return Ok(());
+        }
+        Dialog::MeasureScale { text, calibrated_points, length, unit } => {
+            use quintess_core::measure::{Scale, UNITS};
+            match calibrated_points {
+                Some(points) => {
+                    ui.label(format!("The line you measured is {:.2} in on the page. How long is it really?", *points / 72.0));
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(length).desired_width(90.0).hint_text("e.g. 12.5"));
+                        egui::ComboBox::from_id_salt("calibration unit").selected_text(unit.as_str()).show_ui(ui, |ui| {
+                            for (name, _) in UNITS {
+                                ui.selectable_value(unit, name.to_string(), name);
+                            }
+                        });
+                    });
+                }
+                None => {
+                    ui.label("How long on the page stands for how long in the world, such as 1 in = 10 ft, 1 cm = 2 m or 1:100 m.");
+                    ui.add(egui::TextEdit::singleline(text).desired_width(220.0).hint_text("1 in = 10 ft"));
+                    ui.horizontal_wrapped(|ui| {
+                        for preset in ["1 in = 1 in", "1/4 in = 1 ft", "1 in = 10 ft", "1 in = 100 ft", "1:50 m", "1:100 m", "1:1000 m"] {
+                            if ui.small_button(preset).clicked() {
+                                *text = preset.replace("1/4 in", "0.25 in");
+                            }
+                        }
+                    });
+                }
+            }
+            if buttons(ui, "Use this scale", outcome) {
+                let scale = match calibrated_points {
+                    Some(points) => {
+                        let real: f64 = length.trim().replace(',', "").parse().map_err(|_| anyhow::anyhow!("enter the real length as a number"))?;
+                        Scale::from_known_length(*points as f64, real, unit)?
+                    }
+                    None => Scale::parse(text)?,
+                };
+                outcome.requests.push(AppRequest::SetMeasureScale(scale));
                 outcome.keep_open = false;
             }
             return Ok(());

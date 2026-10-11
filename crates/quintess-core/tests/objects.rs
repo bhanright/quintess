@@ -127,3 +127,18 @@ fn order_on_the_page_can_change() {
     let front = color_at(&bytes_of(&mut pdf), 200.0, 440.0);
     assert!(front[2] > 180 && front[0] < 90, "and back in front: {front:?}");
 }
+
+#[test]
+fn opacity_lets_the_page_show_through() {
+    use quintess_core::objects::BlendMode;
+    let mut pdf = page();
+    let picture = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Image).unwrap();
+    change_objects(&mut pdf, 1, &[picture], &Change::Appearance { opacity: 0.5, blend_mode: BlendMode::Normal }).unwrap();
+    // A second change replaces the first rather than stacking.
+    let picture = list_objects(&pdf, 1).unwrap().into_iter().find(|o| o.kind == ObjectKind::Image).unwrap();
+    assert_eq!(picture.opacity, 0.5);
+    change_objects(&mut pdf, 1, &[picture], &Change::Appearance { opacity: 0.5, blend_mode: BlendMode::Normal }).unwrap();
+    let color = color_at(&bytes_of(&mut pdf), 200.0, 450.0);
+    // Half red over white is pink.
+    assert!(color[0] > 200 && color[1] > 110 && color[1] < 170, "{color:?}");
+}

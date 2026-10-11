@@ -49,6 +49,8 @@ pub enum Tool {
     Inspect,
     /// Pick pictures, drawings and groups to move, resize, crop or delete.
     EditObjects,
+    /// Measure distances, perimeters and areas at a scale.
+    Measure,
 }
 
 impl Tool {
@@ -78,6 +80,7 @@ impl Tool {
             Tool::EditText => "Edit text",
             Tool::Inspect => "Inspect",
             Tool::EditObjects => "Edit pictures and shapes",
+            Tool::Measure => "Measure",
         }
     }
 
@@ -101,11 +104,12 @@ pub struct ToolSettings {
     pub font_size: f32,
     pub stamp_label: String,
     pub author: String,
+    pub measure: crate::measure_tool::MeasureSettings,
 }
 
 impl Default for ToolSettings {
     fn default() -> Self {
-        Self { color: [0.85, 0.1, 0.1], stroke_width: 2.0, opacity: 1.0, fill: None, font_size: 12.0, stamp_label: "APPROVED".into(), author: quintess_core::annotations::default_author() }
+        Self { color: [0.85, 0.1, 0.1], stroke_width: 2.0, opacity: 1.0, fill: None, font_size: 12.0, stamp_label: "APPROVED".into(), author: quintess_core::annotations::default_author(), measure: Default::default() }
     }
 }
 
@@ -137,6 +141,13 @@ pub enum ViewerAction {
     ChangeObjects { page_index: usize, objects: Vec<quintess_core::objects::PageObject>, change: quintess_core::objects::Change, label: String, expected: Vec<(quintess_core::objects::ObjectKind, [f32; 4])> },
     /// Choose a picture file to put in place of these pictures.
     ReplacePicture { page_index: usize, objects: Vec<quintess_core::objects::PageObject> },
+    /// Save a finished measurement at the page's scale.
+    AddMeasurement { page_index: usize, kind: quintess_core::measure::MeasureKind, points: Vec<(f32, f32)> },
+    /// A known length was measured: ask how long it really is.
+    Calibrate { points_length: f32 },
+    SetMeasureKind(quintess_core::measure::MeasureKind),
+    /// Ask for a scale such as "1 in = 10 ft".
+    SetScale,
 }
 
 /// Something waiting for the person to type text in a dialog.
@@ -182,6 +193,8 @@ pub struct ViewerState {
     pane: usize,
     /// The Edit pictures and shapes tool's selection and gesture.
     pub objects: crate::object_tool::ObjectToolState,
+    /// The Measure tool's points so far.
+    pub measure: crate::measure_tool::MeasureToolState,
 }
 
 /// An existing line of page text open for editing.
@@ -461,10 +474,15 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut ViewerState, t
                 if tool == Tool::EditObjects {
                     crate::object_tool::draw(ui, tab, &mut state.objects, page_index, geometry, screen_rect, zoom, &mut actions);
                 }
+                if tool == Tool::Measure {
+                    crate::measure_tool::draw(ui, &state.measure, &settings.measure, page_index, geometry, screen_rect, zoom);
+                }
             }
         }
     });
-    let _ = output;
+    if tool == Tool::Measure {
+        crate::measure_tool::bar(ui, &mut state.measure, &settings.measure, output.inner_rect, &mut actions);
+    }
 
     // Ctrl+scroll zooms around the current page.
     let zoom_delta = ui.input(|i| i.zoom_delta());
@@ -817,6 +835,10 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
     let point = pointer.map(|p| to_page(geometry, page_rect, zoom, p));
     if tool == Tool::EditObjects {
         crate::object_tool::input(ui, tab, &mut state.objects, page_index, geometry, page_rect, zoom, &response, actions);
+        return;
+    }
+    if tool == Tool::Measure {
+        crate::measure_tool::input(ui, &mut state.measure, &settings.measure, page_index, geometry, page_rect, zoom, &response, actions);
         return;
     }
 

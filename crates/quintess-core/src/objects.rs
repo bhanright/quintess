@@ -93,6 +93,8 @@ pub struct PageObject {
     pub name: Option<String>,
     /// For images: pixel size.
     pub pixels: Option<(u32, u32)>,
+    /// How solid it is drawn (1 solid, 0 invisible).
+    pub opacity: f32,
 }
 
 fn number(object: &Object) -> Option<f32> {
@@ -122,20 +124,27 @@ pub fn list_objects(pdf: &Pdf, page_number: u32) -> Result<Vec<PageObject>> {
     let page_id = pdf.page_id(page_number)?;
     let operations = page_operations(pdf, page_id)?;
     let xobjects = page_xobjects(pdf, page_id);
-    Ok(find_objects(pdf, &operations, &xobjects))
+    let states = page_resource_category(pdf, page_id, b"ExtGState");
+    Ok(find_objects(pdf, &operations, &xobjects, &states))
 }
 
 /// The page's XObject dictionary, resolved.
 fn page_xobjects(pdf: &Pdf, page_id: ObjectId) -> Dictionary {
-    let Ok(Some(resources)) = pdf.inherited_attribute(page_id, b"Resources") else { return Dictionary::new() };
-    let resources = pdf.resolve(&resources).as_dict().cloned().unwrap_or_default();
-    resources.get(b"XObject").ok().and_then(|x| pdf.resolve(x).as_dict().ok()).cloned().unwrap_or_default()
+    page_resource_category(pdf, page_id, b"XObject")
 }
 
-fn find_objects(pdf: &Pdf, operations: &[Operation], xobjects: &Dictionary) -> Vec<PageObject> {
+fn page_resource_category(pdf: &Pdf, page_id: ObjectId, category: &[u8]) -> Dictionary {
+    let Ok(Some(resources)) = pdf.inherited_attribute(page_id, b"Resources") else { return Dictionary::new() };
+    let resources = pdf.resolve(&resources).as_dict().cloned().unwrap_or_default();
+    resources.get(category).ok().and_then(|x| pdf.resolve(x).as_dict().ok()).cloned().unwrap_or_default()
+}
+
+fn find_objects(pdf: &Pdf, operations: &[Operation], xobjects: &Dictionary, states: &Dictionary) -> Vec<PageObject> {
     let mut found = Vec::new();
     let mut ctm = IDENTITY;
-    let mut stack: Vec<Matrix> = Vec::new();
+    // The fill opacity in force (from `gs` with /ca), saved with the CTM.
+    let mut opacity: f32 = 1.0;
+    let mut stack: Vec<(Matrix, f32)> = Vec::new();
     // The path being built: where it starts, its points (user space), and
     // whether it is used as a clip.
     let mut path_start: Option<usize> = None;
@@ -145,8 +154,14 @@ fn find_objects(pdf: &Pdf, operations: &[Operation], xobjects: &Dictionary) -> V
     for (index, operation) in operations.iter().enumerate() {
         let operator = operation.operator.as_str();
         match operator {
-            "q" => stack.push(ctm),
-            "Q" => ctm = stack.pop().unwrap_or(IDENTITY),
+            "q" => stack.push((ctm, opacity)),
+            "Q" => (ctm, opacity) = stack.pop().unwrap_or((IDENTITY, 1.0)),
+            "gs" => {
+                let state = operation.operands.first().and_then(|o| o.as_name().ok()).and_then(|name| states.get(name).ok()).and_then(|s| pdf.resolve(s).as_dict().ok());
+                if let Some(alpha) = state.and_then(|s| s.get(b"ca").ok()).and_then(|a| pdf.resolve(a).as_float().ok()) {
+                    opacity = alpha;
+                }
+            }
             "cm" => {
                 let values = numbers(operation);
                 if values.len() == 6 {
@@ -174,7 +189,7 @@ fn find_objects(pdf: &Pdf, operations: &[Operation], xobjects: &Dictionary) -> V
                     // change what everything after them shows.
                     if operator != "n" && !clipping {
                         if let Some(bounds) = bounds_of(path_points.iter().map(|point| apply(ctm, *point))) {
-                            found.push(PageObject { kind: ObjectKind::Shape, start, end: index + 1, bounds, ctm, name: None, pixels: None });
+                            found.push(PageObject { kind: ObjectKind::Shape, start, end: index + 1, bounds, ctm, name: None, pixels: None, opacity });
                         }
                     }
                 }
@@ -202,13 +217,13 @@ fn find_objects(pdf: &Pdf, operations: &[Operation], xobjects: &Dictionary) -> V
                     (ObjectKind::Group, bounds_of(corners.map(|p| apply(to_page, p))), None)
                 };
                 if let Some(bounds) = bounds {
-                    found.push(PageObject { kind, start: index, end: index + 1, bounds, ctm, name: Some(String::from_utf8_lossy(name).into_owned()), pixels });
+                    found.push(PageObject { kind, start: index, end: index + 1, bounds, ctm, name: Some(String::from_utf8_lossy(name).into_owned()), pixels, opacity });
                 }
             }
             "BI" => {
                 let unit_square = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
                 if let Some(bounds) = bounds_of(unit_square.map(|p| apply(ctm, p))) {
-                    found.push(PageObject { kind: ObjectKind::Image, start: index, end: index + 1, bounds, ctm, name: None, pixels: None });
+                    found.push(PageObject { kind: ObjectKind::Image, start: index, end: index + 1, bounds, ctm, name: None, pixels: None, opacity });
                 }
             }
             _ => {}
@@ -249,6 +264,57 @@ pub enum Change {
     /// Moves to the front or back of the page's drawing order.
     BringToFront,
     SendToBack,
+    /// See-through drawing (0 invisible to 1 solid) and how colors mix
+    /// with what is underneath (a PDF blend mode such as "Multiply").
+    Appearance { opacity: f32, blend_mode: BlendMode },
+}
+
+/// How an object's colors combine with what lies beneath, as in image
+/// editors. The names are PDF's own.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BlendMode {
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+impl BlendMode {
+    pub const ALL: [BlendMode; 16] = [BlendMode::Normal, BlendMode::Multiply, BlendMode::Screen, BlendMode::Overlay, BlendMode::Darken, BlendMode::Lighten, BlendMode::ColorDodge, BlendMode::ColorBurn, BlendMode::HardLight, BlendMode::SoftLight, BlendMode::Difference, BlendMode::Exclusion, BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity];
+
+    /// The PDF name, which is also the label people know from image editors.
+    pub fn name(self) -> &'static str {
+        match self {
+            BlendMode::Normal => "Normal",
+            BlendMode::Multiply => "Multiply",
+            BlendMode::Screen => "Screen",
+            BlendMode::Overlay => "Overlay",
+            BlendMode::Darken => "Darken",
+            BlendMode::Lighten => "Lighten",
+            BlendMode::ColorDodge => "ColorDodge",
+            BlendMode::ColorBurn => "ColorBurn",
+            BlendMode::HardLight => "HardLight",
+            BlendMode::SoftLight => "SoftLight",
+            BlendMode::Difference => "Difference",
+            BlendMode::Exclusion => "Exclusion",
+            BlendMode::Hue => "Hue",
+            BlendMode::Saturation => "Saturation",
+            BlendMode::Color => "Color",
+            BlendMode::Luminosity => "Luminosity",
+        }
+    }
 }
 
 /// Page-space transformations, for use with [`Change::Transform`].
@@ -292,7 +358,7 @@ pub fn change_objects(pdf: &mut Pdf, page_number: u32, selected: &[PageObject], 
     pdf.materialize_inherited_attributes(page_id)?;
     let mut operations = page_operations(pdf, page_id)?;
     // Check the selection still matches the page.
-    let current = find_objects(pdf, &operations, &page_xobjects(pdf, page_id));
+    let current = find_objects(pdf, &operations, &page_xobjects(pdf, page_id), &page_resource_category(pdf, page_id, b"ExtGState"));
     for object in selected {
         if !current.iter().any(|known| known.start == object.start && known.end == object.end && known.kind == object.kind) {
             bail!("the page has changed since these objects were picked; pick them again");
@@ -346,6 +412,26 @@ pub fn change_objects(pdf: &mut Pdf, page_number: u32, selected: &[PageObject], 
                 let placement = multiply([fit_width, 0.0, 0.0, fit_height, left, bottom], inverse);
                 let replacement = vec![Operation::new("q", vec![]), matrix_operation(placement), Operation::new("Do", vec![Object::Name(name.as_bytes().to_vec())]), Operation::new("Q", vec![])];
                 operations.splice(object.start..object.end, replacement);
+            }
+        }
+        Change::Appearance { opacity, blend_mode } => {
+            let opacity = opacity.clamp(0.0, 1.0);
+            let state = lopdf::dictionary! { "Type" => "ExtGState", "ca" => opacity, "CA" => opacity, "BM" => Object::Name(blend_mode.name().as_bytes().to_vec()) };
+            let name = pdf.add_page_resource(page_id, b"ExtGState", "QsGs", Object::Dictionary(state))?;
+            for object in &ordered {
+                // When an earlier opacity change already wraps the object,
+                // replace its setting so the new value is absolute, not
+                // stacked on the old one.
+                let earlier = object.start >= 2
+                    && operations[object.start - 2].operator == "q"
+                    && operations[object.start - 1].operator == "gs"
+                    && operations[object.start - 1].operands.first().and_then(|o| o.as_name().ok()).is_some_and(|n| n.starts_with(b"QsGs"))
+                    && operations.get(object.end).is_some_and(|o| o.operator == "Q");
+                if earlier {
+                    operations[object.start - 1] = Operation::new("gs", vec![Object::Name(name.as_bytes().to_vec())]);
+                } else {
+                    wrap(&mut operations, object, vec![Operation::new("q", vec![]), Operation::new("gs", vec![Object::Name(name.as_bytes().to_vec())])]);
+                }
             }
         }
         Change::BringToFront | Change::SendToBack => {

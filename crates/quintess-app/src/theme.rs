@@ -359,6 +359,7 @@ pub mod icon {
     pub const SIGN: char = '\u{EE56}';
     pub const INSPECT: char = '\u{E946}';
     pub const PICTURE: char = '\u{E91B}';
+    pub const MEASURE: char = '\u{ECC6}';
     pub const FIELD: char = '\u{E929}';
     pub const CHECKBOX: char = '\u{E73A}';
     pub const PAGES: char = '\u{E8A9}';

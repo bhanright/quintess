@@ -25,6 +25,7 @@ pub mod stamp;
 pub mod document;
 pub mod edit_text;
 pub mod engine;
+pub mod measure;
 pub mod metadata;
 pub mod objects;
 pub mod ocr;

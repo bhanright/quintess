@@ -181,6 +181,11 @@ saves a picture of the window and exits (setup options are documented on
   page-space transform T, as C·T·C⁻¹ in the object's space; a clipping path for
   crops) or remove it; restacking lifts runs with their CTM and color state.
   The tool reselects by expected bounds after each change. Tests render pages.
+- Measuring (`measure.rs`, `measure_tool.rs`): Scale parsing ("1 in = 10 ft",
+  "1:100 m", calibration from a known length), /VP viewport scales from CAD
+  files, Line/PolyLine/Polygon annotations with /IT …Dimension and /Measure (RL)
+  plus a drawn label. Object opacity/blend modes: `Change::Appearance` wraps
+  the run in `q /QsGsN gs … Q`, replacing an earlier one so values are absolute.
 - Help: `docs/USER_GUIDE.md` is compiled into the app (`app/help.rs`) and
   shown with a searchable topic list (F1, Help ▸ User guide). Keep it in
   step with features. `README.md` is the GitHub front page.

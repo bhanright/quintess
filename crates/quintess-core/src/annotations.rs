@@ -45,6 +45,9 @@ pub enum AnnotationKind {
     Link { rect: [f32; 4], target: LinkTarget },
     /// An area marked for redaction; nothing is removed until redaction is applied.
     RedactionMark { rects: Vec<[f32; 4]> },
+    /// A distance, perimeter or area measured at a scale, labeled with the
+    /// result (which also becomes the annotation's text).
+    Measurement { kind: crate::measure::MeasureKind, points: Vec<(f32, f32)>, scale: crate::measure::Scale, border_width: f32 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -395,6 +398,73 @@ pub fn add_annotation(pdf: &mut Pdf, page_number: u32, annotation: &NewAnnotatio
                 }
             }
             ("Link", *rect, String::new(), Dictionary::new())
+        }
+        AnnotationKind::Measurement { kind, points, scale, border_width } => {
+            use crate::measure::MeasureKind;
+            let needed = if *kind == MeasureKind::Distance { 2 } else if *kind == MeasureKind::Area { 3 } else { 2 };
+            if points.len() < needed {
+                bail!("a measurement needs at least {needed} points");
+            }
+            let points: Vec<(f32, f32)> = if *kind == MeasureKind::Distance { points[..2].to_vec() } else { points.clone() };
+            let value = crate::measure::measure(*kind, &points, scale);
+            dict.set("Contents", text_string(&value));
+            let (subtype, entries) = crate::measure::measurement_entries(*kind, scale);
+            for (key, object) in entries {
+                dict.set(key, object);
+            }
+            dict.set("BS", dictionary! { "W" => *border_width });
+            let coordinates = Object::Array(points.iter().flat_map(|&(x, y)| [Object::Real(x), Object::Real(y)]).collect());
+            if *kind == MeasureKind::Distance {
+                dict.set("L", coordinates);
+                // Show the value on the line, as Acrobat does.
+                dict.set("Cap", true);
+            } else {
+                dict.set("Vertices", coordinates);
+            }
+            let mut content = String::new();
+            if *kind == MeasureKind::Area {
+                // A light fill shows the measured area.
+                content.push_str(&format!("q /G1 gs {} ", rgb(color, false)));
+                for (index, (x, y)) in points.iter().enumerate() {
+                    content.push_str(&format!("{} {} {} ", number(*x), number(*y), if index == 0 { "m" } else { "l" }));
+                }
+                content.push_str("h f Q ");
+            }
+            content.push_str(&format!("/G0 gs {} {} w 1 j 1 J ", rgb(color, true), number(*border_width)));
+            for (index, (x, y)) in points.iter().enumerate() {
+                content.push_str(&format!("{} {} {} ", number(*x), number(*y), if index == 0 { "m" } else { "l" }));
+            }
+            content.push_str(if *kind == MeasureKind::Area { "s " } else { "S " });
+            if *kind == MeasureKind::Distance {
+                // Short ticks across both ends.
+                let (start, end) = (points[0], points[1]);
+                let angle = (end.1 - start.1).atan2(end.0 - start.0) + std::f32::consts::FRAC_PI_2;
+                let (dx, dy) = (5.0 * angle.cos(), 5.0 * angle.sin());
+                for (x, y) in [start, end] {
+                    content.push_str(&format!("{} {} m {} {} l S ", number(x - dx), number(y - dy), number(x + dx), number(y + dy)));
+                }
+            }
+            // The label on a white plate: at the middle of a distance, the
+            // end of a perimeter, the center of an area.
+            let anchor = match kind {
+                MeasureKind::Distance => ((points[0].0 + points[1].0) / 2.0, (points[0].1 + points[1].1) / 2.0 + 4.0),
+                MeasureKind::Perimeter => points[points.len() - 1],
+                MeasureKind::Area => (points.iter().map(|p| p.0).sum::<f32>() / points.len() as f32, points.iter().map(|p| p.1).sum::<f32>() / points.len() as f32),
+            };
+            let size = 9.0;
+            let mut setter = TextSetter::for_texts(StandardFont::Helvetica, [value.as_str()]);
+            let width = setter.width(&value, size);
+            let plate = [anchor.0 - width / 2.0 - 3.0, anchor.1 - 3.0, anchor.0 + width / 2.0 + 3.0, anchor.1 + size + 2.0];
+            content.push_str(&format!("1 1 1 rg {} {} {} {} re f BT {} 1 0 0 1 {} {} Tm ", number(plate[0]), number(plate[1]), number(plate[2] - plate[0]), number(plate[3] - plate[1]), rgb(color, false), number(anchor.0 - width / 2.0), number(anchor.1)));
+            content.push_str(&setter.show(&mut pdf.doc, &value, size));
+            content.push_str(" ET");
+            let mut resources = transparency_resources(opacity, false);
+            let mut states = resources.get(b"ExtGState").and_then(Object::as_dict).cloned().unwrap_or_default();
+            states.set("G1", dictionary! { "Type" => "ExtGState", "ca" => 0.15 * opacity });
+            resources.set("ExtGState", states);
+            resources.set("Font", setter.finish(&mut pdf.doc)?);
+            let rect = union_rect(&[points_rect(points.iter().copied(), border_width + 6.0), plate]);
+            (subtype, rect, content, resources)
         }
         AnnotationKind::RedactionMark { rects } => {
             dict.set("QuadPoints", quad_points(rects));

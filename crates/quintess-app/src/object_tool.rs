@@ -5,7 +5,7 @@
 //! the outlines and handles, and the floating toolbar.
 
 use egui::{Color32, CursorIcon, Pos2, Rect, Stroke, StrokeKind, vec2};
-use quintess_core::objects::{Change, Matrix, ObjectKind, PageObject, apply, object_at, objects_in, rectangle_to_rectangle, rotation_about, scaling_about, translation};
+use quintess_core::objects::{BlendMode, Change, Matrix, ObjectKind, PageObject, apply, object_at, objects_in, rectangle_to_rectangle, rotation_about, scaling_about, translation};
 
 use crate::tab::{DocumentTab, PageGeometry};
 use crate::viewer::{ViewerAction, screen_rect_of, to_page};
@@ -381,6 +381,7 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
         (count, _) => format!("{count} objects"),
     };
     let (cropping, all_pictures) = (state.cropping, pictures == state.selected.len());
+    let starting_opacity = state.selected.first().map_or(1.0, |object| object.opacity);
     let (mut toggle_crop, mut replace, mut outcome) = (false, false, None);
     // Keep the bar inside the view, using its width from the last frame.
     let bar_id = ui.id().with(("object toolbar", page_index));
@@ -417,6 +418,22 @@ fn toolbar(ui: &egui::Ui, state: &mut ObjectToolState, page_index: usize, select
                 if all_pictures && ui.button("Replace…").on_hover_text("Put another picture in its place").clicked() {
                     replace = true;
                 }
+                // Opacity and blend mode, chosen in a small menu and applied together.
+                let look_id = ui.id().with("object look");
+                let (mut opacity, mut blend_mode) = ui.ctx().data(|data| data.get_temp::<(f32, BlendMode)>(look_id)).unwrap_or((starting_opacity, BlendMode::Normal));
+                ui.menu_button("Opacity", |ui| {
+                    ui.add(egui::Slider::new(&mut opacity, 0.0..=1.0).custom_formatter(|value, _| format!("{:.0}%", value * 100.0)).text("Opacity"));
+                    egui::ComboBox::from_label("Blend").selected_text(blend_label(blend_mode)).show_ui(ui, |ui| {
+                        for mode in BlendMode::ALL {
+                            ui.selectable_value(&mut blend_mode, mode, blend_label(mode));
+                        }
+                    });
+                    if ui.button("Apply").clicked() {
+                        push("Opacity", Change::Appearance { opacity, blend_mode }, Some(quintess_core::objects::IDENTITY));
+                        ui.close();
+                    }
+                });
+                ui.ctx().data_mut(|data| data.insert_temp(look_id, (opacity, blend_mode)));
                 if ui.button("Front").on_hover_text("Bring to front").clicked() {
                     push("Bring to front", Change::BringToFront, None);
                 }
@@ -461,9 +478,22 @@ mod tests {
 
     #[test]
     fn expected_bounds_follow_the_transformation() {
-        let object = PageObject { kind: ObjectKind::Image, start: 0, end: 1, bounds: [0.0, 0.0, 10.0, 20.0], ctm: quintess_core::objects::IDENTITY, name: None, pixels: None };
+        let object = PageObject { kind: ObjectKind::Image, start: 0, end: 1, bounds: [0.0, 0.0, 10.0, 20.0], ctm: quintess_core::objects::IDENTITY, name: None, pixels: None, opacity: 1.0 };
         let expected = expected_after(&[object], rotation_about(90.0, (5.0, 10.0)));
         let [l, b, r, t] = expected[0].1;
         assert!((l + 5.0).abs() < 1e-4 && (b - 5.0).abs() < 1e-4 && (r - 15.0).abs() < 1e-4 && (t - 15.0).abs() < 1e-4, "{:?}", expected[0].1);
     }
+}
+
+/// A blend mode's name with spaces, as image editors show it ("Color Dodge").
+fn blend_label(mode: BlendMode) -> String {
+    let name = mode.name();
+    let mut label = String::new();
+    for (index, character) in name.char_indices() {
+        if index > 0 && character.is_uppercase() {
+            label.push(' ');
+        }
+        label.push(character);
+    }
+    label
 }

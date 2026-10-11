@@ -156,6 +156,22 @@ impl QuintessApp {
                 "organizer" => self.organizer = true,
                 "tool" if value == "edit-text" => self.tool = Tool::EditText,
                 "tool" if value == "edit-objects" => self.tool = Tool::EditObjects,
+                "tool" if value == "measure" => self.tool = Tool::Measure,
+                "measure-area" => self.tool_settings.measure.kind = quintess_core::measure::MeasureKind::Area,
+                "scale" => {
+                    if let Ok(scale) = quintess_core::measure::Scale::parse(value) {
+                        self.tool_settings.measure.scale = scale;
+                    }
+                }
+                "measure-points" => {
+                    // x;y;x;y… on the current page
+                    let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        let points = numbers.chunks_exact(2).map(|pair| (pair[0], pair[1])).collect();
+                        let page = tab.current_page;
+                        self.viewer_states.entry(tab.id).or_default().measure.set_points(page, points);
+                    }
+                }
                 "select-object" => {
                     // x;y on the current page
                     let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
@@ -1540,6 +1556,17 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         self.reselect_objects(page_index, &[]);
                     }
                 }
+                ViewerAction::AddMeasurement { page_index, kind, points } => {
+                    // A drawing's own scale wins over the one chosen here.
+                    let page = page_index as u32 + 1;
+                    let drawing_scale = self.tab().and_then(|tab| tab.load_pdf().ok()).and_then(|pdf| quintess_core::measure::viewport_scale(&pdf, page, points[0]));
+                    let scale = drawing_scale.unwrap_or_else(|| self.tool_settings.measure.scale.clone());
+                    let annotation = quintess_core::annotations::NewAnnotation::new(quintess_core::annotations::AnnotationKind::Measurement { kind, points, scale, border_width: self.tool_settings.stroke_width.min(2.0) }).with_color(self.tool_settings.color);
+                    self.edit("Measure", |pdf| quintess_core::annotations::add_annotation(pdf, page, &annotation).map(|_| ()));
+                }
+                ViewerAction::Calibrate { points_length } => self.dialogs.push(Dialog::MeasureScale { text: String::new(), calibrated_points: Some(points_length), length: String::new(), unit: "ft".into() }),
+                ViewerAction::SetMeasureKind(kind) => self.tool_settings.measure.kind = kind,
+                ViewerAction::SetScale => self.dialogs.push(Dialog::MeasureScale { text: self.tool_settings.measure.scale.label(), calibrated_points: None, length: String::new(), unit: "ft".into() }),
                 ViewerAction::AddPageText { page, x, y, text, style } => self.edit("Add text", |pdf| quintess_core::edit_text::add_text(pdf, page as usize - 1, x, y, &text, &style)),
                 ViewerAction::Inspect { page_index, x, y } => self.inspect_at(page_index, x, y),
                 ViewerAction::ShowCode(code) => self.dialogs.push(Dialog::QrCode(code)),
@@ -1659,6 +1686,10 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                         quintess_core::spelling::download_dictionary(&tag)?;
                         Ok(JobOutcome::Message(format!("Added the {name} dictionary. Choose it in Preferences ▸ Spelling.")))
                     });
+                }
+                AppRequest::SetMeasureScale(scale) => {
+                    self.info(format!("Measuring at {}.", scale.label()));
+                    self.tool_settings.measure.scale = scale;
                 }
                 AppRequest::OpenDialog(dialog) => self.dialogs.push(*dialog),
                 AppRequest::ShowOnPage { page_index, display_rect } => {
@@ -1816,6 +1847,7 @@ fn annotation_label(kind: &quintess_core::annotations::AnnotationKind) -> &'stat
         Stamp { .. } => "stamp",
         Link { .. } => "link",
         RedactionMark { .. } => "redaction mark",
+        Measurement { .. } => "measurement",
     }
 }
 
