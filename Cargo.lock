@@ -3859,6 +3859,7 @@ dependencies = [
  "ocrs",
  "pdfium-render",
  "qrcode",
+ "quick-xml",
  "rcgen",
  "regex",
  "ring",
@@ -3877,6 +3878,7 @@ dependencies = [
  "ureq",
  "windows",
  "x509-parser",
+ "zip",
 ]
 
 [[package]]

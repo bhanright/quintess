@@ -32,6 +32,7 @@ pub mod ocr;
 pub mod optimize;
 pub mod pages;
 pub mod preflight;
+pub mod presentation;
 #[cfg(windows)]
 pub mod print;
 pub mod qr;
@@ -43,7 +44,9 @@ pub mod security;
 pub mod settings;
 pub mod signatures;
 pub mod spelling;
+pub mod spreadsheet;
 pub mod strings;
+pub mod tables;
 pub mod unicode_text;
 pub mod updates;
 pub mod watch;
