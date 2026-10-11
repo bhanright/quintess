@@ -39,6 +39,16 @@ pub struct Settings {
     /// Graphics: "automatic" (OpenGL, falling back to wgpu) or "wgpu"
     /// (DirectX or Vulkan). Read when the app starts.
     pub graphics: String,
+    /// The certificate file (.pfx or .p12) last signed with; its password is
+    /// never stored.
+    pub signing_certificate_file: Option<PathBuf>,
+    /// The Windows certificate last signed with, by thumbprint.
+    pub signing_store_thumbprint: Option<String>,
+    /// How the last signature was made: "identity", "file" or "store".
+    pub signing_source: String,
+    /// The timestamp server to use, and whether to add a timestamp.
+    pub timestamp_server: String,
+    pub add_timestamp: bool,
 }
 
 /// The page a file was left at, and its zoom (`None` when it was fitted to
@@ -71,6 +81,11 @@ impl Default for Settings {
             spelling_language: String::new(),
             page_memory_megabytes: 768,
             graphics: "automatic".into(),
+            signing_certificate_file: None,
+            signing_store_thumbprint: None,
+            signing_source: "identity".into(),
+            timestamp_server: "http://timestamp.digicert.com".into(),
+            add_timestamp: false,
         }
     }
 }

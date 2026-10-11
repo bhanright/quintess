@@ -289,6 +289,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 "split" => self.split_view = true,
                 "spelling" => self.start_spell_check(ctx),
                 "read-aloud" => self.start_reading(false),
+                "sign-dialog" => self.sign_here(1, [350.0, 80.0, 550.0, 140.0]),
                 "inspect" => {
                     // x;y on the current page
                     let numbers: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
@@ -958,21 +959,50 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn sign_here(&mut self, page: u32, rect: [f32; 4]) {
-        let Some(identity_path) = self.settings.signing_identity.clone() else {
-            self.error("Create or choose a signing identity first.");
-            self.dialogs.push(Dialog::CreateIdentity { name: self.settings.author.clone(), email: String::new(), organization: String::new() });
-            return;
-        };
-        let Some(tab) = self.tabs.get_mut(self.active) else { return };
-        let result = quintess_core::signatures::SigningIdentity::load(&identity_path).and_then(|identity| {
-            let signed = quintess_core::signatures::sign(&tab.bytes, &identity, &quintess_core::signatures::SignOptions { placement: Some((page, rect)), reason: "I approve this document".into(), ..Default::default() })?;
-            tab.replace_bytes("Sign", signed)?;
-            Ok(identity.signer_name())
-        });
-        if let Some(name) = self.report(result) {
-            self.tool = Tool::Select;
-            self.info(format!("Signed by {name}. Later edits are added after the signature, which stays valid; redacting or removing content rewrites the file and invalidates it."));
+        let dialog = dialogs::SignDialog::new(page, rect, &self.settings);
+        if dialog.source == dialogs::SignSource::OwnIdentity && dialog.identity_file.is_none() && dialog.store_certificates.is_empty() && dialog.certificate_file.is_none() {
+            self.error("Create a signing identity first, or sign with a certificate file.");
         }
+        self.dialogs.push(Dialog::Sign(Box::new(dialog)));
+    }
+
+    /// Signs with the Sign dialog's choices, in the background (a timestamp
+    /// means asking a server, which can take a moment).
+    fn sign_with(&mut self, ctx: &egui::Context, choice: dialogs::SignDialog) {
+        use quintess_core::signatures::{SignOptions, SigningIdentity};
+        let identity = match choice.source {
+            dialogs::SignSource::OwnIdentity => choice.identity_file.as_deref().map(SigningIdentity::load),
+            dialogs::SignSource::CertificateFile => choice.certificate_file.as_deref().map(|path| std::fs::read(path).map_err(anyhow::Error::from).and_then(|bytes| SigningIdentity::from_pkcs12(&bytes, &choice.password))),
+            dialogs::SignSource::WindowsStore => choice.store_thumbprint.as_deref().map(quintess_core::cert_store::identity_from_store),
+        };
+        let Some(identity) = identity.map(|result| self.report(result)).flatten() else { return };
+        // Remember the choices (never the password) for next time.
+        self.settings.signing_source = match choice.source {
+            dialogs::SignSource::OwnIdentity => "identity",
+            dialogs::SignSource::CertificateFile => "file",
+            dialogs::SignSource::WindowsStore => "store",
+        }
+        .into();
+        self.settings.signing_certificate_file = choice.certificate_file.clone().or(self.settings.signing_certificate_file.take());
+        self.settings.signing_store_thumbprint = choice.store_thumbprint.clone().or(self.settings.signing_store_thumbprint.take());
+        self.settings.signing_identity = choice.identity_file.clone().or(self.settings.signing_identity.take());
+        self.settings.add_timestamp = choice.add_timestamp;
+        self.settings.timestamp_server = choice.timestamp_server.clone();
+        let _ = self.settings.save();
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let (tab_id, bytes) = (tab.id, tab.bytes.clone());
+        let options = SignOptions {
+            placement: Some((choice.page, choice.rect)),
+            reason: choice.reason.clone(),
+            location: choice.location.clone(),
+            timestamp_server: choice.add_timestamp.then(|| choice.timestamp_server.trim().to_string()).filter(|server| !server.is_empty()),
+            ..Default::default()
+        };
+        self.tool = Tool::Select;
+        self.start_job(ctx, "Signing", move |_| {
+            let signed = quintess_core::signatures::sign(&bytes, &identity, &options)?;
+            Ok(JobOutcome::ReplaceBytes { tab_id, label: format!("Signed by {}", identity.signer_name()), bytes: signed, removes_content: false })
+        });
     }
 
     fn apply_job_outcome(&mut self, outcome: JobOutcome) {
@@ -992,6 +1022,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             JobOutcome::UpdateChecked { found, manual } => self.update_checked(found, manual),
             JobOutcome::UpdateDownloaded { path, verified, version } => self.update_window = Some(updates::UpdateWindow::Ready { path, verified, version }),
             JobOutcome::Spelling { tab_id, found } => self.spelling_checked(tab_id, found),
+            JobOutcome::Signatures(checks) => self.dialogs.push(Dialog::SignatureResults(checks)),
             JobOutcome::QrCodes { tab_id, version, codes } => {
                 let count = codes.len();
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -1311,13 +1342,38 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         });
         if let Some(values) = self.report(result) {
             let mut unmatched = Vec::new();
+            let mut script_notes: Vec<String> = Vec::new();
             self.edit("Import form data", |pdf| {
-                unmatched = forms::fill_fields(pdf, &values)?;
+                // The form's own calculations run on the imported values.
+                let (missing, outcome) = quintess_core::form_scripts::fill_fields_and_calculate(pdf, &values)?;
+                unmatched = missing;
+                script_notes = outcome.alerts.into_iter().chain(outcome.script_errors).collect();
                 Ok(())
             });
             if !unmatched.is_empty() {
                 self.info(format!("Filled the form; no field matched: {}", unmatched.join(", ")));
             }
+            if !script_notes.is_empty() {
+                self.info(format!("The form says: {}", script_notes.join(" · ")));
+            }
+        }
+    }
+
+    /// Stores a field's new value the way the form intends: its keystroke and
+    /// validation scripts may refuse it (then nothing changes and the form's
+    /// message is shown), and its calculations and formats run afterwards.
+    fn fill_field(&mut self, name: String, value: String) {
+        let mut alerts = Vec::new();
+        let filled = self.try_edit("Fill field", |pdf| {
+            let outcome = quintess_core::form_scripts::apply_field_value(pdf, &name, &value)?;
+            if let Some(rejected) = outcome.rejected {
+                anyhow::bail!("{}", if rejected.message.is_empty() { format!("The form doesn't accept \"{}\" in {}.", rejected.value, rejected.field) } else { rejected.message });
+            }
+            alerts = outcome.alerts.into_iter().chain(outcome.script_errors).collect();
+            Ok(())
+        });
+        if filled && !alerts.is_empty() {
+            self.info(format!("The form says: {}", alerts.join(" · ")));
         }
     }
 
@@ -1609,8 +1665,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.edit(&label, |pdf| quintess_core::annotations::add_annotation(pdf, page, &annotation).map(|_| ()));
                 }
                 ViewerAction::FillField { name, value } => {
-                    let values = std::collections::BTreeMap::from([(name, value)]);
-                    self.edit("Fill field", |pdf| forms::fill_fields(pdf, &values).map(|_| ()));
+                    self.fill_field(name, value);
                 }
                 ViewerAction::AddField(field) => self.edit("Add field", |pdf| forms::add_field(pdf, &field).map(|_| ())),
                 ViewerAction::AskForText(pending) => self.dialogs.push(Dialog::Text(pending)),
@@ -1752,8 +1807,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 SidebarAction::FillField(name, value) => {
-                    let values = std::collections::BTreeMap::from([(name, value)]);
-                    self.edit("Fill field", |pdf| forms::fill_fields(pdf, &values).map(|_| ()));
+                    self.fill_field(name, value);
                 }
                 SidebarAction::SetBookmarks(entries) => self.edit("Bookmarks", |pdf| set_bookmarks(pdf, &entries)),
                 SidebarAction::AddAttachment => {
@@ -1851,6 +1905,46 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 AppRequest::SetMeasureScale(scale) => {
                     self.info(format!("Measuring at {}.", scale.label()));
                     self.tool_settings.measure.scale = scale;
+                }
+                AppRequest::Sign(choice) => {
+                    let ctx = self.worker_context.clone();
+                    self.sign_with(&ctx, *choice);
+                }
+                AppRequest::TrustCertificate(certificate) => {
+                    let folder = quintess_core::validation::trusted_certificates_folder();
+                    let result = quintess_core::validation::add_trusted_certificates(&folder, &certificate);
+                    if self.report(result).is_some() {
+                        self.info("Trusted. Signatures by this certificate, or certificates it issued, now show as valid.");
+                        if let Some(tab) = self.tabs.get(self.active) {
+                            let checks = quintess_core::signatures::verify(&tab.bytes);
+                            if let Some(checks) = self.report(checks) {
+                                self.dialogs.push(Dialog::SignatureResults(checks));
+                            }
+                        }
+                    }
+                }
+                AppRequest::CheckRevocation => {
+                    let Some(tab) = self.tabs.get(self.active) else { continue };
+                    let bytes = tab.bytes.clone();
+                    let ctx = self.worker_context.clone();
+                    self.start_job(&ctx, "Checking for revocation", move |_| {
+                        let mut checks = quintess_core::signatures::verify(&bytes)?;
+                        let transport = quintess_core::net::NetworkTransport::new(std::time::Duration::from_secs(20));
+                        for check in &mut checks {
+                            quintess_core::signatures::check_revocation_online(check, &transport);
+                        }
+                        Ok(JobOutcome::Signatures(checks))
+                    });
+                }
+                AppRequest::AddLongTermValidation => {
+                    let Some(tab) = self.tabs.get(self.active) else { continue };
+                    let (tab_id, bytes) = (tab.id, tab.bytes.clone());
+                    let ctx = self.worker_context.clone();
+                    self.start_job(&ctx, "Adding long-term validation", move |_| {
+                        let transport = quintess_core::net::NetworkTransport::new(std::time::Duration::from_secs(20));
+                        let result = quintess_core::ltv::add_long_term_validation(&bytes, &transport, &Default::default())?;
+                        Ok(JobOutcome::ReplaceBytes { tab_id, label: "Added long-term validation".into(), bytes: result.bytes, removes_content: false })
+                    });
                 }
                 AppRequest::OpenDialog(dialog) => self.dialogs.push(*dialog),
                 AppRequest::ShowOnPage { page_index, display_rect } => {

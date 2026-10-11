@@ -47,6 +47,14 @@ pub enum AppRequest {
     DownloadOcrModels,
     /// Download a spelling dictionary (a language tag such as "pt-PT").
     DownloadDictionary(String),
+    /// Sign with the choices made in the Sign dialog.
+    Sign(Box<SignDialog>),
+    /// Trust a certificate (DER) from now on, then check the signatures again.
+    TrustCertificate(Vec<u8>),
+    /// Ask the certificates' issuers whether any was revoked (online).
+    CheckRevocation,
+    /// Store certificates and revocation answers in the document.
+    AddLongTermValidation,
     SetMeasureScale(quintess_core::measure::Scale),
     /// Turn to a page and outline a box there (display points from the top left).
     ShowOnPage { page_index: usize, display_rect: [f32; 4] },
@@ -144,6 +152,8 @@ pub enum Dialog {
     CreateIdentity { name: String, email: String, organization: String },
     TextResult { title: String, text: String },
     SignatureResults(Vec<quintess_core::signatures::SignatureCheck>),
+    /// Choosing how to sign, before signing in a drawn box.
+    Sign(Box<SignDialog>),
     AccessibilityResults(Vec<quintess_core::accessibility::Check>),
     PreflightResults(Vec<quintess_core::preflight::PreflightIssue>),
     ComparisonResult { summary: String, report_path: PathBuf },
@@ -228,6 +238,7 @@ impl Dialog {
             Dialog::CreateIdentity { .. } => "Create a signing identity",
             Dialog::TextResult { title, .. } => title,
             Dialog::SignatureResults(_) => "Signatures",
+            Dialog::Sign(_) => "Sign",
             Dialog::AccessibilityResults(_) => "Accessibility check",
             Dialog::PreflightResults(_) => "PDF/A check",
             Dialog::ComparisonResult { .. } => "Comparison",
@@ -1069,28 +1080,81 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             return Ok(());
         }
         Dialog::SignatureResults(checks) => {
-            ui.set_min_width(460.0);
+            use quintess_core::signatures::{SignatureKind, SignatureVerdict};
+            ui.set_min_width(520.0);
             if checks.is_empty() {
                 ui.label("This document has no digital signatures.");
             }
-            for check in checks.iter() {
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let (verdict, color) = if check.intact { ("Signature is intact", egui::Color32::from_rgb(40, 150, 70)) } else { ("Signature is INVALID", egui::Color32::from_rgb(200, 50, 50)) };
-                    ui.colored_label(color, RichText::new(verdict).strong());
-                    ui.label(format!("Signed by {} ({})", check.signer, check.field_name));
-                    if let Some(date) = quintess_core::metadata::pdf_date_to_iso(&check.signing_time) {
-                        ui.label(format!("When: {date}"));
+            let height = ui.ctx().content_rect().height() * 0.6;
+            egui::ScrollArea::vertical().max_height(height).show(ui, |ui| {
+                for check in checks.iter() {
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        let (verdict, color) = match check.verdict {
+                            SignatureVerdict::Valid => ("Valid", egui::Color32::from_rgb(40, 150, 70)),
+                            SignatureVerdict::ValidButUntrusted => ("Intact, but the signer isn't trusted", egui::Color32::from_rgb(200, 140, 20)),
+                            SignatureVerdict::Invalid => ("INVALID", egui::Color32::from_rgb(200, 50, 50)),
+                        };
+                        let kind = if check.kind == SignatureKind::DocumentTimestamp { "Document timestamp" } else { "Signature" };
+                        ui.horizontal(|ui| {
+                            ui.colored_label(color, RichText::new(verdict).strong());
+                            ui.weak(format!("{kind} · {}", check.field_name));
+                        });
+                        ui.label(format!("Signed by {}", check.signer));
+                        if let Some(timestamp) = &check.timestamp {
+                            ui.label(format!("When: {} (trusted timestamp from {}{})", timestamp.time, timestamp.authority, if timestamp.intact && timestamp.trusted { "" } else { ", not verified" }));
+                        } else if let Some(date) = quintess_core::metadata::pdf_date_to_iso(&check.signing_time) {
+                            ui.label(format!("When: {date} (as the signer's computer says)"));
+                        }
+                        if !check.reason.is_empty() {
+                            ui.label(format!("Reason: {}", check.reason));
+                        }
+                        for reason in &check.reasons {
+                            ui.weak(format!("• {reason}"));
+                        }
+                        if !check.chain.is_empty() {
+                            ui.collapsing("Certificates", |ui| {
+                                for (depth, certificate) in check.chain.iter().enumerate() {
+                                    ui.label(format!("{}{} (until {}){}", "   ".repeat(depth), certificate.name, certificate.not_after, if certificate.revocation.describe().is_empty() { String::new() } else { format!(" · {}", certificate.revocation.describe()) }));
+                                }
+                                if let Some(anchor) = &check.trust_anchor {
+                                    ui.weak(format!("Trusted because: {anchor}"));
+                                }
+                            });
+                        }
+                        if !check.trusted {
+                            if let Some(top) = check.chain.last() {
+                                if ui.button(format!("Trust {}…", top.name)).on_hover_text("Trust this certificate from now on, for every document it signs").clicked() {
+                                    outcome.requests.push(AppRequest::TrustCertificate(top.der.clone()));
+                                    outcome.keep_open = false;
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            ui.horizontal(|ui| {
+                if !checks.is_empty() {
+                    if ui.button("Check for revocation…").on_hover_text("Asks the certificates' issuers online whether any was revoked").clicked() {
+                        outcome.requests.push(AppRequest::CheckRevocation);
+                        outcome.keep_open = false;
                     }
-                    if !check.reason.is_empty() {
-                        ui.label(format!("Reason: {}", check.reason));
+                    if ui.button("Add long-term validation").on_hover_text("Stores the certificates and revocation answers in the document, so the signatures can be checked years from now without a network").clicked() {
+                        outcome.requests.push(AppRequest::AddLongTermValidation);
+                        outcome.keep_open = false;
                     }
-                    for problem in &check.problems {
-                        ui.weak(format!("• {problem}"));
-                    }
-                });
-            }
-            if ui.button("Close").clicked() {
+                }
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
+            return Ok(());
+        }
+        Dialog::Sign(sign) => {
+            sign.show(ui);
+            if buttons(ui, "Sign", outcome) {
+                sign.check()?;
+                outcome.requests.push(AppRequest::Sign(sign.clone()));
                 outcome.keep_open = false;
             }
             return Ok(());
@@ -1998,4 +2062,128 @@ fn existing_label_ranges(pdf: &Pdf) -> Vec<metadata::PageLabelRange> {
             })
         })
         .collect()
+}
+
+/// How to sign: with Quintess's own identity, a certificate file, or (on
+/// Windows) a certificate from the system store.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SignSource {
+    OwnIdentity,
+    CertificateFile,
+    WindowsStore,
+}
+
+#[derive(Clone)]
+pub struct SignDialog {
+    pub page: u32,
+    pub rect: [f32; 4],
+    pub source: SignSource,
+    pub identity_file: Option<std::path::PathBuf>,
+    pub certificate_file: Option<std::path::PathBuf>,
+    /// Typed for this signature only; never stored.
+    pub password: String,
+    pub store_certificates: Vec<quintess_core::cert_store::StoreCertificate>,
+    pub store_thumbprint: Option<String>,
+    pub add_timestamp: bool,
+    pub timestamp_server: String,
+    pub reason: String,
+    pub location: String,
+}
+
+impl SignDialog {
+    pub fn new(page: u32, rect: [f32; 4], settings: &quintess_core::settings::Settings) -> Self {
+        let source = match settings.signing_source.as_str() {
+            "file" => SignSource::CertificateFile,
+            "store" => SignSource::WindowsStore,
+            _ => SignSource::OwnIdentity,
+        };
+        SignDialog {
+            page,
+            rect,
+            source,
+            identity_file: settings.signing_identity.clone(),
+            certificate_file: settings.signing_certificate_file.clone(),
+            password: String::new(),
+            store_certificates: quintess_core::cert_store::list_personal_certificates(),
+            store_thumbprint: settings.signing_store_thumbprint.clone(),
+            add_timestamp: settings.add_timestamp,
+            timestamp_server: settings.timestamp_server.clone(),
+            reason: "I approve this document".into(),
+            location: String::new(),
+        }
+    }
+
+    fn show(&mut self, ui: &mut egui::Ui) {
+        ui.set_min_width(460.0);
+        ui.label(RichText::new("Sign with").strong());
+        ui.radio_value(&mut self.source, SignSource::CertificateFile, "A certificate file (.pfx or .p12) from a certificate authority");
+        if self.source == SignSource::CertificateFile {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label(self.certificate_file.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "none chosen".into()));
+                if ui.button("Choose…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Certificate", &["pfx", "p12"]).pick_file() {
+                        self.certificate_file = Some(path);
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label("Password");
+                ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(180.0));
+            });
+        }
+        if !self.store_certificates.is_empty() {
+            ui.radio_value(&mut self.source, SignSource::WindowsStore, "A certificate installed in Windows (including smart cards)");
+            if self.source == SignSource::WindowsStore {
+                ui.horizontal(|ui| {
+                    ui.add_space(20.0);
+                    let shown = self.store_thumbprint.as_ref().and_then(|t| self.store_certificates.iter().find(|c| &c.thumbprint == t)).map_or("choose one".to_string(), |c| c.name.clone());
+                    egui::ComboBox::from_id_salt("store certificate").selected_text(shown).width(300.0).show_ui(ui, |ui| {
+                        for certificate in &self.store_certificates {
+                            let label = format!("{} (from {}, until {})", certificate.name, certificate.issuer, certificate.expires);
+                            ui.selectable_value(&mut self.store_thumbprint, Some(certificate.thumbprint.clone()), label);
+                        }
+                    });
+                });
+            }
+        }
+        ui.radio_value(&mut self.source, SignSource::OwnIdentity, "My own Quintess identity (readers show it as not verified)");
+        if self.source == SignSource::OwnIdentity {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label(self.identity_file.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "none yet: create one in Protect ▸ Create signing identity".into()));
+                if ui.button("Choose…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Quintess identity", &["json"]).pick_file() {
+                        self.identity_file = Some(path);
+                    }
+                }
+            });
+        }
+        ui.separator();
+        egui::Grid::new("sign details").num_columns(2).show(ui, |ui| {
+            ui.label("Reason");
+            ui.add(egui::TextEdit::singleline(&mut self.reason).desired_width(280.0));
+            ui.end_row();
+            ui.label("Location");
+            ui.add(egui::TextEdit::singleline(&mut self.location).desired_width(280.0).hint_text("optional"));
+            ui.end_row();
+        });
+        ui.checkbox(&mut self.add_timestamp, "Add a trusted timestamp (contacts the timestamp server; only a fingerprint is sent)");
+        if self.add_timestamp {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.add(egui::TextEdit::singleline(&mut self.timestamp_server).desired_width(300.0));
+            });
+        }
+    }
+
+    fn check(&self) -> anyhow::Result<()> {
+        match self.source {
+            SignSource::CertificateFile if self.certificate_file.is_none() => anyhow::bail!("choose a certificate file"),
+            SignSource::WindowsStore if self.store_thumbprint.is_none() => anyhow::bail!("choose a certificate"),
+            SignSource::OwnIdentity if self.identity_file.is_none() => anyhow::bail!("create or choose a signing identity first"),
+            _ => Ok(()),
+        }
+    }
 }

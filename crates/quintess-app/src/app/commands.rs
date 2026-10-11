@@ -164,7 +164,11 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools ▸ Forms", "Detect fields automatically", |app, _| app.detect_fields()),
     command("Tools ▸ Forms", "Import data…", |app, _| app.import_form_data()),
     command("Tools ▸ Forms", "Fill from spreadsheet…", |app, _| app.open_form_merge()).hint("One filled copy of this form for every row of a spreadsheet"),
-    command("Tools ▸ Forms", "Clear all fields", |app, _| app.edit("Clear form", forms::reset_form)),
+    command("Tools ▸ Forms", "Clear all fields", |app, _| app.edit("Clear form", |pdf| {
+        forms::reset_form(pdf)?;
+        // Totals and other calculated fields follow the cleared values.
+        quintess_core::form_scripts::recalculate(pdf).map(|_| ())
+    })),
     command("Tools ▸ Forms", "Flatten fields into the page", |app, _| app.edit_recording("Flatten form", Step::Flatten { forms_only: true }, |pdf| forms::flatten(pdf, true).map(|_| ()))),
     command("Tools ▸ Redact", "Find and redact…", |app, _| app.dialogs.push(Dialog::redact())),
     command("Tools ▸ Redact", "Check for leftover text…", |app, _| app.dialogs.push(Dialog::CheckForText { texts: String::new() })).hint("Search every part of the file for words that should be gone"),
