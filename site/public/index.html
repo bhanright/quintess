@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quintess: free, open-source PDF editor for Windows 10 and 11</title>
-<meta name="description" content="Free PDF editor for Windows 10 and 11. Edit existing text, redact sensitive information, sign and fill forms, offline. Open source, with no account required.">
+<title>Quintess: free, open-source PDF editor for Windows and Linux</title>
+<meta name="description" content="Edit PDF text and pictures, check spelling, redact, sign and fill forms. Free and open source for Windows and Linux. No account or subscription.">
 <link rel="canonical" href="https://quintess.cc/">
 <meta name="theme-color" content="#0a0a0f">
 <meta name="color-scheme" content="dark">
@@ -14,12 +14,12 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Quintess">
 <meta property="og:url" content="https://quintess.cc/">
-<meta property="og:title" content="Quintess: a free PDF editor for Windows">
-<meta property="og:description" content="Edit existing text, redact sensitive information, sign and fill forms. Open source, offline, no account.">
+<meta property="og:title" content="Quintess: free, open-source PDF editor for Windows and Linux">
+<meta property="og:description" content="Edit PDF text and pictures, check spelling, redact, sign and fill forms. Free and open source for Windows and Linux. No account or subscription.">
 <meta property="og:image" content="https://quintess.cc/assets/img/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The Quintess logo beside the line: A free PDF editor for Windows.">
+<meta property="og:image:alt" content="The Quintess logo beside the line: A free PDF editor for Windows and Linux.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css?v=0e758b5f47">
@@ -31,14 +31,14 @@
       "@type": "SoftwareApplication",
       "@id": "https://quintess.cc/#app",
       "name": "Quintess",
-      "description": "A free, open-source PDF reader and editor for Windows: edit existing text, redact, sign, fill and create forms, OCR, compare, convert and automate, offline.",
+      "description": "A free, open-source PDF reader and editor for Windows and Linux. Edit text and pictures, check spelling, redact, sign, fill forms and convert documents.",
       "applicationCategory": "BusinessApplication",
       "applicationSubCategory": "PDF editor",
-      "operatingSystem": "Windows 10, Windows 11",
-      "softwareVersion": "0.1.0",
+      "operatingSystem": "Windows 10, Windows 11, Linux",
+      "softwareVersion": "0.2.0",
       "url": "https://quintess.cc/",
-      "downloadUrl": "https://github.com/bhanright/quintess/releases/latest",
-      "installUrl": "https://github.com/bhanright/quintess/releases/latest",
+      "downloadUrl": "https://github.com/bhanright/quintess/releases/tag/v0.2.0",
+      "installUrl": "https://github.com/bhanright/quintess/releases/tag/v0.2.0",
       "softwareHelp": "https://quintess.cc/guide/",
       "license": "https://github.com/bhanright/quintess/blob/main/LICENSE-MIT",
       "isAccessibleForFree": true,
@@ -47,7 +47,7 @@
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "author": { "@type": "Person", "name": "William Hanright", "url": "https://github.com/bhanright" },
       "codeRepository": "https://github.com/bhanright/quintess",
-      "featureList": ["Edit existing PDF text and paragraphs", "Redaction that removes content, with a check for leftover text", "Digital signatures, with earlier signed revisions kept through later edits", "Form filling, creation and mail merge from spreadsheets", "Offline OCR", "QR code reading", "Compare, convert and export", "Batch actions, watched folders and a command-line tool"]
+      "featureList": ["Edit existing PDF text and paragraphs, with spell check", "Move, resize, crop and replace pictures, with text wrap", "Redaction that removes content, with a check for leftover text", "Sign with a certificate and check who signed a PDF", "Fill and create forms, calculate totals and make one copy per spreadsheet row", "Scan paper documents and make scans searchable with offline OCR", "Create PDFs from other files and export tables to Excel or CSV", "Batch actions, watched folders and command-line tools"]
     },
     {
       "@type": "WebSite",
@@ -88,20 +88,44 @@
 <!-- HERO -->
 <section class="hero" aria-labelledby="hero-title">
   <div class="hero-head">
-    <p class="kicker"><span class="dot"></span><span>v<span data-version>0.1.0</span> · free · open source · Windows 10 &amp; 11</span></p>
-    <h1 id="hero-title" class="display">A free PDF editor<br>for Windows.</h1>
+    <p class="kicker"><span class="dot"></span><span>v<span data-version>0.2.0</span> · free · open source · Windows + Linux</span></p>
+    <h1 id="hero-title" class="display">A free PDF editor<br>for Windows and Linux.</h1>
   </div>
   <div class="hero-copy">
-    <p class="lede">Quintess is an open-source PDF reader and editor for Windows 10 and 11. Your documents stay on your computer, and there is no account or subscription.</p>
+    <p class="lede">Quintess is an open-source PDF reader and editor for Windows 10 and 11 and Linux. Edit text and pictures, check spelling, fill forms and create PDFs. Your documents stay on your computer, with no account or subscription.</p>
+    <ul class="dl-list" aria-label="Download Quintess">
+      <li class="dl" data-asset="windows">
+        <a class="button" href="https://github.com/bhanright/quintess/releases/download/v0.2.0/Quintess-0.2.0-setup.exe" data-download="windows" data-track="download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+          Download for Windows
+        </a>
+        <p class="dl-meta"><span class="dl-note">Windows 10/11 · x86_64 · installs for your user account</span><span class="fine mono keep-case" data-asset-line>Quintess-0.2.0-setup.exe</span></p>
+      </li>
+      <li class="dl" data-asset="deb">
+        <a class="button" href="https://github.com/bhanright/quintess/releases/download/v0.2.0/quintess_0.2.0_amd64.deb" data-download="deb" data-track="download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+          Download for Linux (.deb)
+        </a>
+        <p class="dl-meta"><span class="dl-note">Linux · x86_64 · .deb for Ubuntu/Debian</span><span class="fine mono keep-case" data-asset-line>quintess_0.2.0_amd64.deb</span></p>
+      </li>
+      <li class="dl" data-asset="tarball">
+        <a class="button" href="https://github.com/bhanright/quintess/releases/download/v0.2.0/quintess-0.2.0-linux-x86_64.tar.gz" data-download="tarball" data-track="download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+          Download for Linux (.tar.gz)
+        </a>
+        <p class="dl-meta"><span class="dl-note">Linux · x86_64 · .tar.gz with an install script</span><span class="fine mono keep-case" data-asset-line>quintess-0.2.0-linux-x86_64.tar.gz</span></p>
+      </li>
+    </ul>
+    <p class="dl-choose">Choose .deb for Ubuntu or Debian. For other Linux distributions, use the tarball and check the installation requirements.</p>
     <div class="cta">
-      <a class="button" href="https://github.com/bhanright/quintess/releases/latest" data-download data-track="download">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-        Download for Windows
-      </a>
       <a class="button button-ghost" href="https://github.com/bhanright/quintess" data-track="github">View the source</a>
     </div>
-    <p class="fine mono keep-case" data-asset-line>Quintess-0.1.0-setup.exe · installs per user, no admin rights</p>
-    <p class="smartscreen">Version <span data-version>0.1.0</span> for Windows 10/11, 64-bit. The installer isn't code-signed yet, so Windows may show a SmartScreen warning. <a href="#install-notes">Read the installation notes</a>.</p>
+    <ul class="hero-links">
+      <li><a href="#install-notes">Windows installation notes</a></li>
+      <li><a href="/guide/#installing-on-linux">Linux installation instructions</a></li>
+      <li><a href="https://github.com/bhanright/quintess/releases/tag/v0.2.0" data-track="github">What's new in 0.2.0</a></li>
+    </ul>
+    <p class="smartscreen">The Windows installer isn't code-signed yet, so Windows may show a SmartScreen warning. Read the <a href="#install-notes">Windows installation notes</a>.</p>
   </div>
 
   <figure class="hero-shot" data-hero-shot>
@@ -122,8 +146,8 @@
     <dl class="spec mono">
       <div><dt>price</dt><dd>$0 · no trial, no ads</dd></div>
       <div><dt>license</dt><dd>MIT or Apache-2.0</dd></div>
-      <div><dt>platform</dt><dd>Windows 10 / 11 · 64-bit</dd></div>
-      <div><dt>network</dt><dd>only update checks you turn on</dd></div>
+      <div><dt>platform</dt><dd>Windows 10/11 + Linux · x86_64</dd></div>
+      <div><dt>network</dt><dd>optional requests you choose</dd></div>
       <div><dt>account</dt><dd>never</dd></div>
       <div><dt>built with</dt><dd>Rust + PDFium</dd></div>
     </dl>
@@ -133,7 +157,7 @@
 <!-- TICKER -->
 <div class="ticker mono" aria-hidden="true">
   <div class="ticker-track">
-    <span>edit existing text</span><span>reflow paragraphs</span><span>redaction</span><span>leftover check</span><span>digital signatures</span><span>offline OCR</span><span>forms + mail merge</span><span>bates numbering</span><span>PDF/A</span><span>compare versions</span><span>QR codes</span><span>watched folders</span><span>53 CLI commands</span><span>Arabic · Hebrew · Hindi</span><span>split view</span><span>command palette</span>
+    <span>edit existing text</span><span>spell check</span><span>pictures + text wrap</span><span>layers</span><span>redaction</span><span>certificate signatures</span><span>forms that calculate</span><span>offline OCR</span><span>Excel + CSV export</span><span>read out loud</span><span>measure to scale</span><span>booklets + posters</span>
   </div>
 </div>
 
@@ -150,7 +174,8 @@
       <div class="cell-in">
         <p class="cell-label mono">edit text</p>
         <h3>Change the words that are already there.</h3>
-        <p class="cell-copy">Click a line or a paragraph and type. Paragraphs re-wrap at their own width and alignment, bold and italic carry through, and new letters use the document's own font when it has them, or a close substitute when it doesn't. A preview marks every line that will move before you apply.</p>
+        <p class="cell-copy">Click a line or paragraph and type. Paragraphs re-wrap, bold and italic carry through, and Quintess uses the document's font where it can. A preview shows which lines will move before you apply.</p>
+        <p class="cell-copy">Spelling mistakes are underlined as you type in page text, comments and form fields. Right-click for suggestions, or press F7 to review them. Nine dictionaries are included, with more available in the app.</p>
         <div class="reflow-demo" aria-hidden="true">
           <p class="reflow-text">Our <em>quarterly</em> report shows revenue of <span class="swap" data-swap="$1.2 million|$1.35 million|$980,000">$1.2 million</span>, driven by <span class="swap" data-swap="steady renewals|new contracts in three regions|returning customers">steady renewals</span> and a <b>lower cost</b> of shipping across the network.</p>
         </div>
@@ -195,13 +220,15 @@
     <article class="cell cell-sign proof" data-demo="versions">
       <div class="cell-in">
         <p class="cell-label mono">signatures</p>
-        <h3>Keep the signed version when you edit.</h3>
-        <p class="cell-copy">Changes after signing are saved on top of the signed revision, which stays intact and checkable; PDF readers show that later changes were made. Redaction rewrites the file and ends existing signatures, and Quintess warns before it does.</p>
+        <h3>Sign a PDF. Check who signed it.</h3>
+        <p class="cell-copy">Sign with a certificate file, a certificate installed in Windows, or an identity you create in Quintess. Add a trusted timestamp, and check signatures for changes and certificate trust, with the result explained in plain language.</p>
         <div class="versions" aria-hidden="true">
           <div class="version v1 mono"><span>rev 1</span><span class="ok">signed revision ✓</span></div>
           <div class="version v2 mono"><span>rev 2</span><span>comment added</span></div>
           <div class="version v3 mono"><span>rev 3</span><span>field filled</span></div>
         </div>
+        <p class="cell-copy cell-after">Later edits keep the signed revision available to check. Readers show that changes were made after signing. Redaction rewrites the file and invalidates existing signatures; Quintess warns first.</p>
+        <a class="text-link cell-link" href="/guide/#digital-signatures">How signing and validation work →</a>
       </div>
     </article>
 
@@ -219,21 +246,34 @@
       </div>
     </article>
 
-    <article class="cell cell-cli proof" data-demo="terminal">
+    <article class="cell cell-pictures proof">
       <div class="cell-in">
-        <p class="cell-label mono">command line</p>
-        <h3>53 commands for scripts and batch jobs.</h3>
-        <pre class="terminal mono" aria-hidden="true"><code data-terminal></code></pre>
+        <p class="cell-label mono">pictures and shapes</p>
+        <h3>Move the picture. The text follows.</h3>
+        <figure class="cell-shot">
+          <picture>
+            <source srcset="/assets/img/wrap-demo.webp" type="image/webp">
+            <img src="/assets/img/wrap-demo.png" width="745" height="580" loading="lazy" decoding="async" alt="A page in Quintess titled Field Notes. A picture of the Quintess logo is selected near the bottom right, with the picture toolbar open and Wrap text switched on, and the paragraphs flow around the picture.">
+          </picture>
+        </figure>
+        <p class="cell-copy">Move and resize pictures and shapes already on the page. Crop or replace a picture, delete an object, or bring it forward or send it back. Turn on text wrap to make paragraphs flow around a picture as you move or resize it.</p>
+        <a class="text-link cell-link" href="/guide/#pictures-and-shapes">How to edit pictures and shapes →</a>
       </div>
     </article>
 
-    <article class="cell cell-qr proof" data-demo="qr">
+    <article class="cell cell-convert proof">
       <div class="cell-in">
-        <p class="cell-label mono">QR codes</p>
-        <h3>See where a QR code leads.</h3>
-        <div class="qr-demo" aria-hidden="true"><svg class="qr-code" viewBox="0 0 25 25" aria-hidden="true"><path stroke="currentColor" d="M0 0.5h7m1 0h1m1 0h5m3 0h7m-25 1h1m5 0h1m1 0h1m4 0h1m4 0h1m5 0h1m-25 1h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1m-25 1h1m1 0h3m1 0h1m2 0h1m2 0h2m1 0h2m1 0h1m1 0h3m1 0h1m-25 1h1m1 0h3m1 0h1m3 0h1m1 0h1m5 0h1m1 0h3m1 0h1m-25 1h1m5 0h1m2 0h1m1 0h1m1 0h1m2 0h1m1 0h1m5 0h1m-25 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-16 1h2m3 0h2m-15 1h1m4 0h3m2 0h2m2 0h3m5 0h2m-25 1h1m3 0h1m2 0h2m5 0h2m1 0h1m1 0h5m-24 1h1m2 0h4m1 0h2m1 0h1m3 0h5m1 0h1m1 0h2m-24 1h2m1 0h1m2 0h2m1 0h1m1 0h1m2 0h1m1 0h2m2 0h1m2 0h1m-24 1h1m1 0h1m2 0h2m4 0h4m2 0h1m5 0h1m-25 1h1m1 0h4m3 0h3m1 0h1m1 0h2m2 0h1m3 0h1m-24 1h1m1 0h5m1 0h3m2 0h4m2 0h3m1 0h2m-25 1h1m1 0h1m1 0h1m3 0h2m1 0h2m4 0h3m1 0h2m1 0h1m-25 1h1m1 0h2m1 0h3m2 0h1m1 0h2m1 0h6m1 0h1m-15 1h2m4 0h1m1 0h1m3 0h1m-21 1h7m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m1 0h1m3 0h1m-25 1h1m5 0h1m3 0h1m3 0h3m3 0h1m2 0h1m-24 1h1m1 0h3m1 0h1m3 0h1m3 0h7m1 0h1m1 0h1m-25 1h1m1 0h3m1 0h1m2 0h4m3 0h3m4 0h2m-25 1h1m1 0h3m1 0h1m2 0h1m3 0h1m7 0h2m1 0h1m-25 1h1m5 0h1m1 0h5m1 0h4m1 0h2m3 0h1m-25 1h7m3 0h1m3 0h1m1 0h2m3 0h1m2 0h1"/></svg></div>
-        <p class="qr-result mono" aria-hidden="true">destination: quintess.cc · review before opening</p>
-        <p class="cell-copy">Quintess shows the real destination and warns about suspicious-looking addresses. Nothing opens until you choose to.</p>
+        <p class="cell-label mono">create and export</p>
+        <h3>Turn other files into PDFs. Take tables out.</h3>
+        <figure class="cell-shot">
+          <picture>
+            <source srcset="/assets/img/convert-demo.webp" type="image/webp">
+            <img src="/assets/img/convert-demo.png" width="515" height="336" loading="lazy" decoding="async" alt="The Create a PDF from a file dialog in Quintess, with a CSV file chosen. The Converter list offers the built-in converter, LibreOffice and Microsoft Office, with LibreOffice selected, and a note that Quintess says which converter it used.">
+          </picture>
+        </figure>
+        <p class="cell-copy">Create PDFs from Word, Excel, PowerPoint, OpenDocument, HTML, Markdown and web pages. Built-in converters handle many formats; installed Office apps or a browser can improve fidelity. Quintess tells you which converter ran.</p>
+        <p class="cell-copy cell-after">Export tables to Excel or CSV, or turn PDF pages into PowerPoint slides. Layout and formatting can change during conversion.</p>
+        <a class="text-link cell-link" href="/guide/#converting-documents-to-pdf">How conversion works →</a>
       </div>
     </article>
 
@@ -241,15 +281,15 @@
       <div class="cell-in">
         <p class="cell-label mono">and the rest</p>
         <ul class="more-list">
-          <li>Offline OCR makes scans searchable</li>
-          <li><a href="/guide/#forms">Fill and create forms, with one copy per Excel or CSV row</a></li>
-          <li>Comments, highlights, ink, stamps</li>
-          <li>Merge, split, crop, n-up and Bates numbering</li>
+          <li>Scan paper documents and make scans searchable with offline OCR</li>
+          <li><a href="/guide/#forms">Fill and create forms, calculate totals, or make one copy per spreadsheet row</a></li>
+          <li>Comments, highlights, ink and stamps</li>
+          <li>Merge, split, crop and number pages</li>
           <li>Compare two versions</li>
-          <li>Export to Word, Markdown, HTML</li>
-          <li>AES-256 passwords and permissions</li>
-          <li>PDF/A and accessibility fixes</li>
-          <li>Split view, folder search, object inspector</li>
+          <li>Password or certificate encryption, with permissions</li>
+          <li>Check and convert PDF/A and PDF/X; edit accessibility tags and reading order</li>
+          <li>Split view, folder search and the command palette</li>
+          <li>Batch actions, watched folders and command-line tools</li>
         </ul>
         <a class="text-link" href="/guide/">Read the full guide →</a>
       </div>
@@ -274,14 +314,14 @@
       <div class="wall-edge"></div>
       <div class="wall-outside">
         <span class="wall-label mono">the internet</span>
-        <span class="zero display-2">0</span>
-        <span class="mono faint">bytes of your documents</span>
+        <span class="zero zero-text display-2">PDFs</span>
+        <span class="mono faint">processed on your computer</span>
       </div>
     </div>
     <dl class="facts">
       <div><dt class="mono">accounts</dt><dd>None. Install it and open a file.</dd></div>
-      <div><dt class="mono">uploads</dt><dd>Never. Editing, OCR, signing and redaction all run on your computer.</dd></div>
-      <div><dt class="mono">network</dt><dd>Only when you ask: checking GitHub for updates (off until you turn it on) and links you choose to open. No telemetry.</dd></div>
+      <div><dt class="mono">uploads</dt><dd>Your PDF files aren’t uploaded. Editing, OCR and redaction run on your computer. Optional trusted timestamps send a fingerprint of the signature to a timestamp server.</dd></div>
+      <div><dt class="mono">network</dt><dd>Network access is used for update checks you enable, dictionaries you download, web pages you convert, links you open, and timestamp or certificate-status requests you choose. No telemetry.</dd></div>
       <div><dt class="mono">source</dt><dd>Every line is public on GitHub under MIT or Apache-2.0, so you can check all of this yourself.</dd></div>
     </dl>
   </div>
@@ -303,10 +343,10 @@
       <tbody>
         <tr><th scope="row">Price</th><td class="us">Free</td><td>No trial, no paid tier, no ads</td></tr>
         <tr><th scope="row">Account</th><td class="us">Not required</td><td>Install it and open a file</td></tr>
-        <tr><th scope="row">Your documents</th><td class="us">Processed on your computer</td><td>Editing, OCR, signing and redaction never upload anything</td></tr>
+        <tr><th scope="row">Your documents</th><td class="us">Processed on your computer</td><td>PDF files aren’t uploaded; optional online requests are explained above</td></tr>
         <tr><th scope="row">License</th><td class="us">MIT or Apache-2.0</td><td>Read, change and share the source</td></tr>
-        <tr><th scope="row">Platform</th><td class="us">Windows 10 / 11, 64-bit</td><td>Installs per user, no admin rights</td></tr>
-        <tr><th scope="row">Command line</th><td class="us">53 commands</td><td>Script the same work the app does</td></tr>
+        <tr><th scope="row">Platform</th><td class="us">Windows 10/11 and Linux, x86_64</td><td>Windows installer, Linux .deb and .tar.gz</td></tr>
+        <tr><th scope="row">Command line</th><td class="us">Included</td><td>Script the same work the app does</td></tr>
       </tbody>
     </table>
     </div>
@@ -320,14 +360,26 @@
     <h2 id="hood-title" class="display-2">Who makes it, and how.</h2>
     <span class="sec-folio mono" aria-hidden="true">p. 05</span>
   </header>
-  <p class="maker">Quintess is built and maintained by William Hanright. Version 0.1.0 is the first public release, so try it on copies of important documents first. The <a href="https://github.com/bhanright/quintess">source</a>, <a href="https://github.com/bhanright/quintess/releases">release notes</a> and <a href="https://github.com/bhanright/quintess/issues">issue tracker</a> are all on GitHub.</p>
-  <div class="stats">
-    <div class="stat proof"><span class="stat-n display-2" data-count="26">26</span><span class="stat-u mono">thousand lines of Rust</span></div>
-    <div class="stat proof"><span class="stat-n display-2" data-count="53">53</span><span class="stat-u mono">command-line commands</span></div>
-    <div class="stat proof"><span class="stat-n display-2" data-count="89">89</span><span class="stat-u mono">automated tests</span></div>
-    <div class="stat proof"><span class="stat-n display-2" data-count="0">0</span><span class="stat-u mono">telemetry calls</span></div>
+  <p class="maker">Quintess is built and maintained by William Hanright. Version 0.2.0 adds Linux support, picture editing, spell check and more. Try it on copies of important documents first. The <a href="https://github.com/bhanright/quintess">source</a>, <a href="https://github.com/bhanright/quintess/releases">release notes</a> and <a href="https://github.com/bhanright/quintess/issues">issue tracker</a> are all on GitHub.</p>
+  <div class="bench proof">
+    <h3 class="bench-title">Opening two long PDFs.</h3>
+    <p class="bench-intro">We measured Quintess 0.2.0 and Adobe Acrobat 26.2 on the same Windows PC.</p>
+    <div class="versus-scroll">
+    <table class="bench-table">
+      <thead>
+        <tr><th scope="col">Document</th><th scope="col" class="us num">Quintess: ready to use</th><th scope="col" class="num">Acrobat: ready to use</th><th scope="col" class="us num">Quintess memory</th><th scope="col" class="num">Acrobat memory</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">624-page text document</th><td class="us num" data-label="Quintess: ready to use" data-bench="text-quintess-time">0.8 s</td><td class="num" data-label="Acrobat: ready to use" data-bench="text-acrobat-time">8.8 s</td><td class="us num" data-label="Quintess memory" data-bench="text-quintess-memory">134 MB</td><td class="num" data-label="Acrobat memory" data-bench="text-acrobat-memory">577 MB</td></tr>
+        <tr><th scope="row">150-page scanned document</th><td class="us num" data-label="Quintess: ready to use" data-bench="scan-quintess-time">0.8 s</td><td class="num" data-label="Acrobat: ready to use" data-bench="scan-acrobat-time">9.2 s</td><td class="us num" data-label="Quintess memory" data-bench="scan-quintess-memory">335 MB</td><td class="num" data-label="Acrobat memory" data-bench="scan-acrobat-memory">781 MB</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="bench-caption">These results cover two files on one PC. They do not measure rendering every page or scrolling through the whole document. Results vary with the file, hardware and settings.</p>
+    <a class="text-link" href="/benchmarks/">Test files, setup and results →</a>
+    <p class="bench-attrib">Adobe and Acrobat are either registered trademarks or trademarks of Adobe in the United States and/or other countries. Quintess is not affiliated with or endorsed by Adobe.</p>
   </div>
-  <p class="hood-note">Rendering by PDFium, the engine inside Chrome. Editing, redaction, signatures and shaping are Quintess's own Rust code, built on about 400 open-source libraries.</p>
+  <p class="hood-note">Quintess is written in Rust and uses PDFium, the PDF engine used by Chrome, to render pages.</p>
 </section>
 
 <!-- FAQ -->
@@ -344,15 +396,15 @@
     </details>
     <details>
       <summary>Can Quintess replace Acrobat?</summary>
-      <p>For many people, yes: it edits text, redacts, fills and creates forms, signs, runs OCR and much more. It doesn't promise every Acrobat feature or identical results, so try it on copies of your documents and check the results before you switch.</p>
+      <p>For many people, yes: it edits text and pictures, redacts, fills and creates forms, signs, runs OCR and converts documents. It doesn't promise every Acrobat feature or identical results. Try it on copies of your documents and check the results before you switch.</p>
     </details>
     <details id="install-notes">
       <summary>Windows says "Windows protected your PC". Is that normal?</summary>
       <p>Yes, for now. The installer isn't code-signed yet, so SmartScreen warns about it. Download it only from the Quintess release page on GitHub, then compare its SHA-256 with the checksum published beside it (in PowerShell: <code>Get-FileHash .\Quintess-*-setup.exe</code>). A match shows the file is exactly the one released. If you decide to go ahead, choose <b>More info</b>, then <b>Run anyway</b>.</p>
     </details>
     <details>
-      <summary>Does it work on Mac or Linux?</summary>
-      <p>Not yet. Quintess is built and tested for Windows 10 and 11 (64-bit). The engine is portable Rust, so other systems are possible later.</p>
+      <summary>Does Quintess work on Linux or Mac?</summary>
+      <p>Linux is supported in version 0.2.0, with x86_64 downloads: a .deb package for Ubuntu/Debian and a .tar.gz archive with an install script. See the <a href="/guide/#installing-on-linux">Linux installation instructions</a> for requirements and setup. There is no Mac release.</p>
     </details>
     <details>
       <summary>Can I edit the text in every PDF?</summary>
@@ -364,7 +416,7 @@
     </details>
     <details>
       <summary>Does it need administrator rights?</summary>
-      <p>No. It installs for your user account only. It can offer itself for opening PDFs without taking over your current default.</p>
+      <p>The Windows installer runs without administrator rights and installs for your user account. Installing the Linux .deb package requires administrator rights. See the <a href="/guide/#installing-on-linux">Linux installation instructions</a> for the tarball's setup options.</p>
     </details>
   </div>
   <script type="application/ld+json">
@@ -372,12 +424,13 @@
     "@context": "https://schema.org",
     "@type": "FAQPage",
     "mainEntity": [
-      {"@type": "Question", "name": "Is Quintess really free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Quintess is open source under MIT or Apache-2.0. There is no paid tier, no trial and no ads."}},
-      {"@type": "Question", "name": "Can Quintess replace Acrobat?", "acceptedAnswer": {"@type": "Answer", "text": "For many people, yes: it edits text, redacts, fills and creates forms, signs and runs OCR. It does not promise every Acrobat feature or identical results, so try it on copies of your documents first."}},
-      {"@type": "Question", "name": "Windows says \"Windows protected your PC\". Is that normal?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, for now. The installer is not code-signed yet, so SmartScreen warns about it. Download it from the Quintess release page on GitHub and compare its SHA-256 with the published checksum. If you decide to go ahead, choose More info, then Run anyway."}},
-      {"@type": "Question", "name": "Does Quintess work on Mac or Linux?", "acceptedAnswer": {"@type": "Answer", "text": "Not yet. Quintess is built and tested for Windows 10 and 11 (64-bit)."}},
-      {"@type": "Question", "name": "Can Quintess edit the text in every PDF?", "acceptedAnswer": {"@type": "Answer", "text": "It edits the text a PDF contains, a line or a paragraph at a time, keeping fonts where they have the letters and substituting a close match otherwise. OCR makes scans searchable and copyable, but the scanned page stays an image."}},
-      {"@type": "Question", "name": "Does Quintess need administrator rights?", "acceptedAnswer": {"@type": "Answer", "text": "No. It installs for your user account only."}}
+      {"@type": "Question", "name": "Is it really free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Quintess is open source under MIT or Apache-2.0. There is no paid tier, no trial and no ads."}},
+      {"@type": "Question", "name": "Can Quintess replace Acrobat?", "acceptedAnswer": {"@type": "Answer", "text": "For many people, yes: it edits text and pictures, redacts, fills and creates forms, signs, runs OCR and converts documents. It doesn't promise every Acrobat feature or identical results. Try it on copies of your documents and check the results before you switch."}},
+      {"@type": "Question", "name": "Windows says \"Windows protected your PC\". Is that normal?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, for now. The installer isn't code-signed yet, so SmartScreen warns about it. Download it only from the Quintess release page on GitHub, then compare its SHA-256 with the checksum published beside it (in PowerShell: Get-FileHash .\\Quintess-*-setup.exe). A match shows the file is exactly the one released. If you decide to go ahead, choose More info, then Run anyway."}},
+      {"@type": "Question", "name": "Does Quintess work on Linux or Mac?", "acceptedAnswer": {"@type": "Answer", "text": "Linux is supported in version 0.2.0, with x86_64 downloads: a .deb package for Ubuntu/Debian and a .tar.gz archive with an install script. See the Linux installation instructions for requirements and setup. There is no Mac release."}},
+      {"@type": "Question", "name": "Can I edit the text in every PDF?", "acceptedAnswer": {"@type": "Answer", "text": "Quintess edits the text a PDF contains, a line or a paragraph at a time, and re-wraps paragraphs. It keeps the document's fonts when they have the letters you type and substitutes a close match when they don't. Scanned pages are pictures: OCR makes them searchable and lets you select and copy the text, but the page itself stays an image. Text drawn as outlines can't be edited as text."}},
+      {"@type": "Question", "name": "How do updates work?", "acceptedAnswer": {"@type": "Answer", "text": "On first launch, Quintess asks whether to check GitHub for new versions. If you say yes, it checks at most once a day and asks before downloading anything. You can also check by hand from the Help menu."}},
+      {"@type": "Question", "name": "Does it need administrator rights?", "acceptedAnswer": {"@type": "Answer", "text": "The Windows installer runs without administrator rights and installs for your user account. Installing the Linux .deb package requires administrator rights. See the Linux installation instructions for the tarball's setup options."}}
     ]
   }
   </script>
@@ -388,16 +441,42 @@
   <h2 id="download-title" class="giant" aria-label="Get Quintess"><span>quintess</span><i class="giant-caret" aria-hidden="true"></i></h2>
   <div class="download-card proof">
     <div class="download-main">
-      <a class="button button-big" href="https://github.com/bhanright/quintess/releases/latest" data-download data-track="download">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-        Download for Windows
-      </a>
-      <dl class="asset mono">
-        <div><dt>file</dt><dd data-asset-name>Quintess-0.1.0-setup.exe</dd></div>
-        <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-        <div><dt>released</dt><dd data-asset-date>2026</dd></div>
-        <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-      </dl>
+      <div class="pkg" data-asset="windows">
+        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.2.0/Quintess-0.2.0-setup.exe" data-download="windows" data-track="download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+          Download for Windows
+        </a>
+        <dl class="asset mono">
+          <div><dt>file</dt><dd data-asset-name>Quintess-0.2.0-setup.exe</dd></div>
+          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
+          <div><dt>released</dt><dd data-asset-date>2026</dd></div>
+          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
+        </dl>
+      </div>
+      <div class="pkg" data-asset="deb">
+        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.2.0/quintess_0.2.0_amd64.deb" data-download="deb" data-track="download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+          Download for Linux (.deb)
+        </a>
+        <dl class="asset mono">
+          <div><dt>file</dt><dd data-asset-name>quintess_0.2.0_amd64.deb</dd></div>
+          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
+          <div><dt>released</dt><dd data-asset-date>2026</dd></div>
+          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
+        </dl>
+      </div>
+      <div class="pkg" data-asset="tarball">
+        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.2.0/quintess-0.2.0-linux-x86_64.tar.gz" data-download="tarball" data-track="download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+          Download for Linux (.tar.gz)
+        </a>
+        <dl class="asset mono">
+          <div><dt>file</dt><dd data-asset-name>quintess-0.2.0-linux-x86_64.tar.gz</dd></div>
+          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
+          <div><dt>released</dt><dd data-asset-date>2026</dd></div>
+          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
+        </dl>
+      </div>
     </div>
     <ul class="download-links mono">
       <li><a href="https://github.com/bhanright/quintess/releases" data-track="github">all releases</a></li>
@@ -405,7 +484,8 @@
       <li><a href="https://github.com/bhanright/quintess/blob/main/docs/BUILDING.md" data-track="github">build it yourself</a></li>
       <li><a href="https://github.com/bhanright/quintess/issues" data-track="github">report a problem</a></li>
     </ul>
-    <p class="smartscreen download-note">Unsigned installer: Windows may show a SmartScreen warning. Compare the SHA-256 above with the file you downloaded, then see the <a href="#install-notes">installation notes</a>.</p>
+    <p class="dl-choose download-note">Choose .deb for Ubuntu or Debian. For other Linux distributions, use the tarball and check the installation requirements in the <a href="/guide/#installing-on-linux">Linux installation instructions</a>. Compare the SHA-256 above with the file you downloaded.</p>
+    <p class="smartscreen download-note">The Windows installer isn't code-signed yet, so Windows may show a SmartScreen warning. Read the <a href="#install-notes">Windows installation notes</a>.</p>
   </div>
 </section>
 

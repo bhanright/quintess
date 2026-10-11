@@ -77,7 +77,7 @@
     if (!("IntersectionObserver" in window)) return callback(true);
     new IntersectionObserver((entries) => entries.forEach((entry) => callback(entry.isIntersecting)), { threshold }).observe(element);
   };
-  $$(".sec-head, .bento .cell, .private > *, .versus, .stat, .faq, .download-card").forEach((element) => {
+  $$(".sec-head, .bento .cell, .private > *, .versus, .bench, .faq, .download-card").forEach((element) => {
     element.classList.add("reveal");
     whenVisible(element, (visible) => visible && element.classList.add("in"), 0.12);
   });
@@ -338,37 +338,6 @@
         await sleep(1000);
       };
     },
-    terminal(cell) {
-      const output = $("[data-terminal]", cell);
-      const script = [
-        ["cmd", "quintess redact contract.pdf --pattern ssn --report"],
-        ["out", "removed 3 matches on pages 2, 5"],
-        ["ok", "check: no matching text found"],
-        ["cmd", "quintess bates *.pdf --prefix ACME-"],
-        ["ok", "numbered 412 pages in 9 files"],
-        ["cmd", "quintess pdfa scan.pdf --convert"],
-        ["ok", "converted toward PDF/A-2b"],
-      ];
-      return async () => {
-        output.innerHTML = "";
-        for (const [kind, text] of script) {
-          const line = document.createElement("div");
-          output.append(line);
-          if (kind === "cmd") {
-            line.innerHTML = '<span class="prompt">&gt; </span><span class="cmd"></span>';
-            const span = $(".cmd", line);
-            for (const letter of text) { span.textContent += letter; await sleep(24); }
-            await sleep(300);
-          } else {
-            line.className = kind === "ok" ? "ok" : "";
-            line.textContent = (kind === "ok" ? "✓ " : "  ") + text;
-            await sleep(450);
-          }
-          while (output.children.length > 7) output.firstChild.remove();
-        }
-        await sleep(2400);
-      };
-    },
   };
 
   $$("[data-demo]").forEach((cell) => {
@@ -402,23 +371,6 @@
     });
   }
 
-  // ---- Counting numbers ----
-  $$("[data-count]").forEach((element) => {
-    const end = Number(element.dataset.count);
-    whenVisible(element, (visible) => {
-      if (!visible || element.dataset.counted) return;
-      element.dataset.counted = "1";
-      if (reducedMotion) { element.textContent = end; return; }
-      const start = performance.now();
-      const tick = (now) => {
-        const t = Math.min(1, (now - start) / 1400);
-        element.textContent = Math.round(end * (1 - Math.pow(1 - t, 3)));
-        if (t < 1) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    }, 0.5);
-  });
-
   // The big wordmark fills in as it scrolls into view.
   const giant = $(".giant span");
   if (giant) {
@@ -434,18 +386,34 @@
   if (versus) whenVisible(versus, (visible) => visible && versus.classList.add("seen"));
 
   // ---- Release details from GitHub (through this site, cached) ----
+  // Each download link and details block is marked with its package kind
+  // (windows, deb or tarball); the page carries working links for 0.2.0 if
+  // this request fails.
   fetch("/api/release").then((response) => (response.ok ? response.json() : null)).then((release) => {
-    if (!release || !release.installer) return;
-    const megabytes = (release.installer.size / 1048576).toFixed(1) + " MB";
-    $$("[data-download]").forEach((link) => (link.href = release.installer.url));
+    if (!release || !release.assets) return;
     $$("[data-version]").forEach((element) => (element.textContent = release.version));
-    const set = (selector, text) => $$(selector).forEach((element) => (element.textContent = text));
-    set("[data-asset-name]", release.installer.name);
-    set("[data-asset-size]", megabytes);
-    set("[data-asset-date]", new Date(release.published).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }));
-    if (release.sha256) set("[data-asset-sha]", release.sha256);
-    set("[data-asset-line]", `${release.installer.name} · ${megabytes} · installs per user, no admin rights`);
+    const date = new Date(release.published).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+    $$("[data-asset]").forEach((block) => {
+      const asset = release.assets[block.dataset.asset];
+      if (!asset) return;
+      const megabytes = (asset.size / 1048576).toFixed(1) + " MB";
+      const set = (selector, text) => $$(selector, block).forEach((element) => (element.textContent = text));
+      $$("[data-download]", block).forEach((link) => (link.href = asset.url));
+      set("[data-asset-name]", asset.name);
+      set("[data-asset-size]", megabytes);
+      set("[data-asset-date]", date);
+      if (asset.sha256) set("[data-asset-sha]", asset.sha256);
+      set("[data-asset-line]", `${asset.name} · ${megabytes}`);
+    });
   }).catch(() => {});
+
+  // Links to a question in the FAQ open it.
+  const openFaq = () => {
+    const target = location.hash && document.getElementById(location.hash.slice(1));
+    if (target && target.tagName === "DETAILS") target.open = true;
+  };
+  addEventListener("hashchange", openFaq);
+  openFaq();
 })();
 
 // ---- The guide: filter topics, and mark the topic being read ----
