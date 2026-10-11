@@ -236,3 +236,35 @@ fn converters_lists_every_provider() {
     let json: serde_json::Value = serde_json::from_str(&ok(&["converters", "--json"])).unwrap();
     assert_eq!(json.as_array().unwrap().len(), 5);
 }
+
+#[test]
+fn print_production_commands_run_end_to_end() {
+    let folder = folder("print_production");
+    let source = letter(&folder);
+
+    let booklet = folder.join("booklet.pdf");
+    let message = ok(&["booklet", path(&source), "--sheet", "tabloid", "-o", path(&booklet)]);
+    assert!(message.contains("short edge"), "{message}");
+    assert!(ok(&["info", path(&booklet)]).contains("1224"), "booklet sides are landscape tabloid");
+
+    let poster = folder.join("poster.pdf");
+    let message = ok(&["poster", path(&source), "--scale", "2", "--overlap", "0", "--cut-marks", "--labels", "-o", path(&poster)]);
+    assert!(message.contains("tiles"), "{message}");
+
+    let inks = ok(&["inks", path(&source)]);
+    assert!(inks.contains("Black") && inks.contains("process"), "{inks}");
+
+    let plate = folder.join("black.png");
+    ok(&["separation", path(&source), "--ink", "Black", "-o", path(&plate)]);
+    let picture = image::open(&plate).unwrap().to_luma8();
+    assert!(picture.pixels().any(|pixel| pixel.0[0] < 128), "the text shows on the black plate");
+    assert!(picture.pixels().any(|pixel| pixel.0[0] == 255));
+
+    let coverage = ok(&["coverage", path(&source), "--limit", "300"]);
+    assert!(coverage.contains("heaviest point"), "{coverage}");
+
+    let converted = folder.join("converted.pdf");
+    let message = ok(&["convert-colors", path(&source), "--to", "cmyk", "-o", path(&converted)]);
+    assert!(message.contains("color settings changed"), "{message}");
+    assert!(!quintess(&["convert-colors", path(&source), "--to", "sepia", "-o", path(&converted)]).status.success());
+}
