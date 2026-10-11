@@ -56,6 +56,7 @@ pub mod spelling;
 pub mod spreadsheet;
 pub mod strings;
 pub mod tables;
+pub mod text_wrap;
 pub mod timestamp;
 pub mod unicode_text;
 pub mod updates;
