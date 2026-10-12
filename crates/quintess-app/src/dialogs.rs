@@ -2794,13 +2794,11 @@ impl ConvertDialog {
         if self.provider == Some(Provider::MicrosoftOffice) {
             ui.checkbox(&mut self.allow_office, "Let Quintess open this document in Microsoft Office to convert it");
         }
-        let network_note = match self.provider {
-            _ if self.web_page => "The browser fetches the page from the internet.",
-            Some(Provider::MicrosoftOffice) => "Microsoft Office opens the document as it normally would, network included.",
-            Some(Provider::BuiltIn) => "The built-in converter never uses the network.",
-            _ => "It runs with the network blocked.",
-        };
-        ui.weak(format!("{network_note} Converters are stopped after two minutes. Quintess says which one it used and what it left out."));
+        // Only where it's true: a web page comes from the internet, and
+        // Microsoft Office uses the network as it normally would.
+        if !self.web_page && self.provider != Some(Provider::MicrosoftOffice) {
+            ui.weak("Conversion is handled offline.");
+        }
     }
 
     fn check(&self) -> anyhow::Result<()> {
