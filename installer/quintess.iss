@@ -14,15 +14,42 @@
 ;   3. put the OCR models (text-detection.onnx, text-recognition.onnx) in
 ;      vendor\ocrs-models; `quintess ocr` downloads them once to
 ;      %LOCALAPPDATA%\Quintess\models, from where they can be copied
-; then compile with Inno Setup 6:  ISCC installer\quintess.iss
+; then compile with Inno Setup 6 (6.3 or later):  ISCC installer\quintess.iss
 ; The installer is written to installer\output. Set QUINTESS_BUILD to the
 ; Cargo target folder when it isn't ..\target.
+;
+; The same script makes the installer for Windows on ARM:
+;   cargo build --release -j 6 --target aarch64-pc-windows-msvc
+;   unpack pdfium-win-arm64.tgz (chromium/8086) into vendor\pdfium-win-arm64
+;   ISCC /DArch=arm64 installer\quintess.iss
+; which writes Quintess-<version>-arm64-setup.exe. It installs only on ARM64
+; PCs (ARM64 programs can't run on an x64 one). It has the same AppId and
+; folder as the x64 installer, so on an ARM64 PC it replaces an x64
+; installation in place, settings kept. The x64 installer still runs on
+; Windows 11 on ARM (under emulation); there it suggests the ARM64 one, and
+; the x64 build's update check offers the ARM64 installer on such a PC.
+
+#ifndef Arch
+  #define Arch "x64"
+#endif
 
 #define AppName "Quintess"
 #define AppVersion "0.3.0"
-#define BuildFolder (GetEnv("QUINTESS_BUILD") != "" ? GetEnv("QUINTESS_BUILD") : "..\target") + "\release"
-#define PdfiumFolder "..\vendor\pdfium"
+#define TargetFolder (GetEnv("QUINTESS_BUILD") != "" ? GetEnv("QUINTESS_BUILD") : "..\target")
 #define ModelsFolder "..\vendor\ocrs-models"
+#if Arch == "x64"
+  #define BuildFolder TargetFolder + "\release"
+  #define PdfiumFolder "..\vendor\pdfium"
+  #define Architectures "x64compatible"
+  #define InstallerName "Quintess-" + AppVersion + "-setup"
+#elif Arch == "arm64"
+  #define BuildFolder TargetFolder + "\aarch64-pc-windows-msvc\release"
+  #define PdfiumFolder "..\vendor\pdfium-win-arm64"
+  #define Architectures "arm64"
+  #define InstallerName "Quintess-" + AppVersion + "-arm64-setup"
+#else
+  #error Arch must be x64 or arm64
+#endif
 
 [Setup]
 AppId={{AF179668-D50B-46E6-8245-EADEE685D488}
@@ -37,10 +64,10 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#Architectures}
+ArchitecturesInstallIn64BitMode={#Architectures}
 OutputDir=output
-OutputBaseFilename=Quintess-{#AppVersion}-setup
+OutputBaseFilename={#InstallerName}
 SetupIconFile=..\assets\quintess.ico
 UninstallDisplayIcon={app}\quintess.exe
 Compression=lzma2/max
@@ -105,6 +132,18 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 Filename: "{app}\quintess.exe"; Description: "Open Quintess"; Flags: nowait postinstall skipifsilent
 
 [Code]
+#if Arch == "x64"
+{ On a PC with an ARM processor the x64 build runs under emulation; the
+  ARM64 installer gives the faster native build. Asked once; answering No
+  (or a silent install) carries on with the x64 build. }
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+  if IsArm64 then
+    Result := SuppressibleMsgBox('This PC has an ARM processor. Quintess-{#AppVersion}-arm64-setup.exe, on the same download page, installs the version made for it, which runs faster than this one.' + #13#10#13#10 + 'Install this x64 version anyway?', mbConfirmation, MB_YESNO, IDYES) = IDYES;
+end;
+#endif
+
 { True when the folder is not on the user's PATH yet. }
 function NeedsAddPath(Folder: string): Boolean;
 var

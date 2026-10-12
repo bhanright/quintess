@@ -7,6 +7,7 @@
 
 mod app;
 mod crash;
+mod desktop;
 mod dialogs;
 mod jobs;
 mod render;

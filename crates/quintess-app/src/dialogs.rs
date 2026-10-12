@@ -876,8 +876,9 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             ui.add_space(6.0);
             ui.weak("Licensed under MIT or Apache-2.0. Built on PDFium (BSD), about 400 open-source Rust libraries, the ocrs recognition models by Robert Knight (CC BY-SA 4.0) and the SCOWL English spelling dictionaries by Kevin Atkinson and others.");
             ui.horizontal(|ui| {
-                // The installer puts the licenses in a folder beside the program.
-                let licenses = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join("licenses")));
+                // The installer puts the licenses in a folder beside the
+                // program (in Resources in the macOS app bundle).
+                let licenses = quintess_core::system::resources_folder().map(|folder| folder.join("licenses"));
                 if let Some(folder) = licenses.filter(|folder| folder.is_dir()) {
                     if ui.button("Open-source licenses…").clicked() {
                         let _ = quintess_core::system::open_in_default_app(&folder);

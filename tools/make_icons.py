@@ -12,6 +12,8 @@ so every size is consistent. Writes:
     assets/quintess-256.png    the window icon
     assets/quintess.ico        16 to 256 px, for the programs and installer
     assets/quintess-mark.png   the mark alone on transparency (the wordmark)
+    assets/linux/icons/        the hicolor icons for the Linux packages
+    assets/macos/quintess.icns the macOS app icon, with Apple's margin
 
 Requires Pillow and numpy.
 """
@@ -66,6 +68,40 @@ def icon(mark: Image.Image, size: int) -> Image.Image:
     return tile
 
 
+# macOS draws app icons on a 1024 px canvas with the tile 824 px wide and
+# transparent space around it (Apple's grid since Big Sur), so Quintess
+# sits the same size as other apps in the Dock and the Finder.
+MAC_TILE_FRACTION = 824 / 1024
+
+# The .icns entries: each type code holds a PNG of the given size (the
+# "@2x" types are the Retina versions of the size below them).
+ICNS_ENTRIES = [(b"icp4", 16), (b"icp5", 32), (b"ic11", 32), (b"icp6", 64), (b"ic12", 64), (b"ic07", 128), (b"ic13", 256), (b"ic08", 256), (b"ic14", 512), (b"ic09", 512), (b"ic10", 1024)]
+
+
+def mac_icon(mark: Image.Image, size: int) -> Image.Image:
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    tile = icon(mark, max(1, round(size * MAC_TILE_FRACTION)))
+    canvas.alpha_composite(tile, ((size - tile.width) // 2, (size - tile.height) // 2))
+    return canvas
+
+
+def write_icns(mark: Image.Image, path: pathlib.Path) -> None:
+    """An Apple icon file, written directly (iconutil exists only on a Mac):
+    the 'icns' header, then each entry as type code, length and PNG data."""
+    import io
+
+    pngs = {}
+    entries = b""
+    for code, size in ICNS_ENTRIES:
+        if size not in pngs:
+            buffer = io.BytesIO()
+            mac_icon(mark, size).save(buffer, format="PNG", optimize=True)
+            pngs[size] = buffer.getvalue()
+        entries += code + (8 + len(pngs[size])).to_bytes(4, "big") + pngs[size]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"icns" + (8 + len(entries)).to_bytes(4, "big") + entries)
+
+
 def main() -> None:
     mark = lift_mark(Image.open(SOURCE))
     mark_out = mark.copy()
@@ -84,6 +120,8 @@ def main() -> None:
         folder = ASSETS / "linux" / "icons" / "hicolor" / f"{size}x{size}" / "apps"
         folder.mkdir(parents=True, exist_ok=True)
         icon(mark, size).save(folder / "quintess.png", optimize=True)
+    # The macOS app bundle's icon (tools/package_macos.py).
+    write_icns(mark, ASSETS / "macos" / "quintess.icns")
     print("wrote icons from", SOURCE.name, "mark size", mark.size)
 
 

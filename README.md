@@ -2,9 +2,9 @@
 
 <h1 align="center">Quintess</h1>
 
-<p align="center"><a href="https://quintess.cc">quintess.cc</a> · <a href="https://github.com/bhanright/quintess/releases/latest">Download for Windows and Linux</a> · <a href="docs/USER_GUIDE.md">User guide</a></p>
+<p align="center"><a href="https://quintess.cc">quintess.cc</a> · <a href="https://github.com/bhanright/quintess/releases/latest">Download for Windows, macOS and Linux</a> · <a href="docs/USER_GUIDE.md">User guide</a></p>
 
-A free, open-source, private PDF reader and editor for Windows and Linux. Edit text, sign, redact, fill forms and automate, all on your own computer. No account, no uploads, works offline.
+A free, open-source, private PDF reader and editor for Windows, macOS and Linux. Edit text, sign, redact, fill forms and automate, all on your own computer. No account, no uploads, works offline.
 
 ## What it does
 
@@ -26,7 +26,20 @@ The built-in guide (press **F1** in the app, or read [docs/USER_GUIDE.md](docs/U
 
 ### Windows
 
-Download the installer from the [releases page](https://github.com/bhanright/quintess/releases) and run it. It installs for your user account only (no administrator rights needed) offers Quintess for opening PDFs without changing your default, and puts the `quintess` command on your PATH.
+Download the installer from the [releases page](https://github.com/bhanright/quintess/releases) and run it. It installs for your user account only (no administrator rights needed), offers Quintess for opening PDFs without changing your default, and puts the `quintess` command on your PATH.
+
+| Your PC | Download |
+| --- | --- |
+| Most Windows PCs (Intel or AMD, "x64-based processor") | `Quintess-<version>-setup.exe` |
+| Windows 11 on ARM (Snapdragon and other "ARM-based processor" PCs) | `Quintess-<version>-arm64-setup.exe` |
+
+Settings ▸ System ▸ About ▸ System type says which you have. The x64 installer also runs on ARM PCs (under emulation) and suggests the ARM64 one there; the ARM64 installer refuses x64 PCs. The installers aren't code-signed yet, so SmartScreen may warn. The ARM64 build is built and tested on GitHub's Windows 11 ARM machines but hasn't been tried by hand on an ARM laptop yet.
+
+### macOS
+
+macOS 11 or later, Apple silicon or Intel: download `Quintess-<version>-macos.dmg` (one universal app for both), open it and drag Quintess into Applications.
+
+Quintess isn't signed with an Apple Developer ID or notarized yet, so macOS refuses it the first time. Open it anyway once: on macOS 15 and later, try to open it, then click **Open Anyway** in System Settings ▸ Privacy & Security; on macOS 14 and earlier, Control-click it in Applications and choose **Open**. If macOS calls it "damaged", run `xattr -dr com.apple.quarantine /Applications/Quintess.app` in Terminal. The command-line tool is `/Applications/Quintess.app/Contents/MacOS/quintess` (link it into `/usr/local/bin` to type just `quintess`). Signing from a certificate store, Microsoft Office conversion and self-update are Windows only, and scanning needs SANE from Homebrew. The Mac version is built and tested on GitHub's Mac runners (Apple silicon and Intel) but hasn't been tried by hand on a Mac yet; see [Installing on macOS](docs/USER_GUIDE.md#installing-on-macos) in the guide.
 
 ### Linux
 
@@ -78,7 +91,7 @@ Quintess never sends your documents anywhere. It goes online only when you ask: 
 
 ## Building from source
 
-See [docs/BUILDING.md](docs/BUILDING.md). In short: Rust, PDFium from pdfium-binaries in `vendor/pdfium` (Windows) or `vendor/pdfium-linux` (Linux), then `cargo build -j 6`. `python3 tools/package_linux.py` makes the Linux packages (with `--appimage`, the AppImage too), and `installer/linux/flatpak/build-bundle.sh` the Flatpak bundle from the tarball.
+See [docs/BUILDING.md](docs/BUILDING.md). In short: Rust, PDFium from pdfium-binaries in `vendor/pdfium` (Windows), `vendor/pdfium-mac` (macOS) or `vendor/pdfium-linux` (Linux), then `cargo build -j 6`. `ISCC installer\quintess.iss` (add `/DArch=arm64` for ARM) makes the Windows installers, `python3 tools/package_macos.py` the Mac disk image, `python3 tools/package_linux.py` the Linux packages (with `--appimage`, the AppImage too) and `installer/linux/flatpak/build-bundle.sh` the Flatpak bundle from the tarball; the workflows in `.github/workflows` build all of them on GitHub's runners.
 
 ## License
 

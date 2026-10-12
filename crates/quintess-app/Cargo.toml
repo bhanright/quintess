@@ -19,6 +19,14 @@ regex = "1"
 chrono = "0.4.45"
 tts = "0.26.3"
 
+# Documents opened from the Finder and the Dock's Quit arrive as Apple
+# events (see src/desktop.rs); objc2 adjusts the application menu.
+[target.'cfg(target_os = "macos")'.dependencies]
+fmv-macos-events = "=0.1.0"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSMenu", "NSMenuItem", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
+
 [dev-dependencies]
 ttf-parser = "0.25"
 # Waits on wgpu calls in the renderer start-up tests (src/window_start.rs);

@@ -26,7 +26,7 @@ Code adapted from PdfCraft (https://github.com/storytold/pdfcraft), Copyright (c
   (crates/quintess-core/src/recovery.rs) and syncing a file to disk before it replaces
   another (write_file_safely); MIT license text below.
 
-Rust crates (613):
+Rust crates (654):
 
   ab_glyph 0.2.32  -  Apache-2.0  (Linux only)
   ab_glyph_rasterizer 0.1.10  -  Apache-2.0  (Linux only)
@@ -34,6 +34,8 @@ Rust crates (613):
   accesskit_atspi_common 0.18.1  -  MIT OR Apache-2.0  (Linux only)
   accesskit_consumer 0.35.0  -  MIT OR Apache-2.0  (Windows only)
   accesskit_consumer 0.36.0  -  MIT OR Apache-2.0  (Linux only)
+  accesskit_consumer 0.38.0  -  MIT OR Apache-2.0  (macOS only)
+  accesskit_macos 0.26.3  -  MIT OR Apache-2.0  (macOS only)
   accesskit_unix 0.21.1  -  MIT OR Apache-2.0  (Linux only)
   accesskit_windows 0.32.1  -  MIT OR Apache-2.0  (Windows only)
   accesskit_winit 0.32.2  -  Apache-2.0
@@ -91,8 +93,11 @@ Rust crates (613):
   bitflags 1.3.2  -  MIT/Apache-2.0
   bitflags 2.13.2  -  MIT OR Apache-2.0
   bitstream-io 4.10.0  -  MIT/Apache-2.0
+  block 0.1.6  -  MIT  (macOS only)
   block-buffer 0.12.1  -  MIT OR Apache-2.0
   block-padding 0.4.2  -  MIT OR Apache-2.0
+  block2 0.5.1  -  MIT  (macOS only)
+  block2 0.6.2  -  MIT  (macOS only)
   blocking 1.7.0  -  Apache-2.0 OR MIT  (Linux only)
   boa_ast 0.22.0  -  Unlicense OR MIT
   boa_engine 0.22.0  -  Unlicense OR MIT
@@ -116,6 +121,7 @@ Rust crates (613):
   calloop-wayland-source 0.4.1  -  MIT  (Linux only)
   cbc 0.2.1  -  MIT OR Apache-2.0
   cfg-if 1.0.5  -  MIT OR Apache-2.0
+  cgl 0.3.2  -  MIT / Apache-2.0  (macOS only)
   chacha20 0.10.2  -  MIT OR Apache-2.0
   chrono 0.4.45  -  MIT OR Apache-2.0
   cipher 0.5.2  -  MIT OR Apache-2.0
@@ -126,6 +132,7 @@ Rust crates (613):
   clipboard-win 5.4.1  -  BSL-1.0  (Windows only)
   cmov 0.5.4  -  Apache-2.0 OR MIT
   cms 0.3.0-pre.1  -  Apache-2.0 OR MIT
+  cocoa-foundation 0.1.2  -  MIT OR Apache-2.0  (macOS only)
   codepage 0.1.3  -  Apache-2.0 OR MIT
   codespan-reporting 0.13.1  -  Apache-2.0
   color 0.3.3  -  Apache-2.0 OR MIT
@@ -134,6 +141,10 @@ Rust crates (613):
   concurrent-queue 2.5.0  -  Apache-2.0 OR MIT
   const-oid 0.10.2  -  Apache-2.0 OR MIT
   const-oid 0.9.6  -  Apache-2.0 OR MIT
+  core-foundation 0.9.4  -  MIT OR Apache-2.0  (macOS only)
+  core-foundation-sys 0.8.7  -  MIT OR Apache-2.0  (macOS only)
+  core-graphics 0.23.2  -  MIT OR Apache-2.0  (macOS only)
+  core-graphics-types 0.1.3  -  MIT OR Apache-2.0  (macOS only)
   core_detect 1.0.0  -  MIT/Apache-2.0
   core_maths 0.1.1  -  MIT
   cow-utils 0.1.3  -  MIT
@@ -161,8 +172,10 @@ Rust crates (613):
   des 0.9.0  -  MIT OR Apache-2.0
   digest 0.10.7  -  MIT OR Apache-2.0
   digest 0.11.3  -  MIT OR Apache-2.0
+  dispatch 0.2.0  -  MIT  (macOS only)
+  dispatch2 0.3.1  -  Zlib OR Apache-2.0 OR MIT  (macOS only)
   displaydoc 0.2.7  -  MIT OR Apache-2.0
-  dlib 0.5.3  -  MIT  (Linux only)
+  dlib 0.5.3  -  MIT  (macOS and Linux only)
   document-features 0.2.12  -  MIT OR Apache-2.0
   docx-rs 0.4.22  -  MIT
   downcast-rs 1.2.1  -  MIT/Apache-2.0  (Linux only)
@@ -208,10 +221,14 @@ Rust crates (613):
   flagset 0.4.7  -  Apache-2.0
   flatbuffers 24.12.23  -  Apache-2.0
   flate2 1.1.10  -  MIT OR Apache-2.0
+  fmv-macos-events 0.1.0  -  MIT OR Apache-2.0  (macOS only)
   foldhash 0.2.0  -  Zlib
   font-types 0.11.3  -  MIT OR Apache-2.0
   font-types 0.12.6  -  MIT OR Apache-2.0
   font-types 0.8.4  -  MIT OR Apache-2.0
+  foreign-types 0.5.0  -  MIT/Apache-2.0  (macOS only)
+  foreign-types-macros 0.2.4  -  MIT/Apache-2.0  (macOS only)
+  foreign-types-shared 0.3.1  -  MIT/Apache-2.0  (macOS only)
   form_urlencoded 1.2.2  -  MIT OR Apache-2.0
   futures-concurrency 7.7.1  -  MIT OR Apache-2.0
   futures-core 0.3.34  -  MIT OR Apache-2.0
@@ -234,7 +251,7 @@ Rust crates (613):
   glow 0.17.0  -  MIT OR Apache-2.0 OR Zlib
   glutin 0.32.3  -  Apache-2.0
   glutin-winit 0.5.0  -  MIT
-  glutin_egl_sys 0.7.1  -  Apache-2.0
+  glutin_egl_sys 0.7.1  -  Apache-2.0  (Windows and Linux only)
   glutin_glx_sys 0.6.1  -  Apache-2.0  (Linux only)
   glutin_wgl_sys 0.6.1  -  Apache-2.0  (Windows only)
   gpu-allocator 0.28.0  -  MIT OR Apache-2.0
@@ -250,7 +267,7 @@ Rust crates (613):
   http 1.5.0  -  MIT OR Apache-2.0
   httparse 1.10.1  -  MIT OR Apache-2.0
   hybrid-array 0.4.15  -  MIT OR Apache-2.0
-  iana-time-zone 0.1.65  -  MIT OR Apache-2.0  (Linux only)
+  iana-time-zone 0.1.65  -  MIT OR Apache-2.0  (macOS and Linux only)
   icu_collections 2.3.0  -  Unicode-3.0
   icu_locale_core 2.3.0  -  Unicode-3.0
   icu_normalizer 2.3.0  -  Unicode-3.0
@@ -288,6 +305,7 @@ Rust crates (613):
   loop9 0.1.5  -  MIT
   lopdf 0.45.0  -  MIT
   lru 0.18.5  -  MIT
+  malloc_buf 0.0.6  -  MIT  (macOS only)
   maybe-owned 0.3.4  -  MIT OR Apache-2.0
   maybe-rayon 0.1.1  -  MIT
   md-5 0.11.0  -  MIT OR Apache-2.0
@@ -321,7 +339,26 @@ Rust crates (613):
   num_cpus 1.17.0  -  MIT OR Apache-2.0
   num_enum 0.7.6  -  BSD-3-Clause OR MIT OR Apache-2.0
   num_enum_derive 0.7.6  -  BSD-3-Clause OR MIT OR Apache-2.0
-  num_threads 0.1.7  -  MIT OR Apache-2.0  (Linux only)
+  num_threads 0.1.7  -  MIT OR Apache-2.0  (macOS and Linux only)
+  objc 0.2.7  -  MIT  (macOS only)
+  objc-sys 0.3.5  -  MIT  (macOS only)
+  objc2 0.5.3  -  MIT  (macOS only)
+  objc2 0.6.5  -  MIT  (macOS only)
+  objc2-app-kit 0.2.2  -  MIT  (macOS only)
+  objc2-app-kit 0.3.2  -  Zlib OR Apache-2.0 OR MIT  (macOS only)
+  objc2-core-data 0.2.2  -  MIT  (macOS only)
+  objc2-core-foundation 0.3.2  -  Zlib OR Apache-2.0 OR MIT  (macOS only)
+  objc2-core-graphics 0.3.2  -  Zlib OR Apache-2.0 OR MIT  (macOS only)
+  objc2-core-image 0.2.2  -  MIT  (macOS only)
+  objc2-encode 4.1.0  -  MIT  (macOS only)
+  objc2-foundation 0.2.2  -  MIT  (macOS only)
+  objc2-foundation 0.3.2  -  MIT  (macOS only)
+  objc2-io-surface 0.3.2  -  Zlib OR Apache-2.0 OR MIT  (macOS only)
+  objc2-metal 0.2.2  -  MIT  (macOS only)
+  objc2-metal 0.3.2  -  Zlib OR Apache-2.0 OR MIT  (macOS only)
+  objc2-quartz-core 0.2.2  -  MIT  (macOS only)
+  objc2-quartz-core 0.3.2  -  Zlib OR Apache-2.0 OR MIT  (macOS only)
+  objc_exception 0.1.2  -  MIT  (macOS only)
   ocrs 0.13.1  -  MIT OR Apache-2.0
   oid-registry 0.8.1  -  MIT OR Apache-2.0
   once_cell 1.21.4  -  MIT OR Apache-2.0
@@ -400,6 +437,7 @@ Rust crates (613):
   ravif 0.13.0  -  BSD-3-Clause
   raw-cpuid 11.6.0  -  MIT
   raw-window-handle 0.6.2  -  MIT OR Apache-2.0 OR Zlib
+  raw-window-metal 1.1.0  -  MIT OR Apache-2.0  (macOS only)
   rayon 1.12.0  -  MIT OR Apache-2.0
   rayon-core 1.13.0  -  MIT OR Apache-2.0
   rc2 0.9.0  -  MIT OR Apache-2.0
@@ -560,7 +598,7 @@ Rust crates (613):
   wayland-protocols-plasma 0.3.12  -  MIT  (Linux only)
   wayland-protocols-wlr 0.3.12  -  MIT  (Linux only)
   wayland-scanner 0.31.11  -  MIT  (Linux only)
-  wayland-sys 0.31.11  -  MIT  (Linux only)
+  wayland-sys 0.31.11  -  MIT  (macOS and Linux only)
   web-time 1.1.0  -  MIT OR Apache-2.0
   webbrowser 1.2.4  -  MIT OR Apache-2.0
   webpki-root-certs 1.0.9  -  CDLA-Permissive-2.0
@@ -569,7 +607,8 @@ Rust crates (613):
   weezl 0.2.1  -  MIT OR Apache-2.0
   wgpu 30.0.1  -  MIT OR Apache-2.0
   wgpu-core 30.0.1  -  MIT OR Apache-2.0
-  wgpu-core-deps-windows-linux-android 30.0.1  -  MIT OR Apache-2.0
+  wgpu-core-deps-apple 30.0.1  -  MIT OR Apache-2.0  (macOS only)
+  wgpu-core-deps-windows-linux-android 30.0.1  -  MIT OR Apache-2.0  (Windows and Linux only)
   wgpu-hal 30.0.1  -  MIT OR Apache-2.0
   wgpu-naga-bridge 30.0.1  -  MIT OR Apache-2.0
   wgpu-types 30.0.1  -  MIT OR Apache-2.0
@@ -596,6 +635,8 @@ Rust crates (613):
   windows-targets 0.52.6  -  MIT OR Apache-2.0  (Windows only)
   windows-targets 0.53.5  -  MIT OR Apache-2.0  (Windows only)
   windows-threading 0.2.1  -  MIT OR Apache-2.0  (Windows only)
+  windows_aarch64_msvc 0.52.6  -  MIT OR Apache-2.0  (Windows only)
+  windows_aarch64_msvc 0.53.1  -  MIT OR Apache-2.0  (Windows only)
   windows_x86_64_msvc 0.52.6  -  MIT OR Apache-2.0  (Windows only)
   windows_x86_64_msvc 0.53.1  -  MIT OR Apache-2.0  (Windows only)
   winit 0.30.13  -  Apache-2.0  (modified, see below)
@@ -848,6 +889,16 @@ No license file is included in the crate; its declared license is MIT OR Apache-
 
 ------------------------------------------------------------------------------
 accesskit_consumer 0.36.0 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT OR Apache-2.0.
+
+------------------------------------------------------------------------------
+accesskit_consumer 0.38.0 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT OR Apache-2.0.
+
+------------------------------------------------------------------------------
+accesskit_macos 0.26.3 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 No license file is included in the crate; its declared license is MIT OR Apache-2.0.
 
@@ -3919,6 +3970,11 @@ DEALINGS IN THE SOFTWARE.
 
 
 ------------------------------------------------------------------------------
+block 0.1.6 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
 block-buffer 0.12.1 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 LICENSE-APACHE: the same text as aead (LICENSE-APACHE) above.
@@ -3956,6 +4012,16 @@ block-padding 0.4.2 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 LICENSE-APACHE: the same text as aead (LICENSE-APACHE) above.
 LICENSE-MIT: the same text as block-buffer (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
+block2 0.5.1 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+block2 0.6.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
 
 ------------------------------------------------------------------------------
 blocking 1.7.0 (Apache-2.0 OR MIT)
@@ -4353,6 +4419,47 @@ LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
 LICENSE-MIT:
 
 Copyright (c) 2014 Alex Crichton
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+------------------------------------------------------------------------------
+cgl 0.3.2 (MIT / Apache-2.0)
+------------------------------------------------------------------------------
+COPYING:
+
+Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+<LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+option. All files in the project carrying such notice may not be
+copied, modified, or distributed except according to those terms.
+
+LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
+LICENSE-MIT:
+
+Copyright (c) 2012-2013 Mozilla Foundation
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -4963,6 +5070,12 @@ DEALINGS IN THE SOFTWARE.
 
 
 ------------------------------------------------------------------------------
+cocoa-foundation 0.1.2 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as cgl (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
 codepage 0.1.3 (Apache-2.0 OR MIT)
 ------------------------------------------------------------------------------
 COPYRIGHT:
@@ -5144,6 +5257,31 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
+
+------------------------------------------------------------------------------
+core-foundation 0.9.4 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as cgl (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
+core-foundation-sys 0.8.7 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as cgl (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
+core-graphics 0.23.2 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+COPYRIGHT: the same text as cgl (COPYING) above.
+LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as cgl (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
+core-graphics-types 0.1.3 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as cgl (LICENSE-MIT) above.
 
 ------------------------------------------------------------------------------
 core_detect 1.0.0 (MIT/Apache-2.0)
@@ -6589,6 +6727,16 @@ DEALINGS IN THE SOFTWARE.
 
 
 ------------------------------------------------------------------------------
+dispatch 0.2.0 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+dispatch2 0.3.1 (Zlib OR Apache-2.0 OR MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is Zlib OR Apache-2.0 OR MIT.
+
+------------------------------------------------------------------------------
 displaydoc 0.2.7 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
@@ -7424,43 +7572,9 @@ DEALINGS IN THE SOFTWARE.
 ------------------------------------------------------------------------------
 euclid 0.22.14 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
-COPYRIGHT:
-
-Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-<LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-option. All files in the project carrying such notice may not be
-copied, modified, or distributed except according to those terms.
-
+COPYRIGHT: the same text as cgl (COPYING) above.
 LICENSE-APACHE: the same text as ahash (LICENSE-APACHE) above.
-LICENSE-MIT:
-
-Copyright (c) 2012-2013 Mozilla Foundation
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
+LICENSE-MIT: the same text as cgl (LICENSE-MIT) above.
 
 ------------------------------------------------------------------------------
 event-listener 5.4.2 (Apache-2.0 OR MIT)
@@ -7886,6 +8000,238 @@ DEALINGS IN THE SOFTWARE.
 
 
 ------------------------------------------------------------------------------
+fmv-macos-events 0.1.0 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE:
+
+Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2026 FastMarkdownViewer contributors
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+LICENSE-MIT:
+
+MIT License
+
+Copyright (c) 2026 FastMarkdownViewer contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+------------------------------------------------------------------------------
 foldhash 0.2.0 (Zlib)
 ------------------------------------------------------------------------------
 LICENSE:
@@ -8120,6 +8466,45 @@ font-types 0.8.4 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 LICENSE-APACHE: the same text as font-types (LICENSE-APACHE) above.
 LICENSE-MIT: the same text as font-types (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
+foreign-types 0.5.0 (MIT/Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as anstream (LICENSE-APACHE) above.
+LICENSE-MIT:
+
+Copyright (c) 2017 The foreign-types Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+------------------------------------------------------------------------------
+foreign-types-macros 0.2.4 (MIT/Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as anstream (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as foreign-types (LICENSE-MIT) above.
+
+------------------------------------------------------------------------------
+foreign-types-shared 0.3.1 (MIT/Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as anstream (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as foreign-types (LICENSE-MIT) above.
 
 ------------------------------------------------------------------------------
 form_urlencoded 1.2.2 (MIT OR Apache-2.0)
@@ -11451,6 +11836,11 @@ SOFTWARE.
 
 
 ------------------------------------------------------------------------------
+malloc_buf 0.0.6 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
 maybe-owned 0.3.4 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 LICENSE-APACHE:
@@ -12979,6 +13369,124 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+------------------------------------------------------------------------------
+objc 0.2.7 (MIT)
+------------------------------------------------------------------------------
+LICENSE.txt:
+
+MIT License
+
+Copyright (c) Steven Sheldon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+------------------------------------------------------------------------------
+objc-sys 0.3.5 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2 0.5.3 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2 0.6.5 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-app-kit 0.2.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-app-kit 0.3.2 (Zlib OR Apache-2.0 OR MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is Zlib OR Apache-2.0 OR MIT.
+
+------------------------------------------------------------------------------
+objc2-core-data 0.2.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-core-foundation 0.3.2 (Zlib OR Apache-2.0 OR MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is Zlib OR Apache-2.0 OR MIT.
+
+------------------------------------------------------------------------------
+objc2-core-graphics 0.3.2 (Zlib OR Apache-2.0 OR MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is Zlib OR Apache-2.0 OR MIT.
+
+------------------------------------------------------------------------------
+objc2-core-image 0.2.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-encode 4.1.0 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-foundation 0.2.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-foundation 0.3.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-io-surface 0.3.2 (Zlib OR Apache-2.0 OR MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is Zlib OR Apache-2.0 OR MIT.
+
+------------------------------------------------------------------------------
+objc2-metal 0.2.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-metal 0.3.2 (Zlib OR Apache-2.0 OR MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is Zlib OR Apache-2.0 OR MIT.
+
+------------------------------------------------------------------------------
+objc2-quartz-core 0.2.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
+
+------------------------------------------------------------------------------
+objc2-quartz-core 0.3.2 (Zlib OR Apache-2.0 OR MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is Zlib OR Apache-2.0 OR MIT.
+
+------------------------------------------------------------------------------
+objc_exception 0.1.2 (MIT)
+------------------------------------------------------------------------------
+No license file is included in the crate; its declared license is MIT.
 
 ------------------------------------------------------------------------------
 ocrs 0.13.1 (MIT OR Apache-2.0)
@@ -15090,6 +15598,12 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 3. This notice may not be removed or altered from any source distribution.
 
+
+------------------------------------------------------------------------------
+raw-window-metal 1.1.0 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE-APACHE: the same text as as-raw-xcb-connection (LICENSE-APACHE) above.
+LICENSE-MIT: the same text as dynify (LICENSE-MIT) above.
 
 ------------------------------------------------------------------------------
 rayon 1.12.0 (MIT OR Apache-2.0)
@@ -21690,6 +22204,12 @@ LICENSE.APACHE: the same text as ab_glyph (LICENSE) above.
 LICENSE.MIT: the same text as naga (LICENSE.MIT) above.
 
 ------------------------------------------------------------------------------
+wgpu-core-deps-apple 30.0.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+LICENSE.APACHE: the same text as ab_glyph (LICENSE) above.
+LICENSE.MIT: the same text as naga (LICENSE.MIT) above.
+
+------------------------------------------------------------------------------
 wgpu-core-deps-windows-linux-android 30.0.1 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 LICENSE.APACHE: the same text as ab_glyph (LICENSE) above.
@@ -22096,6 +22616,18 @@ license-mit: the same text as windows (license-mit) above.
 
 ------------------------------------------------------------------------------
 windows-threading 0.2.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+license-apache-2.0: the same text as windows (license-apache-2.0) above.
+license-mit: the same text as windows (license-mit) above.
+
+------------------------------------------------------------------------------
+windows_aarch64_msvc 0.52.6 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+license-apache-2.0: the same text as windows (license-apache-2.0) above.
+license-mit: the same text as windows (license-mit) above.
+
+------------------------------------------------------------------------------
+windows_aarch64_msvc 0.53.1 (MIT OR Apache-2.0)
 ------------------------------------------------------------------------------
 license-apache-2.0: the same text as windows (license-apache-2.0) above.
 license-mit: the same text as windows (license-mit) above.
@@ -23367,6 +23899,38 @@ LICENSE: the same text as zbus (LICENSE) above.
 zvariant_utils 4.2.0 (MIT)
 ------------------------------------------------------------------------------
 LICENSE: the same text as adler2 (LICENSE-MIT) above.
+
+==============================================================================
+PdfCraft (adapted packaging code)
+==============================================================================
+
+PdfCraft (https://github.com/storytold/pdfcraft, commit 6d843a8e8b22e4442666eb9e12f506c40458af3d):
+parts of the macOS packaging (installer/macos/Info.plist.in, entitlements.plist,
+import-signing-certificate.sh, tools/package_macos.py) and the approach to the
+Finder's Apple events (crates/quintess-app/src/desktop.rs) are adapted from it,
+modified. Licensed MIT OR Apache-2.0; its MIT license:
+
+MIT License
+
+Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ==============================================================================
 Material Icons (the app's fallback icons)

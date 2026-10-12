@@ -1,0 +1,211 @@
+# Builds the Windows installers on GitHub's runners: x64 on windows-latest
+# and ARM64 natively on windows-11-arm, each from installer/quintess.iss
+# (ISCC /DArch=arm64 for ARM). On each runner the tests run, the installer
+# is compiled, installed silently, checked file for file against the
+# layout the script describes (tools/check_windows_install.py), tried from
+# the command line, screenshotted with the app's self-check and
+# uninstalled. Runs by hand (Actions > Windows release > Run workflow) and
+# on version tags, where the installers are attached to the release (a
+# draft release is created if none exists yet).
+name: Windows release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PDFIUM_RELEASE: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086
+
+jobs:
+  windows:
+    name: Windows ${{ matrix.architecture }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The x64 build goes to target\release, as a local build does.
+          - architecture: x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            cargo_target: ""
+            release_folder: target\release
+            pdfium_archive: pdfium-win-x64.tgz
+            pdfium_folder: vendor\pdfium
+          - architecture: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            cargo_target: --target aarch64-pc-windows-msvc
+            release_folder: target\aarch64-pc-windows-msvc\release
+            pdfium_archive: pdfium-win-arm64.tgz
+            pdfium_folder: vendor\pdfium-win-arm64
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        # The ARM64 image has no Rust; rustup's own installer for ARM64 sets it up.
+        run: |
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            $installer = Join-Path $env:RUNNER_TEMP "rustup-init.exe"
+            Invoke-WebRequest "https://static.rust-lang.org/rustup/dist/${{ matrix.target }}/rustup-init.exe" -OutFile $installer
+            & $installer -y --profile minimal --default-toolchain stable
+            "$env:USERPROFILE\.cargo\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+          }
+          rustup update stable
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+          rustc --version --verbose
+
+      - name: Clang (ring's ARM64 assembly needs it)
+        if: matrix.architecture == 'arm64'
+        run: |
+          if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+            $llvm = "C:\Program Files\LLVM\bin"
+            if (-not (Test-Path "$llvm\clang.exe")) { choco install llvm -y --no-progress }
+            $llvm | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            $env:PATH = "$llvm;$env:PATH"
+          }
+          clang --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: PDFium
+        run: |
+          New-Item -ItemType Directory -Force "${{ matrix.pdfium_folder }}" | Out-Null
+          Invoke-WebRequest "$env:PDFIUM_RELEASE/${{ matrix.pdfium_archive }}" -OutFile pdfium.tgz
+          tar -xzf pdfium.tgz -C "${{ matrix.pdfium_folder }}"
+          Get-Item "${{ matrix.pdfium_folder }}\bin\pdfium.dll"
+
+      - name: OCR models
+        # The installer bundles them; their SHA-256 is checked by the program.
+        run: |
+          New-Item -ItemType Directory -Force vendor\ocrs-models | Out-Null
+          foreach ($model in "text-detection", "text-recognition") {
+            Invoke-WebRequest "https://ocrs-models.s3-accelerate.amazonaws.com/$model.onnx" -OutFile "vendor\ocrs-models\$model.onnx"
+          }
+
+      - name: Test
+        env:
+          QUINTESS_PDFIUM_DIR: ${{ github.workspace }}\${{ matrix.pdfium_folder }}\bin
+        run: cargo test -j 4 --workspace ${{ matrix.cargo_target }}
+
+      - name: Build
+        run: |
+          cargo build --release -j 4 -p quintess-cli -p quintess-console ${{ matrix.cargo_target }}
+          Get-Item "${{ matrix.release_folder }}\quintess.exe", "${{ matrix.release_folder }}\quintess-console.exe" | Format-Table Name, Length
+
+      - name: Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup's compiler was not installed" }
+          "ISCC=$iscc" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Compile the installer
+        run: |
+          # The script states the version; it must be the workspace's.
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if (-not (Select-String -Path installer\quintess.iss -SimpleMatch "#define AppVersion `"$version`"")) { throw "installer\quintess.iss doesn't say version $version" }
+          & $env:ISCC /Qp "/DArch=${{ matrix.architecture }}" installer\quintess.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          $suffix = if ("${{ matrix.architecture }}" -eq "arm64") { "-arm64-setup.exe" } else { "-setup.exe" }
+          $installer = Get-Item "installer\output\Quintess-$version$suffix"
+          # The update check verifies downloads against this file.
+          "$((Get-FileHash $installer).Hash.ToLower())  $($installer.Name)" | Out-File -Encoding ascii -NoNewline "$($installer.FullName).sha256"
+          "INSTALLER=$($installer.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Get-ChildItem installer\output | Format-Table Name, Length
+
+      - name: Install it and try it
+        run: |
+          $folder = Join-Path $env:RUNNER_TEMP "Quintess"
+          $setup = Start-Process -PassThru -Wait $env:INSTALLER -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$folder`"", "/TASKS=openwith,addtopath", "/LOG=`"$env:RUNNER_TEMP\install.log`""
+          if ($setup.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log"; throw "setup exited with $($setup.ExitCode)" }
+          python tools/check_windows_install.py $folder "${{ matrix.pdfium_folder }}"
+          if ($LASTEXITCODE -ne 0) { throw "the installed files differ from installer\quintess.iss" }
+          # The installed program is native to this runner's processor: the
+          # machine field of its PE header (offset at 0x3C) says which.
+          $bytes = [IO.File]::ReadAllBytes("$folder\quintess.exe")
+          $machine = [BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3C) + 4)
+          $expected = if ("${{ matrix.architecture }}" -eq "arm64") { 0xAA64 } else { 0x8664 }
+          if ($machine -ne $expected) { throw ("quintess.exe is for machine 0x{0:X}" -f $machine) }
+          # quintess.com: the console launcher, as typing `quintess` in a terminal runs it.
+          & "$folder\quintess.com" --version
+          if ($LASTEXITCODE -ne 0) { throw "quintess --version failed" }
+          "# Quintess on Windows ${{ matrix.architecture }}`n`nA **sample** page with *styles*.`n`n- One`n- Two`n" | Out-File -Encoding utf8 sample.md
+          & "$folder\quintess.com" create markdown sample.md -o sample.pdf
+          & "$folder\quintess.com" info sample.pdf
+          if ($LASTEXITCODE -ne 0) { throw "quintess info failed" }
+          # OCR with the installed models (a download would mean they weren't
+          # found), on a picture of the sample page.
+          & "$folder\quintess.com" render sample.pdf --dpi 200 -o pages
+          & "$folder\quintess.com" create images pages\sample-page-001.png -o scan.pdf
+          $ocr = & "$folder\quintess.com" ocr scan.pdf --text recognized.txt -o scan-ocr.pdf
+          $ocr
+          if ($LASTEXITCODE -ne 0 -or "$ocr" -match "weren't installed") { throw "OCR didn't use the installed models" }
+          if (-not (Select-String -Path recognized.txt -Pattern "sample page" -Quiet)) { Get-Content recognized.txt; throw "OCR didn't read the sample page" }
+          "INSTALLED=$folder" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Screenshot
+        # The app's self-check draws the window once, saves a picture and
+        # exits. Runners have no graphics card: OpenGL falls back to wgpu.
+        run: |
+          $picture = "$env:GITHUB_WORKSPACE\screenshot-windows-${{ matrix.architecture }}.png"
+          $env:QUINTESS_SCREENSHOT = $picture
+          $app = Start-Process -PassThru "$env:INSTALLED\quintess.exe" -ArgumentList "`"$env:GITHUB_WORKSPACE\sample.pdf`"" -RedirectStandardError "$env:RUNNER_TEMP\app-errors.txt"
+          if (-not $app.WaitForExit(180000)) { $app.Kill(); Write-Host "the app did not finish in 3 minutes" }
+          Get-Content "$env:RUNNER_TEMP\app-errors.txt" -ErrorAction SilentlyContinue
+          if (-not (Test-Path $picture)) { throw "no screenshot was saved" }
+
+      - name: Uninstall
+        run: |
+          $uninstall = Start-Process -PassThru -Wait "$env:INSTALLED\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if ($uninstall.ExitCode -ne 0) { throw "uninstall exited with $($uninstall.ExitCode)" }
+          Start-Sleep -Seconds 3
+          if (Test-Path "$env:INSTALLED\quintess.exe") { throw "quintess.exe is still installed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quintess-windows-${{ matrix.architecture }}
+          path: |
+            installer/output/Quintess-*-setup.exe
+            installer/output/Quintess-*-setup.exe.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-windows-${{ matrix.architecture }}
+          path: screenshot-*.png
+          if-no-files-found: ignore
+
+  release:
+    name: Attach to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: quintess-windows-*
+          path: installers
+          merge-multiple: true
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          files=$(ls installers/Quintess-*-setup.exe installers/Quintess-*-setup.exe.sha256)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $files --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --title "Quintess ${GITHUB_REF_NAME#v}" --notes "Windows installers (x64 and ARM64); see the README for installing." $files
+          fi

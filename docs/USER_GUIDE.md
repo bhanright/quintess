@@ -1,6 +1,6 @@
 # Welcome to Quintess
 
-Quintess reads, edits, signs, redacts and automates PDF documents on Windows and Linux. It runs on your computer, needs no account, and works offline. The few features that use the internet are listed under **Privacy and updates**.
+Quintess reads, edits, signs, redacts and automates PDF documents on Windows, macOS and Linux. It runs on your computer, needs no account, and works offline. The few features that use the internet are listed under **Privacy and updates**.
 
 This guide explains Quintess's tools and common workflows. Use the list on the left to jump to a topic, or type in the search box above it. Press **F1** at any time to come back here.
 
@@ -19,6 +19,38 @@ Press **Ctrl+K** and type what you want, such as "rotate", "watermark" or "redac
 ## Installing on Windows
 
 Download the installer (`Quintess-<version>-setup.exe`) from the releases page at github.com/bhanright/quintess/releases and run it. It installs for your user account only, with no administrator rights needed, offers Quintess for opening PDFs without changing your default, and puts the `quintess` command on your PATH so it can be typed in a terminal. The installer isn't code-signed yet, so Windows may show a SmartScreen warning. Remove Quintess from Windows Settings ▸ Apps.
+
+**PCs with an ARM processor** (such as Snapdragon laptops running Windows 11) have their own installer, `Quintess-<version>-arm64-setup.exe`, which installs the version made for that processor; it runs faster and uses less battery than the x64 version, which Windows on ARM can also run (under emulation). The ARM64 installer refuses to install on an x64 PC, where its program couldn't run. If you start the x64 installer on an ARM PC, it suggests the ARM64 one and lets you carry on anyway; installing the ARM64 version later replaces the x64 one in place, keeping your settings. The update check (**Help ▸ Check for updates**) downloads the ARM64 installer on an ARM PC, even from the x64 version. Settings ▸ System ▸ About ▸ **System type** says which processor a PC has ("ARM-based processor" or "x64-based processor"). The ARM64 version is built and tested on GitHub's Windows 11 ARM computers but hasn't yet been tried by hand on a laptop.
+
+## Installing on macOS
+
+Quintess runs on macOS 11 (Big Sur) and later, on Macs with Apple silicon (M1 and later) and on Intel Macs: one download, `Quintess-<version>-macos.dmg`, holds a program for both. Download it from the releases page at github.com/bhanright/quintess/releases, open it, and drag **Quintess** onto **Applications**. A `.sha256` file beside the download checks it: `shasum -a 256 -c Quintess-<version>-macos.dmg.sha256` in Terminal.
+
+**Opening it the first time**: Quintess is free and isn't signed with an Apple Developer ID (which costs a yearly fee) or checked by Apple, so macOS refuses to open it the first time, saying it can't check it for malicious software. This happens once:
+
+- macOS 15 (Sequoia) and later: open Quintess (it is refused; click **Done**), then open System Settings ▸ **Privacy & Security**, scroll down to **Security**, click **Open Anyway** beside the message about Quintess, and confirm with your password.
+- macOS 14 (Sonoma) and earlier: in Applications, Control-click (or right-click) Quintess, choose **Open**, then click **Open** in the message.
+- If macOS says Quintess "is damaged and can't be opened", it is the download's quarantine mark rather than damage. In Terminal, run `xattr -dr com.apple.quarantine /Applications/Quintess.app`, then open it.
+
+After that it opens normally. The disk image has a **Read me first** file with these steps.
+
+**Opening PDFs**: Quintess is listed under **Open With** when you Control-click a PDF in the Finder. To make it the default, select a PDF, choose File ▸ Get Info, pick Quintess under **Open with**, and click **Change All**. You can also drop PDFs on Quintess in the Dock.
+
+**The command line**: the app is also the command-line tool, at `/Applications/Quintess.app/Contents/MacOS/quintess` (`… quintess --help` lists the commands). To type just `quintess` in Terminal, link it once: `sudo ln -sf /Applications/Quintess.app/Contents/MacOS/quintess /usr/local/bin/quintess` (create `/usr/local/bin` first with `sudo mkdir -p /usr/local/bin` if your Mac lacks it).
+
+**Shortcuts**: the shortcuts written with Ctrl in this guide use the Command (⌘) key on a Mac: ⌘O opens, ⌘S saves, ⌘K opens the command palette. **Quit Quintess** (⌘Q) asks about unsaved changes like closing the window does.
+
+**What differs from Windows**:
+
+- Signing from a certificate store isn't available (Windows only); sign with a .pfx or .p12 file.
+- Microsoft Office can't be used to convert documents (Windows only); install LibreOffice (in Applications) for Office documents and presentations, and Chrome or Edge for web pages.
+- Scanning needs SANE, which macOS doesn't include: install it with Homebrew (`brew install sane-backends`), or scan with the Image Capture app and make a PDF from the pictures (File ▸ Create ▸ From images…).
+- Printing goes through the Mac's own print system (CUPS). There is no Properties button; choose the **Paper** size in the Print dialog.
+- Reading aloud uses the Mac's voices; add more in System Settings ▸ Accessibility ▸ Spoken Content ▸ System voice ▸ Manage Voices.
+- Quintess doesn't update itself: **Help ▸ Check for updates** opens the release page; download the new disk image and drag Quintess into Applications again, replacing the old one.
+- Settings and data are in `~/Library/Application Support/Quintess`.
+
+The Mac version is built and tested on GitHub's Mac computers (Apple silicon and Intel), where its tests pass and the app opens and draws documents, but it hasn't yet been tried by hand on a Mac. Please report what doesn't work at github.com/bhanright/quintess/issues.
 
 ## Installing on Linux
 
@@ -162,7 +194,7 @@ Quintess can't nest a bookmark under another yet.
 
 - **Read this page** (Ctrl+Shift+V) or **Read to the end** (Ctrl+Shift+B). The paragraph being read is outlined, and pages turn as reading moves on.
 - The bar at the bottom has **Pause** and **Resume** (Ctrl+Shift+C), **Skip** to the next paragraph, **Stop** (Ctrl+Shift+E), a speed slider and a voice list. **Resume** starts the current paragraph again from its beginning. While paused, **Skip**, a new speed or a new voice wait for **Resume**.
-- On Windows, more voices can be added in Windows Settings ▸ Time & language ▸ Speech. On Linux, reading aloud needs the `speech-dispatcher` package, and its voices come from the speech engines installed for it (such as `espeak-ng`).
+- On Windows, more voices can be added in Windows Settings ▸ Time & language ▸ Speech. On Linux, reading aloud needs the `speech-dispatcher` package, and its voices come from the speech engines installed for it (such as `espeak-ng`). On a Mac, voices are added in System Settings ▸ Accessibility ▸ Spoken Content.
 - Scanned pages have no text to read until **Tools ▸ Recognize text (OCR)** adds it.
 
 ## QR codes
@@ -196,7 +228,7 @@ All of these are under **File ▸ Create**. Each new PDF opens in a new tab, uns
 - **Microsoft Office** (on Windows only) opens the document invisibly in Word, Excel or PowerPoint. You must tick **Let Quintess open this document in Microsoft Office to convert it** each time. Quintess turns macros off and opens a read-only copy, but it doesn't block Office from the network.
 - **Microsoft Edge** or **Chrome or Chromium** print web pages. Local web pages are printed with the network blocked, so pictures, fonts and styles from the web are missing.
 
-On Linux, install LibreOffice for Office documents and presentations, and Chromium or Chrome for web pages.
+On Linux, install LibreOffice for Office documents and presentations, and Chromium or Chrome for web pages. On a Mac, LibreOffice, Chrome and Edge are found in Applications (or in your own Applications folder).
 
 External converters are stopped after two minutes. When conversion finishes, the status bar names the converter and lists what it left out. If neither Edge nor Chrome is installed, **From a web page…** says so.
 
@@ -204,7 +236,7 @@ External converters are stopped after two minutes. When conversion finishes, the
 
 ## Scanning
 
-**From a scanner…** lists the scanners on your computer: on Windows through Windows' own scanner support (WIA), on Linux through SANE (the `sane-utils` package and your scanner's driver). Choose the **Resolution** (300 dpi suits OCR and printing), **Color**, **Gray** or **Black and white**, and whether to **Take every sheet in the document feeder**. **Make the text searchable (OCR)** recognizes the text as soon as the pages arrive.
+**From a scanner…** lists the scanners on your computer: on Windows through Windows' own scanner support (WIA), on Linux and macOS through SANE (on Linux the `sane-utils` package and your scanner's driver; on a Mac, SANE from Homebrew, `brew install sane-backends`, since the Mac's own Image Capture can't be used by other programs). Choose the **Resolution** (300 dpi suits OCR and printing), **Color**, **Gray** or **Black and white**, and whether to **Take every sheet in the document feeder**. **Make the text searchable (OCR)** recognizes the text as soon as the pages arrive.
 
 ## Combining PDFs
 
@@ -258,7 +290,7 @@ While you type, Quintess shows the result on the page: where the paragraph will 
 
 ## Fonts
 
-Quintess reuses the document's own font when the document already shows every letter you typed in that font, so edits match the text around them. Otherwise it embeds the original font again if it can, and if not, a similar font stands in (on Windows, Arial, Times New Roman or Courier New; on Linux, Liberation fonts if installed). The edit preview names any stand-in.
+Quintess reuses the document's own font when the document already shows every letter you typed in that font, so edits match the text around them. Otherwise it embeds the original font again if it can, and if not, a similar font stands in (on Windows, Arial, Times New Roman or Courier New; on a Mac the same fonts, which macOS includes; on Linux, Liberation fonts if installed). The edit preview names any stand-in.
 
 ## Moving, adding and deleting text
 
@@ -292,7 +324,7 @@ Each change is an ordinary edit you can undo. Changing page text rewrites the li
 
 - In **Edit ▸ Preferences…**, **Spelling** turns checking while typing on or off and picks the dictionary. "System language" follows your computer's setting.
 - **Add a language…** (beside the dictionary choice) downloads one of about 50 languages from the open-source wooorm/dictionaries collection, or installs any Hunspell dictionary you have (pick its `.dic` file; the `.aff` file must be beside it). Added languages can be removed there too.
-- Dictionaries can also be copied by hand into the `dictionaries` folder in Quintess's settings folder (see **Preferences and troubleshooting**). On Linux, dictionaries installed with the system (`/usr/share/hunspell`) are found automatically.
+- Dictionaries can also be copied by hand into the `dictionaries` folder in Quintess's settings folder (see **Preferences and troubleshooting**). On Linux, dictionaries installed with the system (`/usr/share/hunspell`) are found automatically. On a Mac, Hunspell dictionaries in `~/Library/Spelling` (which macOS's own spell checker also reads) are found too.
 - Words you add are kept in `personal-dictionary.txt` in the settings folder, one per line; you can edit it.
 - Words with digits, ALL-CAPS abbreviations, web and email addresses and file names are not checked.
 
@@ -526,7 +558,7 @@ To open a file encrypted for you, choose your certificate with its private key: 
 Choose **Tools ▸ Sign ▸ Sign here (draw a box)**, or the **Sign here** tool, and drag a box where the signature should appear. Then choose what to sign with:
 
 - **A certificate file (.pfx or .p12) from a certificate authority**, with its password. The password is used for this signature only and never saved.
-- **A certificate installed in Windows (including smart cards)**: on Windows, when you have certificates with private keys. Windows may ask for your PIN. On Linux, sign with a certificate file.
+- **A certificate installed in Windows (including smart cards)**: on Windows, when you have certificates with private keys. Windows may ask for your PIN. On macOS and Linux, sign with a certificate file.
 - **My own Quintess identity**. **Tools ▸ Sign ▸ Create signing identity…** makes one (an RSA key, which can also receive files encrypted for its certificate) and saves it as a file. Keep that file private: it holds your private key and isn't password-protected. Other programs show such signatures as not verified, since no authority vouches for them.
 
 Add a **Reason** and an optional **Location**. The signature shows your name from the certificate, the date, the reason and the location.
@@ -565,7 +597,7 @@ When a signer isn't trusted, the result offers **Trust…** with the certificate
 **Tools ▸ Recognize text (OCR)** reads the text in scanned pages and lays it invisibly over the page, so you can search, select and copy it while the page looks as before. Recognition runs on your computer and works best on Latin-script text.
 
 - Pages that already have text are skipped, and the message afterward says how many. If every page has text, Quintess says so and changes nothing.
-- The OCR models are included with the installer and the Linux packages. A copy built from source asks before downloading them once (about 12 MB).
+- The OCR models are included with the Windows installers, the Mac disk image and the Linux packages. A copy built from source asks before downloading them once (about 12 MB).
 - Check recognized text before relying on it, especially for redaction: OCR can misread words.
 
 # Comparing and exporting
@@ -699,7 +731,7 @@ A document is marked as PDF/A or PDF/X only when nothing unfixable remains. Thes
 
 On Windows, **Properties…** opens the printer's own settings (paper, tray, quality).
 
-On Linux, Quintess prints through CUPS (the `cups-client` package): it sends the chosen pages as a PDF, and CUPS fits them to the paper. There is no Properties button; choose the **Paper** size in the dialog, and set trays and quality in your system's printer settings.
+On Linux, Quintess prints through CUPS (the `cups-client` package): it sends the chosen pages as a PDF, and CUPS fits them to the paper. There is no Properties button; choose the **Paper** size in the dialog, and set trays and quality in your system's printer settings. A Mac prints the same way, through the CUPS print system built into macOS.
 
 ## Booklets and posters
 
@@ -778,8 +810,8 @@ Commands that write many files, `batch` and `form merge`, never replace a file s
 
 ## Where Quintess keeps its files
 
-- Settings, the personal dictionary, added dictionaries and trusted certificates: on Windows, `%APPDATA%\Quintess`; on Linux, `~/.config/quintess` by default (`$XDG_CONFIG_HOME/quintess` if that is set). Preferences are in `settings.json` there.
-- Recovered documents, the crash log and downloaded OCR models: on Windows, `%LOCALAPPDATA%\Quintess`; on Linux, `~/.local/share/quintess` by default (`$XDG_DATA_HOME/quintess` if that is set).
+- Settings, the personal dictionary, added dictionaries and trusted certificates: on Windows, `%APPDATA%\Quintess`; on macOS, `~/Library/Application Support/Quintess`; on Linux, `~/.config/quintess` by default (`$XDG_CONFIG_HOME/quintess` if that is set). Preferences are in `settings.json` there.
+- Recovered documents, the crash log and downloaded OCR models: on Windows, `%LOCALAPPDATA%\Quintess`; on macOS, the same `~/Library/Application Support/Quintess`; on Linux, `~/.local/share/quintess` by default (`$XDG_DATA_HOME/quintess` if that is set).
 
 ## If Quintess crashes
 
@@ -799,7 +831,7 @@ Copies made while another Quintess window is still open belong to that window an
 
 - Pages draw wrongly or not at all: try the other **Graphics** choice in Preferences, then restart Quintess.
 - An edit went wrong: **Ctrl+Z** undoes up to 60 recent edits.
-- A converter, scanner, printer or voice is missing on Linux: install the optional program listed under **Installing on Linux**.
+- A converter, scanner, printer or voice is missing on Linux or macOS: install the optional program listed under **Installing on Linux** or **Installing on macOS**.
 
 # Keyboard shortcuts
 
@@ -831,8 +863,8 @@ Quintess doesn't send your documents anywhere. It contacts the internet only for
 - **Downloading a spelling dictionary** fetches it from the open-source dictionaries project on GitHub.
 - **Creating a PDF from a web page** loads that page. On Windows, **Microsoft Office** conversion isn't blocked from the network.
 - **Trusted timestamps** send a fingerprint of the signature (not the document) to the timestamp server, and **checking revocation** or **adding long-term validation** asks the certificates' issuers whether they were revoked.
-- A copy of Quintess built from source asks before downloading the OCR models once (a batch action asks too, and the command line needs `--download-models`); the installer and the Linux packages include them.
+- A copy of Quintess built from source asks before downloading the OCR models once (a batch action asks too, and the command line needs `--download-models`); the installers, the Mac disk image and the Linux packages include them.
 
 Opening a link or QR code opens your browser, after showing you where it goes.
 
-On Linux, Quintess doesn't update itself: when a new version is out, it opens the release page, and you install the new package the same way you installed the old one.
+On Linux, Quintess doesn't update itself: when a new version is out, it opens the release page, and you install the new package the same way you installed the old one. On a Mac, download the new disk image and drag Quintess into Applications again, replacing the old copy.

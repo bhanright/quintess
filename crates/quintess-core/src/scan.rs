@@ -1,7 +1,9 @@
 //! Scanning paper into pictures for a new PDF, through the system's own
 //! scanner support: WIA on Windows (driven by a short PowerShell script, as
-//! WIA is a COM interface), SANE's `scanimage` on Linux. No extra software
-//! is needed on Windows; Linux needs the `sane-utils` package.
+//! WIA is a COM interface), SANE's `scanimage` on Linux and macOS. No extra
+//! software is needed on Windows; Linux needs the `sane-utils` package and
+//! macOS SANE from Homebrew (`sane-backends`), since the Mac's own scanning
+//! (Image Capture) has no command-line tool.
 //!
 //! Each scan runs as a child process with an argument list (no shell
 //! command line is built from text), into a private temporary folder, with
@@ -186,11 +188,26 @@ do {
 mod platform {
     use super::*;
 
+    /// SANE's scanimage. Apps opened from the Finder don't get Homebrew's
+    /// folders on their PATH, so on a Mac those are tried by full path.
+    fn scanimage() -> PathBuf {
+        let homebrew = ["/opt/homebrew/bin/scanimage", "/usr/local/bin/scanimage"].map(PathBuf::from);
+        let found = if cfg!(target_os = "macos") { homebrew.into_iter().find(|path| path.is_file()) } else { None };
+        found.unwrap_or_else(|| PathBuf::from("scanimage"))
+    }
+
+    /// What to do when SANE is missing.
+    const INSTALL_HINT: &str = if cfg!(target_os = "macos") {
+        "scanning on a Mac needs SANE, which macOS doesn't include: install it with Homebrew (brew install sane-backends), or scan with Image Capture and make a PDF of the pictures with File ▸ Create ▸ From images…"
+    } else {
+        "scanning needs SANE: install the sane-utils package"
+    };
+
     pub fn scanners() -> Result<Vec<Scanner>> {
         // `scanimage -f` prints one line per device in the format given.
-        let mut command = Command::new("scanimage");
+        let mut command = Command::new(scanimage());
         command.args(["-f", "%d\t%v %m%n"]);
-        let output = run_with_timeout(command, Duration::from_secs(30)).context("scanning needs SANE: install the sane-utils package")?;
+        let output = run_with_timeout(command, Duration::from_secs(30)).context(INSTALL_HINT)?;
         Ok(String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| line.split_once('\t')).map(|(id, name)| Scanner { id: id.trim().to_string(), name: name.trim().to_string() }).collect())
     }
 
@@ -200,7 +217,7 @@ mod platform {
             ColorMode::Gray => "Gray",
             ColorMode::BlackAndWhite => "Lineart",
         };
-        let mut command = Command::new("scanimage");
+        let mut command = Command::new(scanimage());
         command.args(["-d", &scanner.id, "--resolution", &options.resolution_dpi.to_string(), "--mode", mode, "--format=png"]);
         if options.use_feeder {
             command.arg(format!("--batch={}", folder.join("page-%04d.png").display())).args(["--source", "ADF"]);

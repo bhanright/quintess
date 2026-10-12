@@ -57,7 +57,10 @@ pub fn run_window(files: Vec<PathBuf>) -> Result<(), WindowFailure> {
     // Set when eframe creates the app, which it does only once the renderer
     // has started.
     let app_started = Rc::new(Cell::new(false));
-    let first_result = run_once(options(first_renderer), &files, &app_started, None);
+    // Before the window opens, so a document the Mac's Finder launched the
+    // app with is caught (see desktop.rs).
+    let desktop_events = crate::desktop::DesktopEvents::install();
+    let first_result = run_once(options(first_renderer), &files, &app_started, desktop_events.inbox(), None);
     let failure = match first_result {
         Err(failure) if should_try_other_renderer(&failure, app_started.get()) => failure,
         other => return other,
@@ -65,7 +68,7 @@ pub fn run_window(files: Vec<PathBuf>) -> Result<(), WindowFailure> {
     let second_renderer = other_renderer(first_renderer);
     eprintln!("{} couldn't start ({failure}); using {} instead", renderer_name(first_renderer), renderer_name(second_renderer));
     let note = format!("{} couldn't start on this computer, so Quintess is drawing with {} instead.", renderer_name(first_renderer), renderer_name(second_renderer));
-    run_once(options(second_renderer), &files, &app_started, Some(note))
+    run_once(options(second_renderer), &files, &app_started, desktop_events.inbox(), Some(note))
 }
 
 /// The renderer to try first, from the Graphics preference or QUINTESS_RENDERER.
@@ -142,13 +145,13 @@ fn surface_texture_limits(mut required: eframe::wgpu::Limits, supported: &eframe
 /// Runs the window once. A panic before the app was created is returned as
 /// `PanicWhileStarting`; a panic after it carries on unwinding, as before
 /// (the crash handler has already saved the user's work and said so).
-fn run_once(options: eframe::NativeOptions, files: &[PathBuf], app_started: &Rc<Cell<bool>>, note: Option<String>) -> Result<(), WindowFailure> {
+fn run_once(options: eframe::NativeOptions, files: &[PathBuf], app_started: &Rc<Cell<bool>>, desktop: crate::desktop::DesktopInbox, note: Option<String>) -> Result<(), WindowFailure> {
     let files = files.to_vec();
     let started = Rc::clone(app_started);
     let creator: eframe::AppCreator<'_> = Box::new(move |cc| {
         started.set(true);
         crate::crash::renderer_started();
-        let mut app = crate::app::QuintessApp::new(cc, files);
+        let mut app = crate::app::QuintessApp::new(cc, files, desktop);
         if let Some(note) = note {
             app.startup_note(note);
         }

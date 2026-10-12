@@ -112,14 +112,19 @@ impl QuintessApp {
                         ui.label(RichText::new(release.notes.trim()).color(colors.text_muted));
                     });
                 }
-                if cfg!(not(windows)) {
-                    // Linux installs come from a package; Quintess doesn't replace itself.
+                // Mac and Linux installs come from a disk image or a package;
+                // Quintess doesn't replace itself there.
+                if let Some(advice) = updates::MANUAL_UPDATE_ADVICE {
                     ui.add_space(6.0);
-                    use quintess_core::system::{linux_package, LinuxPackage};
-                    let advice = match linux_package() {
-                        LinuxPackage::Flatpak => "Download the new .flatpak file from the release page and install it with flatpak install --user, as before.",
-                        LinuxPackage::AppImage => "Download the new .AppImage from the release page, make it executable and use it in place of this one.",
-                        LinuxPackage::Installed => "Download it from the release page: the .deb if you installed with apt or dpkg, the .tar.gz if you used install.sh.",
+                    // On Linux the advice depends on how Quintess was installed.
+                    #[cfg(target_os = "linux")]
+                    let advice = {
+                        use quintess_core::system::{linux_package, LinuxPackage};
+                        match linux_package() {
+                            LinuxPackage::Flatpak => "Download the new .flatpak file from the release page and install it with flatpak install --user, as before.",
+                            LinuxPackage::AppImage => "Download the new .AppImage from the release page, make it executable and use it in place of this one.",
+                            LinuxPackage::Installed => advice,
+                        }
                     };
                     ui.label(RichText::new(advice).color(colors.text_muted));
                 }
