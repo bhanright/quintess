@@ -454,8 +454,12 @@ et.rs`): .pfx/.p12
   infinite number as "inf", which led to `pages::number` (Quintess's own
   content writer did the same with "inf" and "NaN") writing 0 instead.
   lopdf also panics, in builds with overflow checks only, on a PNG
-  predictor whose Columns times Colors overflows (object.rs:1237); release
-  builds wrap instead, so that one is left for lopdf. qpdf in CI flagged saved copies that lose
+  predictor whose Columns times Colors overflows (object.rs:1237) and on a
+  cross-reference stream /Index near the largest integer
+  (parser_aux.rs:633); release builds wrap instead, so those are left for
+  lopdf and listed as known in `mutate.rs`. One night's save_round_trip
+  fuzzing died of a SIGSEGV with no input saved (likely a stack overflow);
+  CI now fuzzes in fork mode so the next one is kept. qpdf in CI flagged saved copies that lose
   objects lopdf can't parse (issue1721: a stream whose data runs into
   `endstream`; issue7496 and issue13783: a corrupt latest copy of a page).
   Tests:

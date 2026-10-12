@@ -135,7 +135,16 @@ QUINTESS_PDFIUM_DIR=... cargo run -p quintess-robustness -- mutate --time 300
 mutates corpus files of 64 KB or less (and two synthetic files) and runs
 each through `check-file` in a child process, so PDFium crashes are found
 too. Crashes are minimized and saved with a note in
-`robustness-out/mutate/findings/`.
+`robustness-out/mutate/findings/`. The run fails on a crash unless it is
+one of the known lopdf panics listed in `KNOWN_UPSTREAM_PANICS` in
+`tools/robustness/src/mutate.rs` (arithmetic overflows that only debug
+builds check; release builds wrap). Hangs are reported but don't fail it:
+so far every one has been PDFium rendering (damaged JBIG2 images, tiny
+tiling steps).
+
+The sweep and the mutation fuzzer use debug builds, whose overflow checks
+turn silent wraparounds into findings. CI runs libFuzzer in fork mode, so a
+crash that kills its process outright (a stack overflow) is still saved.
 
 Never commit a finding made from a corpus file: turn each bug into a
 regression test with a small synthetic file.
