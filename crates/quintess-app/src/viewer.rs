@@ -435,6 +435,9 @@ struct FieldEdit {
     /// Whether the field has a keystroke script to run on each change;
     /// found out at the first change.
     filters_keystrokes: Option<bool>,
+    /// How the value will be drawn on the page, so the editor can match it;
+    /// `None` until read from the form (or when it can't be).
+    look: Option<quintess_core::forms::TextFieldLook>,
 }
 
 /// The resolution key for a zoom: render DPI rounded to steps of 24, so
@@ -723,12 +726,38 @@ fn handle_page_input(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut Viewe
     // An open field editor sits on top of the page and takes the input.
     if let Some(edit) = state.editing_field.as_mut().filter(|e| e.page_index == page_index) {
         let rect = screen_rect_of(geometry, page_rect, zoom, edit.rect);
-        let font = egui::FontId::proportional((rect.height() * 0.6).clamp(10.0, 18.0));
-        let mut layouter = crate::spell::plain_layouter(font.clone(), None);
+        // The editor looks like the field will once filled: the same size,
+        // color and alignment, on the field's own background, with the
+        // two-point inset the drawn value has.
+        let look = edit.look;
+        let font_size = look.map_or((rect.height() * 0.6).clamp(10.0, 18.0), |look| look.size_points * zoom);
+        let font = egui::FontId::proportional(font_size.max(4.0));
+        let to_color = |[red, green, blue]: [f32; 3]| Color32::from_rgb((red * 255.0).round() as u8, (green * 255.0).round() as u8, (blue * 255.0).round() as u8);
+        let text_color = look.map_or(Color32::BLACK, |look| to_color(look.color));
+        let background = look.and_then(|look| look.background).map_or(Color32::WHITE, to_color);
+        ui.painter().rect_filled(rect, 0.0, background);
+        let horizontal = match look.map(|look| look.alignment) {
+            Some(quintess_core::forms::TextAlignment::Centered) => egui::Align::Center,
+            Some(quintess_core::forms::TextAlignment::Right) => egui::Align::RIGHT,
+            _ => egui::Align::LEFT,
+        };
+        let inset = (2.0 * zoom).round() as i8;
+        let mut layouter = crate::spell::plain_layouter(font.clone(), Some(text_color));
         let before = edit.value.clone();
         let editor = if edit.multiline { egui::TextEdit::multiline(&mut edit.value) } else { egui::TextEdit::singleline(&mut edit.value) };
-        let editor = editor.font(font).desired_width(rect.width()).layouter(&mut layouter);
-        let output = ui.scope_builder(egui::UiBuilder::new().max_rect(rect.expand(1.0)), |ui| editor.show(ui)).inner;
+        let editor = editor
+            .font(font)
+            .text_color(text_color)
+            .frame(egui::Frame::NONE)
+            .margin(egui::Margin::symmetric(inset, if edit.multiline { inset } else { 0 }))
+            .horizontal_align(horizontal)
+            .vertical_align(if edit.multiline { egui::Align::TOP } else { egui::Align::Center })
+            .min_size(rect.size())
+            .desired_width(rect.width())
+            .layouter(&mut layouter);
+        let output = ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| editor.show(ui)).inner;
+        // A thin outline says which field is being typed in.
+        ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, crate::theme::highlight()), StrokeKind::Outside);
         if edit.value != before {
             // The form's keystroke script may refuse a character or reshape
             // it (a phone mask adds its dashes), as in Acrobat.
@@ -1070,6 +1099,10 @@ fn click(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &
             // Form fields first: they sit above the page.
             if let Some(field) = tab.fields.iter().find(|f| f.widgets.iter().any(|(p, r)| *p == page && inside(*r, point))).cloned() {
                 start_field_interaction(state, &field, page_index, point, actions);
+                // The editor takes the look the value will have on the page.
+                if let Some(edit) = state.editing_field.as_mut().filter(|edit| edit.look.is_none()) {
+                    edit.look = tab.load_pdf().ok().and_then(|pdf| quintess_core::forms::text_field_look(&pdf, &edit.name, edit.rect));
+                }
                 return;
             }
             if let Some(link) = tab.annotations.iter().find(|a| a.page == page && a.subtype == "Link" && inside(a.rect, point)) {
@@ -1136,7 +1169,7 @@ fn start_field_interaction(state: &mut ViewerState, field: &FieldInfo, page_inde
                 actions.push(ViewerAction::FillField { name: field.name.clone(), value: field.options[position].clone() });
                 return;
             }
-            state.editing_field = Some(FieldEdit { name: field.name.clone(), page_index, rect: *rect, value: field.value.clone(), multiline: field.multiline, focus_requested: false, filters_keystrokes: None });
+            state.editing_field = Some(FieldEdit { name: field.name.clone(), page_index, rect: *rect, value: field.value.clone(), multiline: field.multiline, focus_requested: false, filters_keystrokes: None, look: None });
         }
         FieldType::CheckBox => {
             let checked = !field.value.is_empty() && field.value != "Off";
@@ -1462,6 +1495,16 @@ pub fn is_editing_text(state: &ViewerState) -> bool {
 
 pub fn begin_text_edit(state: &mut ViewerState, line: EditableLine) {
     state.editing_text = Some(TextEditing::start(line));
+}
+
+/// Opens the editor on a form field on the current page, as clicking it
+/// does, with `value` typed in. For the screenshot self-check.
+pub fn begin_field_edit(state: &mut ViewerState, tab: &DocumentTab, field_name: &str, value: &str) {
+    let page = tab.current_page as u32 + 1;
+    let Some(field) = tab.fields.iter().find(|field| field.name == field_name) else { return };
+    let Some((_, rect)) = field.widgets.iter().find(|(widget_page, _)| *widget_page == page) else { return };
+    let look = tab.load_pdf().ok().and_then(|pdf| quintess_core::forms::text_field_look(&pdf, field_name, *rect));
+    state.editing_field = Some(FieldEdit { name: field.name.clone(), page_index: tab.current_page, rect: *rect, value: value.to_string(), multiline: field.multiline, focus_requested: false, filters_keystrokes: None, look });
 }
 
 /// Opens the paragraph editor, as clicking a paragraph with Edit text does.

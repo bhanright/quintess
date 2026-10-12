@@ -290,7 +290,7 @@ fn regenerate_text_appearance_in_color(pdf: &mut Pdf, field_id: ObjectId, value:
         let rect = rectangle_from_object(&pdf.doc, pdf.doc.get_dictionary(widget)?.get(b"Rect")?)?;
         let (width, height) = (rect[2] - rect[0], rect[3] - rect[1]);
         let multiline = flags & FLAG_MULTILINE != 0;
-        let size = if requested_size > 0.0 { requested_size } else if multiline { 10.0 } else { (height * 0.66).clamp(4.0, 14.0) };
+        let size = text_field_font_size(requested_size, multiline, height);
         let mut setter = TextSetter::for_texts(StandardFont::Helvetica, [value]);
         let mut content = format!("/Tx BMC q 1 1 {} {} re W n BT {} {} {} rg ", number(width - 2.0), number(height - 2.0), number(color[0]), number(color[1]), number(color[2]));
         let lines: Vec<String> = if multiline { crate::fonts::wrap_text_by(value, width - 4.0, |piece| setter.width(piece, size)) } else { vec![value.replace('\n', " ")] };
@@ -331,6 +331,76 @@ fn regenerate_text_appearance_in_color(pdf: &mut Pdf, field_id: ObjectId, value:
         pdf.doc.get_dictionary_mut(widget)?.set("AP", dictionary! { "N" => appearance_id });
     }
     Ok(())
+}
+
+/// The size a text field's value is drawn at: the size its default
+/// appearance asks for, or, for "automatic" (zero), one that suits the
+/// field's height.
+fn text_field_font_size(requested_size: f32, multiline: bool, height: f32) -> f32 {
+    if requested_size > 0.0 {
+        requested_size
+    } else if multiline {
+        10.0
+    } else {
+        (height * 0.66).clamp(4.0, 14.0)
+    }
+}
+
+/// How a text field's value is drawn on the page, so the box for typing
+/// into it can look the same: the size, color and alignment of the text,
+/// and the field's background.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextFieldLook {
+    /// In points; the value is set in Helvetica.
+    pub size_points: f32,
+    pub color: [f32; 3],
+    pub alignment: TextAlignment,
+    /// The widget's own background color, when it has one.
+    pub background: Option<[f32; 3]>,
+    /// For a comb field, the number of boxes, one character in each.
+    pub comb_cells: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAlignment {
+    Left,
+    Centered,
+    Right,
+}
+
+/// The look of the text field `name` in its widget at `widget_rect`, or
+/// `None` when there is no such text field.
+pub fn text_field_look(pdf: &Pdf, name: &str, widget_rect: [f32; 4]) -> Option<TextFieldLook> {
+    let field_id = list_fields(pdf).into_iter().find(|field| field.name == name)?.id?;
+    let field = pdf.doc.get_dictionary(field_id).ok()?;
+    let da = inherited(pdf, field, b"DA").and_then(object_to_text).or_else(|| acroform(pdf).and_then(|f| f.get(b"DA").ok().and_then(object_to_text))).unwrap_or_else(|| "/Helv 0 Tf 0 g".into());
+    let flags = inherited(pdf, field, b"Ff").and_then(|f| f.as_i64().ok()).unwrap_or(0);
+    let alignment = match inherited(pdf, field, b"Q").and_then(|q| q.as_i64().ok()).unwrap_or(0) {
+        1 => TextAlignment::Centered,
+        2 => TextAlignment::Right,
+        _ => TextAlignment::Left,
+    };
+    let comb_cells = if flags & (1 << 24) != 0 { inherited(pdf, field, b"MaxLen").and_then(|m| m.as_i64().ok()).and_then(|cells| u32::try_from(cells).ok()).filter(|cells| *cells > 0) } else { None };
+    let (requested_size, color) = parse_default_appearance(&da);
+    let size_points = text_field_font_size(requested_size, flags & FLAG_MULTILINE != 0, widget_rect[3] - widget_rect[1]);
+    // The background is the widget's: a field shown in several places can
+    // look different in each.
+    let same_rect = |rect: [f32; 4]| rect.iter().zip(widget_rect).all(|(a, b)| (a - b).abs() < 0.5);
+    let background = widget_ids(pdf, field_id)
+        .into_iter()
+        .filter_map(|widget| pdf.doc.get_dictionary(widget).ok())
+        .find(|widget| widget.get(b"Rect").ok().and_then(|rect| rectangle_from_object(&pdf.doc, rect).ok()).is_some_and(same_rect))
+        .and_then(|widget| widget.get(b"MK").ok().and_then(|mk| pdf.resolve(mk).as_dict().ok()).and_then(|mk| mk.get(b"BG").ok()).and_then(|bg| pdf.resolve(bg).as_array().ok()).cloned())
+        .and_then(|components| {
+            let values: Vec<f32> = components.iter().filter_map(|c| c.as_float().ok().or_else(|| c.as_i64().ok().map(|i| i as f32))).collect();
+            match values.as_slice() {
+                [gray] => Some([*gray; 3]),
+                [red, green, blue] => Some([*red, *green, *blue]),
+                [cyan, magenta, yellow, black] => Some([(1.0 - cyan) * (1.0 - black), (1.0 - magenta) * (1.0 - black), (1.0 - yellow) * (1.0 - black)]),
+                _ => None,
+            }
+        });
+    Some(TextFieldLook { size_points, color, alignment, background, comb_cells })
 }
 
 /// Makes sure the form has a default font resource named Helv; returns its id.

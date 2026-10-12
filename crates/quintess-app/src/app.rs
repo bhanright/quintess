@@ -99,6 +99,7 @@ pub struct QuintessApp {
 /// list of `organizer`, `night`, `dark`, `zoom=1.5`, `page=3`, `tool=Ink`,
 /// `search=text`, `dialog=name`, `tool=edit-text`, `edit-line=N`,
 /// `command=Reverse order` (any command by its label), `crash` (to test the crash handler),
+/// `edit-field=Field name;typed value` (opens a form field's editor),
 /// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
 /// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`,
@@ -278,6 +279,13 @@ impl QuintessApp {
                         if let Some(line) = tab.editable_lines(tab.current_page).get(number.saturating_sub(1)).cloned() {
                             viewer::begin_text_edit(self.viewer_states.entry(tab.id).or_default(), line);
                         }
+                    }
+                }
+                "edit-field" => {
+                    // "edit-field=Field name;typed value"
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        let (name, typed) = value.split_once(';').unwrap_or((value, ""));
+                        viewer::begin_field_edit(self.viewer_states.entry(tab.id).or_default(), tab, name, typed);
                     }
                 }
                 "edit-text" | "show-result" => {

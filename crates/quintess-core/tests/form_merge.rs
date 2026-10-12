@@ -91,3 +91,33 @@ fn excel_workbooks_read_like_a_spreadsheet_shows_them() {
     assert_eq!(table.columns, ["Name", "Member number", "Joined"]);
     assert_eq!(table.rows, [vec!["Ada".to_string(), "1042".into(), "10/10/2026".into()], vec!["Grace".into(), "7.5".into(), String::new()]]);
 }
+
+/// The box for typing into a field takes the look the value will have: its
+/// size, color, alignment and background.
+#[test]
+fn text_field_look_follows_the_field() {
+    use quintess_core::forms::{TextAlignment, text_field_look};
+    let mut pdf = text_to_pdf("Form", &TextPageSettings::default()).unwrap();
+    let rect = [140.0, 700.0, 400.0, 720.0];
+    let id = add_field(&mut pdf, &NewField { name: "total".into(), page: 1, rect, kind: NewFieldKind::Text { multiline: false, font_size: 12.0, max_length: None, default_value: String::new() }, tooltip: String::new(), required: false }).unwrap();
+    let look = text_field_look(&pdf, "total", rect).expect("a text field");
+    assert_eq!(look.size_points, 12.0);
+    assert_eq!(look.alignment, TextAlignment::Left);
+    // Fields Quintess adds have a pale blue background.
+    assert_eq!(look.background, Some([0.93, 0.95, 1.0]));
+
+    // Centered, dark blue, automatic size, on a light gray background.
+    {
+        let field = pdf.doc.get_dictionary_mut(id).unwrap();
+        field.set("Q", 1);
+        field.set("DA", lopdf::Object::string_literal("/Helv 0 Tf 0 0 0.5 rg"));
+        field.set("MK", lopdf::dictionary! { "BG" => vec![0.9.into()] });
+    }
+    let look = text_field_look(&pdf, "total", rect).unwrap();
+    assert_eq!(look.alignment, TextAlignment::Centered);
+    assert_eq!(look.color, [0.0, 0.0, 0.5]);
+    assert_eq!(look.background, Some([0.9; 3]));
+    // Automatic size suits the 20-point-high box, as the drawn value does.
+    assert!((look.size_points - 13.2).abs() < 0.01, "{}", look.size_points);
+    assert_eq!(text_field_look(&pdf, "no such field", rect), None);
+}
