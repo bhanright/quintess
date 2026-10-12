@@ -89,7 +89,7 @@
       primary.querySelector("[data-download]").dataset.download = key;
       $("[data-primary-label]", primary).textContent = choices[key][0];
       $("[data-primary-note]", primary).textContent = choices[key][1];
-      const other = document.querySelector(`.dl-others [data-asset="${key}"]`);
+      const other = document.querySelector(`#dl a[data-asset="${key}"]`);
       if (other) primary.querySelector("a").href = other.href;
     };
     const agent = navigator.userAgent;
@@ -101,6 +101,108 @@
     }
   }
 
+  // ---- Download cards (adapted from the Cartogenesis site) ----
+  // The one chosen opens across the row and the others move beneath it. The
+  // move measures where every card was, lets the grid lay them out anew, and
+  // slides each from its old place and size to its new one; each card's
+  // contents are scaled the other way at every step, so the words keep their
+  // shape while the card around them changes its.
+  const downloads = $("#dl");
+  if (downloads) {
+    downloads.classList.add("live");
+    const cards = $$(".dl-card", downloads);
+    const ownOrder = cards.slice();
+    const lessMotion = matchMedia("(prefers-reduced-motion: reduce)");
+    const CARD_MOVE_MS = 420;
+    const CARD_MOVE_STEPS = 12;
+    const lerp = (from, to, share) => from + (to - from) * share;
+    const easeOut = (share) => 1 - Math.pow(1 - share, 3);
+    const headOf = (card) => card.querySelector(".dl-head");
+    const rearrange = (change) => {
+      const before = new Map(cards.map((card) => [card, card.getBoundingClientRect()]));
+      change();
+      if (lessMotion.matches || !Element.prototype.animate) return;
+      cards.forEach((card) => {
+        const was = before.get(card), now = card.getBoundingClientRect();
+        if (!now.width || !now.height) return;
+        const dx = was.left - now.left, dy = was.top - now.top;
+        const across = was.width / now.width, down = was.height / now.height;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(across - 1) < 0.01 && Math.abs(down - 1) < 0.01) return;
+        const outer = [], inner = [];
+        for (let step = 0; step <= CARD_MOVE_STEPS; step++) {
+          const share = easeOut(step / CARD_MOVE_STEPS);
+          const scaleAcross = lerp(across, 1, share), scaleDown = lerp(down, 1, share);
+          outer.push({ offset: step / CARD_MOVE_STEPS, transformOrigin: "0 0", transform: `translate(${lerp(dx, 0, share)}px,${lerp(dy, 0, share)}px) scale(${scaleAcross},${scaleDown})` });
+          inner.push({ offset: step / CARD_MOVE_STEPS, transform: `scale(${1 / scaleAcross},${1 / scaleDown})` });
+        }
+        card.animate(outer, { duration: CARD_MOVE_MS, easing: "linear" });
+        card.querySelector(".dl-inner").animate(inner, { duration: CARD_MOVE_MS, easing: "linear" });
+        if (card.classList.contains("open")) {
+          card.querySelector(".dl-body").animate([{ opacity: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1 }], { duration: CARD_MOVE_MS + 60 });
+        }
+      });
+    };
+    const choose = (chosen) => {
+      const opens = chosen && !chosen.classList.contains("open");
+      rearrange(() => {
+        cards.forEach((card) => {
+          const on = opens && card === chosen;
+          card.classList.toggle("open", on);
+          headOf(card).setAttribute("aria-expanded", on ? "true" : "false");
+        });
+        // The open card goes first, so it spans the row above the others.
+        if (opens) downloads.insertBefore(chosen, downloads.firstChild);
+        else ownOrder.forEach((card) => downloads.appendChild(card));
+      });
+    };
+    cards.forEach((card) => {
+      headOf(card).setAttribute("aria-expanded", "false");
+      headOf(card).addEventListener("click", () => choose(card));
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      const open = downloads.querySelector(".dl-card.open");
+      if (!open) return;
+      const focusWasInside = open.contains(document.activeElement);
+      choose(null);
+      if (focusWasInside) headOf(open).focus();
+    });
+    $$(".dl-copy", downloads).forEach((button) => {
+      button.hidden = false;
+      button.addEventListener("click", () => {
+        const source = document.getElementById(button.dataset.copy);
+        const said = (words) => { button.textContent = words; setTimeout(() => (button.textContent = "Copy"), 1600); };
+        const selectInstead = () => {
+          const range = document.createRange();
+          range.selectNodeContents(source);
+          const selection = getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          said("Selected");
+        };
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(source.textContent).then(() => said("Copied"), selectInstead);
+        else selectInstead();
+      });
+    });
+    // The card for this visitor's system is marked, not opened. Phones and
+    // tablets get no mark: there is no version for them.
+    const platform = navigator.userAgentData?.platform || "";
+    const agent = navigator.userAgent || "";
+    const both = `${platform} ${agent}`;
+    let system = null;
+    if (/Android|iPhone|iPad|iPod|CrOS/i.test(both)) system = null;
+    else if (/^Windows$/i.test(platform) || (!platform && /Windows NT/.test(agent))) system = "windows";
+    else if (/^macOS$/i.test(platform) || (!platform && /Macintosh|Mac OS X/.test(agent))) system = "macos";
+    else if (/^Linux$/i.test(platform) || (!platform && /Linux|X11/.test(agent))) system = "linux";
+    const yours = system && downloads.querySelector(`.dl-card[data-system="${system}"]`);
+    if (yours) {
+      yours.classList.add("yours");
+      yours.querySelector(".dl-tag").hidden = false;
+    }
+    // "Mac, Linux, Windows on ARM" from the hero opens nothing by itself;
+    // following a link to #download keeps the cards as they are.
+  }
+
   fetch("/api/release").then((response) => (response.ok ? response.json() : null)).then((release) => {
     if (!release || !release.assets) return;
     $$("[data-version]").forEach((element) => (element.textContent = release.version));
@@ -110,6 +212,7 @@
       if (!asset) return;
       const megabytes = (asset.size / 1048576).toFixed(1) + " MB";
       const set = (selector, text) => $$(selector, block).forEach((element) => (element.textContent = text));
+      if (block.matches("[data-download]")) block.href = asset.url;
       $$("[data-download]", block).forEach((link) => (link.href = asset.url));
       set("[data-asset-name]", asset.name);
       set("[data-asset-size]", megabytes);

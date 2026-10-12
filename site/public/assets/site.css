@@ -411,3 +411,72 @@ main { position: relative; z-index: 2; }
 .download-grid .pkg { display: block; }
 .download-grid .pkg + .pkg { padding-top: 0; border-top: 0; }
 .download-grid .pkg .button { width: 100%; }
+
+/* Download cards (adapted from the Cartogenesis site): one per system; the
+   chosen one opens across the row and the others move beneath it. Without
+   scripts every card is open. */
+.dl-lede { margin: 0 0 18px; color: var(--muted); max-width: 60ch; }
+.dl-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.dl-card {
+  --card-ground: var(--ink-2); --card-ink: var(--text);
+  --card-ink-dim: var(--muted);
+  --card-chip: color-mix(in srgb, var(--card-ink) 12%, var(--card-ground));
+  --card-well: var(--ink);
+  position: relative; grid-column: 1 / -1; min-width: 0; overflow: hidden;
+  background: var(--card-ground); color: var(--card-ink); box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.dl-card.yours { box-shadow: inset 0 0 0 2px var(--violet); }
+.dl-cards.live .dl-card:not(.open) { grid-column: auto; }
+.dl-inner { transform-origin: 0 0; }
+.dl-head {
+  display: flex; flex-direction: column; justify-content: space-between; gap: 22px; width: 100%; margin: 0;
+  padding: 18px 18px 6px; border: 0; background: none; font: inherit; color: inherit; text-align: left;
+}
+.dl-cards.live .dl-head { cursor: pointer; }
+.dl-cards.live .dl-card:not(.open) .dl-head { min-height: 172px; padding-bottom: 16px; }
+.dl-head:focus-visible { outline: 2px solid var(--violet-hi); outline-offset: -4px; }
+.dl-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.dl-icon { width: 30px; height: 30px; }
+.dl-more { display: none; width: 30px; height: 30px; border-radius: 50%; background: var(--card-chip); transition: transform .3s; }
+.dl-cards.live .dl-more { display: grid; place-items: center; }
+.dl-more svg { width: 14px; height: 14px; }
+.dl-card.open .dl-more { transform: rotate(45deg); }
+.dl-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-weight: 600; font-size: 19px; line-height: 1.2; }
+.dl-sum { display: block; font-weight: 500; font-size: 14px; line-height: 1.35; color: var(--card-ink-dim); margin-top: 4px; }
+.dl-tag { max-width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.2; letter-spacing: .04em; padding: 3px 7px; background: var(--violet); color: #fff; }
+.dl-body { padding: 0 18px 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.dl-cards.live .dl-card:not(.open) .dl-body { display: none; }
+.dl-body p { margin: 0; color: var(--card-ink-dim); font-size: 15px; line-height: 1.6; max-width: 66ch; }
+.dl-card code { color: var(--card-ink); font-family: var(--mono); font-size: .92em; }
+.dl-files { display: flex; flex-wrap: wrap; gap: 10px; }
+.dl-file {
+  display: inline-flex; align-items: baseline; gap: 8px; text-decoration: none; color: var(--card-ink);
+  border: 1px solid var(--line-strong); padding: 10px 16px; font-weight: 600; font-size: 14px; line-height: 1;
+}
+.dl-file:hover { border-color: var(--violet); }
+.dl-file small { font-family: var(--mono); font-size: 12px; line-height: 1; color: var(--card-ink-dim); }
+.dl-file.first { background: var(--violet); border-color: var(--violet); color: #fff; }
+.dl-file.first small { color: rgba(255, 255, 255, .8); }
+.dl-file:focus-visible { outline: 2px solid var(--violet-hi); outline-offset: 3px; }
+/* Commands scroll sideways instead of wrapping, so they paste as typed. */
+.dl-cmd { position: relative; margin: 0; background: var(--card-well); padding: 12px 14px; font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--card-ink); overflow-x: auto; white-space: pre; }
+.dl-cmd-box { position: relative; min-width: 0; }
+.dl-cards.live .dl-cmd { padding-right: 76px; }
+.dl-copy { position: absolute; right: 8px; top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1; color: var(--card-ink); background: var(--card-chip); border: 0; padding: 6px 10px; cursor: pointer; }
+.dl-notes { margin: 0; padding-left: 18px; color: var(--card-ink-dim); font-size: 14px; line-height: 1.55; display: grid; gap: 4px; }
+.dl-sha { font-size: 12px !important; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.dl-sha span { min-width: 0; overflow-wrap: anywhere; }
+.dl-sha b { font-weight: 600; color: var(--card-ink); }
+.dl-sha code { font-size: 11px; }
+@media (max-width: 699px) {
+  .dl-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dl-cards.live .dl-card.linux:not(.open) { grid-column: 1 / -1; }
+  .dl-cards.live .dl-card:not(.open) .dl-head { min-height: 140px; }
+}
+/* In the download panel the cards take the full width, with the links in a
+   row beneath them, and sit darker than the panel so they read as cards. */
+.download-card .dl-lede, .download-card .dl-cards { grid-column: 1 / -1; }
+.download-card .download-links { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 18px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+.download-card .dl-card { --card-ground: var(--ink); --card-well: var(--ink-3); }
+/* Commands show every character as typed: no "--" drawn as a dash. */
+.dl-card code, .dl-cmd { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }

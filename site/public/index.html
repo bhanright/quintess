@@ -22,7 +22,7 @@
 <meta property="og:image:alt" content="The Quintess logo beside the line: A free PDF editor for Windows, Mac and Linux.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/site.css?v=ad6d479b20">
+<link rel="stylesheet" href="/assets/site.css?v=e28d6aa55a">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -109,7 +109,7 @@
       </a>
       <p class="dl-meta"><span class="dl-note" data-primary-note>Windows 10/11 · x86_64 · installs for your user account</span><span class="fine mono keep-case" data-asset-line>Quintess-0.4.0-setup.exe</span></p>
     </div>
-    <p class="dl-others">Also for <a href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-arm64-setup.exe" data-asset="windows_arm64" data-download="windows_arm64" data-track="download">Windows on ARM</a> · <a href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-macos.dmg" data-asset="macos" data-download="macos" data-track="download">Mac</a> · <a href="https://github.com/bhanright/quintess/releases/download/v0.4.0/quintess_0.4.0_amd64.deb" data-asset="deb" data-download="deb" data-track="download">Linux (.deb)</a> · <a href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-x86_64.AppImage" data-asset="appimage" data-download="appimage" data-track="download">Linux (AppImage)</a> · <a href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-x86_64.flatpak" data-asset="flatpak" data-download="flatpak" data-track="download">Linux (Flatpak)</a> · <a href="https://github.com/bhanright/quintess/releases/download/v0.4.0/quintess-0.4.0-linux-x86_64.tar.gz" data-asset="tarball" data-download="tarball" data-track="download">Linux (.tar.gz)</a>. <a href="#download">All downloads and checksums</a></p>
+    <p class="dl-others"><a href="#download">Mac, Linux, Windows on ARM, and how to install ↓</a></p>
     <div class="cta">
       <a class="button button-ghost" href="https://github.com/bhanright/quintess" data-track="github">View the source</a>
     </div>
@@ -260,90 +260,93 @@
 <section class="download" id="download" aria-labelledby="download-title">
   <h2 id="download-title" class="giant" aria-label="Get Quintess"><span>quintess</span><i class="giant-caret" aria-hidden="true"></i></h2>
   <div class="download-card proof">
-    <div class="download-main download-grid">
-      <div class="pkg" data-asset="windows">
-        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-setup.exe" data-download="windows" data-track="download">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-          Windows
-        </a>
-        <p class="pkg-note">Windows 10/11 · x86_64 · installs for your user account</p>
-        <dl class="asset mono">
-          <div><dt>file</dt><dd data-asset-name>Quintess-0.4.0-setup.exe</dd></div>
-          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-        </dl>
+    <p class="dl-lede">Choose your system to see its downloads and how to install them.</p>
+    <div class="dl-cards" id="dl">
+      <div class="dl-card windows" data-system="windows">
+        <div class="dl-inner">
+          <button type="button" class="dl-head" aria-expanded="true" aria-controls="dl-windows">
+            <span class="dl-top">
+              <svg class="dl-icon" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4.5 6.5q0-1.5 1.5-1.5h18q1.5 0 1.5 1.5v13q0 1.5-1.5 1.5H6q-1.5 0-1.5-1.5z"/><path d="M11 26h8M15 21v5"/></svg>
+              <span class="dl-more" aria-hidden="true"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 2v10M2 7h10"/></svg></span>
+            </span>
+            <span>
+              <span class="dl-name">Windows <span class="dl-tag" hidden>Your system</span></span>
+              <span class="dl-sum">Installer · x64 or ARM64 · Windows 10 and 11</span>
+            </span>
+          </button>
+          <div class="dl-body" id="dl-windows">
+            <div class="dl-files">
+              <a class="dl-file first" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-setup.exe" data-asset="windows" data-download="windows" data-track="download">Installer (x64) <small data-asset-size></small></a>
+              <a class="dl-file" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-arm64-setup.exe" data-asset="windows_arm64" data-download="windows_arm64" data-track="download">Installer (ARM64) <small data-asset-size></small></a>
+            </div>
+            <p>Run the installer: it sets Quintess up for your user account, with no administrator rights, and adds it to the Start menu and to your PATH. It isn't code-signed yet, so Windows shows a SmartScreen warning. If you trust the download, choose “More info”, then “Run anyway”.</p>
+            <ul class="dl-notes">
+              <li>On a PC with an ARM processor (Snapdragon and the like), choose the ARM64 installer. The x64 one runs there too, more slowly, and suggests the ARM64 one.</li>
+              <li>Typing <code>quintess</code> in a terminal runs the command-line tool; <code>quintess --help</code> lists its commands.</li>
+            </ul>
+            <p class="dl-sha">SHA-256: <span data-asset="windows"><b>x64</b> <code data-asset-sha>see the .sha256 file beside it</code></span> <span data-asset="windows_arm64"><b>ARM64</b> <code data-asset-sha>see the .sha256 file beside it</code></span></p>
+          </div>
+        </div>
       </div>
-      <div class="pkg" data-asset="windows_arm64">
-        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-arm64-setup.exe" data-download="windows_arm64" data-track="download">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-          Windows on ARM
-        </a>
-        <p class="pkg-note">Windows 11 on ARM · native ARM64</p>
-        <dl class="asset mono">
-          <div><dt>file</dt><dd data-asset-name>Quintess-0.4.0-arm64-setup.exe</dd></div>
-          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-        </dl>
+
+      <div class="dl-card macos" data-system="macos">
+        <div class="dl-inner">
+          <button type="button" class="dl-head" aria-expanded="true" aria-controls="dl-macos">
+            <span class="dl-top">
+              <svg class="dl-icon" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6.5 5h17q1.5 0 1.5 1.5v12q0 1.5-1.5 1.5h-17Q5 20 5 18.5v-12Q5 5 6.5 5z"/><path d="M2.5 24.5h25"/></svg>
+              <span class="dl-more" aria-hidden="true"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 2v10M2 7h10"/></svg></span>
+            </span>
+            <span>
+              <span class="dl-name">Mac <span class="dl-tag" hidden>Your system</span></span>
+              <span class="dl-sum">Disk image · Apple silicon and Intel · macOS 11 or later</span>
+            </span>
+          </button>
+          <div class="dl-body" id="dl-macos">
+            <div class="dl-files">
+              <a class="dl-file first" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-macos.dmg" data-asset="macos" data-download="macos" data-track="download">Disk image <small data-asset-size></small></a>
+            </div>
+            <p>Open the disk image and drag Quintess into Applications. Quintess isn't signed by Apple yet, so macOS won't open it the first time: open System Settings › Privacy &amp; Security, scroll down, and choose Open Anyway beside the message about Quintess. After that it opens normally. Or clear the download mark in Terminal:</p>
+            <div class="dl-cmd-box"><pre class="dl-cmd"><code id="dl-mac-quarantine">xattr -dr com.apple.quarantine /Applications/Quintess.app</code></pre><button type="button" class="dl-copy" data-copy="dl-mac-quarantine" hidden>Copy</button></div>
+            <ul class="dl-notes">
+              <li>One app for both Apple silicon and Intel Macs.</li>
+              <li>The command-line tool is inside the app; to type <code>quintess</code> in Terminal, link it once: <code>sudo ln -sf /Applications/Quintess.app/Contents/MacOS/quintess /usr/local/bin/quintess</code>.</li>
+              <li>The Mac version is built and tested automatically on both kinds of Mac, but hasn't been tried by hand yet. Please report problems on GitHub.</li>
+            </ul>
+            <p class="dl-sha">SHA-256: <span data-asset="macos"><b>disk image</b> <code data-asset-sha>see the .sha256 file beside it</code></span></p>
+          </div>
+        </div>
       </div>
-      <div class="pkg" data-asset="macos">
-        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-macos.dmg" data-download="macos" data-track="download">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-          Mac
-        </a>
-        <p class="pkg-note">macOS 11 or later · Apple silicon and Intel</p>
-        <dl class="asset mono">
-          <div><dt>file</dt><dd data-asset-name>Quintess-0.4.0-macos.dmg</dd></div>
-          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-        </dl>
-      </div>
-      <div class="pkg" data-asset="deb">
-        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/quintess_0.4.0_amd64.deb" data-download="deb" data-track="download">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-          Linux (.deb)
-        </a>
-        <p class="pkg-note">Ubuntu and Debian · x86_64</p>
-        <dl class="asset mono">
-          <div><dt>file</dt><dd data-asset-name>quintess_0.4.0_amd64.deb</dd></div>
-          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-        </dl>
-      </div>
-      <div class="pkg" data-asset="appimage">
-        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-x86_64.AppImage" data-download="appimage" data-track="download">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-          Linux (AppImage)
-        </a>
-        <p class="pkg-note">most distributions · runs without installing</p>
-        <dl class="asset mono">
-          <div><dt>file</dt><dd data-asset-name>Quintess-0.4.0-x86_64.AppImage</dd></div>
-          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-        </dl>
-      </div>
-      <div class="pkg" data-asset="flatpak">
-        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-x86_64.flatpak" data-download="flatpak" data-track="download">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-          Linux (Flatpak)
-        </a>
-        <p class="pkg-note">sandboxed · needs the Flathub runtime</p>
-        <dl class="asset mono">
-          <div><dt>file</dt><dd data-asset-name>Quintess-0.4.0-x86_64.flatpak</dd></div>
-          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-        </dl>
-      </div>
-      <div class="pkg" data-asset="tarball">
-        <a class="button button-big" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/quintess-0.4.0-linux-x86_64.tar.gz" data-download="tarball" data-track="download">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-          Linux (.tar.gz)
-        </a>
-        <p class="pkg-note">any distribution · with an install script</p>
-        <dl class="asset mono">
-          <div><dt>file</dt><dd data-asset-name>quintess-0.4.0-linux-x86_64.tar.gz</dd></div>
-          <div><dt>size</dt><dd data-asset-size>see release</dd></div>
-          <div class="sha"><dt>SHA-256</dt><dd data-asset-sha>published with the release</dd></div>
-        </dl>
+
+      <div class="dl-card linux" data-system="linux">
+        <div class="dl-inner">
+          <button type="button" class="dl-head" aria-expanded="true" aria-controls="dl-linux">
+            <span class="dl-top">
+              <svg class="dl-icon" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4.5 6.5q0-1.5 1.5-1.5h18q1.5 0 1.5 1.5v17q0 1.5-1.5 1.5H6q-1.5 0-1.5-1.5z"/><path d="M8.5 11.5l4 3-4 3M14.5 18.5h7"/></svg>
+              <span class="dl-more" aria-hidden="true"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 2v10M2 7h10"/></svg></span>
+            </span>
+            <span>
+              <span class="dl-name">Linux <span class="dl-tag" hidden>Your system</span></span>
+              <span class="dl-sum">.deb, AppImage, Flatpak or tarball · 64-bit</span>
+            </span>
+          </button>
+          <div class="dl-body" id="dl-linux">
+            <p>On Ubuntu or Debian, download the .deb and install it with apt, which also fetches what it needs:</p>
+            <div class="dl-cmd-box"><pre class="dl-cmd"><code id="dl-deb">sudo apt install ./quintess_<span data-version>0.4.0</span>_amd64.deb</code></pre><button type="button" class="dl-copy" data-copy="dl-deb" hidden>Copy</button></div>
+            <div class="dl-files">
+              <a class="dl-file first" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/quintess_0.4.0_amd64.deb" data-asset="deb" data-download="deb" data-track="download">.deb package <small data-asset-size></small></a>
+              <a class="dl-file" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-x86_64.AppImage" data-asset="appimage" data-download="appimage" data-track="download">AppImage <small data-asset-size></small></a>
+              <a class="dl-file" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/Quintess-0.4.0-x86_64.flatpak" data-asset="flatpak" data-download="flatpak" data-track="download">Flatpak <small data-asset-size></small></a>
+              <a class="dl-file" href="https://github.com/bhanright/quintess/releases/download/v0.4.0/quintess-0.4.0-linux-x86_64.tar.gz" data-asset="tarball" data-download="tarball" data-track="download">Tarball <small data-asset-size></small></a>
+            </div>
+            <p>Elsewhere: the AppImage runs without installing (make it executable with <code>chmod +x Quintess-*.AppImage</code>, then run it). The Flatpak installs into a sandbox with <code>flatpak install --user Quintess-*.flatpak</code> and needs the Freedesktop runtime from Flathub. The tarball works on any distribution: unpack it and run <code>./install.sh</code>.</p>
+            <ul class="dl-notes">
+              <li>Needs glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and newer.</li>
+              <li>Printing uses CUPS, reading aloud speech-dispatcher, and scanning SANE (<code>sane-utils</code>); the .deb suggests them.</li>
+              <li>Inside the Flatpak, scanning and conversion through LibreOffice or a browser aren't available.</li>
+            </ul>
+            <p class="dl-sha">SHA-256: <span data-asset="deb"><b>.deb</b> <code data-asset-sha>see the .sha256 file beside it</code></span> <span data-asset="appimage"><b>AppImage</b> <code data-asset-sha>see the .sha256 file beside it</code></span> <span data-asset="flatpak"><b>Flatpak</b> <code data-asset-sha>see the .sha256 file beside it</code></span> <span data-asset="tarball"><b>tarball</b> <code data-asset-sha>see the .sha256 file beside it</code></span></p>
+          </div>
+        </div>
       </div>
     </div>
     <ul class="download-links mono">
@@ -352,8 +355,6 @@
       <li><a href="https://github.com/bhanright/quintess/blob/main/docs/BUILDING.md" data-track="github">build it yourself</a></li>
       <li><a href="https://github.com/bhanright/quintess/issues" data-track="github">report a problem</a></li>
     </ul>
-    <p class="dl-choose download-note">On Linux, choose the .deb for Ubuntu or Debian, the AppImage to run without installing, the Flatpak for a sandboxed install, or the tarball for anything else; see <a href="/guide/#installing-on-linux">Installing on Linux</a>. Compare the SHA-256 above with the file you downloaded.</p>
-    <p class="smartscreen download-note">Quintess isn't code-signed yet. Windows may show a SmartScreen warning, and a Mac asks you to choose Open Anyway in System Settings › Privacy &amp; Security the first time. <a href="#install-notes">Why, and what to do</a>.</p>
   </div>
 </section>
 
@@ -372,6 +373,6 @@
   </div>
 </footer>
 
-<script src="/assets/site.js?v=23a95e540d" defer></script>
+<script src="/assets/site.js?v=2e0064f4c0" defer></script>
 </body>
 </html>
