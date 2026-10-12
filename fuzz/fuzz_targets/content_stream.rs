@@ -7,7 +7,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use quintess_core::lopdf::content::Content;
-use quintess_core::lopdf::{Dictionary, Stream};
+use quintess_core::lopdf::{Dictionary, Object, Stream};
 use quintess_core::{Pdf, objects, pages};
 
 fuzz_target!(|data: &[u8]| {
@@ -17,9 +17,13 @@ fuzz_target!(|data: &[u8]| {
             // drops what follows), which it then can't read back; the first
             // night's fuzzing found that. That is lopdf's leniency, so inline
             // images are left out of the check; everything else must survive.
+            // The second night found the same for a number too large for a
+            // 32-bit float, which lopdf reads as infinity and writes as "inf".
+            // (Quintess's own writer, `pages::number`, writes 0 instead.)
             let has_inline_image = content.operations.iter().any(|operation| operation.operator == "BI");
+            let has_infinite_number = content.operations.iter().flat_map(|operation| &operation.operands).any(|operand| matches!(operand, Object::Real(value) if !value.is_finite()));
             let decoded_again = Content::decode(&encoded);
-            assert!(has_inline_image || decoded_again.is_ok(), "content that decoded once must decode again after encoding");
+            assert!(has_inline_image || has_infinite_number || decoded_again.is_ok(), "content that decoded once must decode again after encoding");
         }
     }
     let mut pdf = Pdf::new_empty();

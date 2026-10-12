@@ -425,16 +425,17 @@ et.rs`): .pfx/.p12
 - Robustness (2026-10-11, docs/ROBUSTNESS.md): `tools/robustness`
   (`quintess-robustness`, a developer tool outside the shipped program)
   fetches the pdf.js test corpus at a pinned commit (987 files kept in the
-  repository plus 448 of its 459 linked files; 11 links are dead) and
+  repository plus the 456 of its 459 linked files still online) and
   sweeps it, each file in a child process with a time limit: open in lopdf
   and PDFium, render every page, read text, comments, fields and bookmarks,
   then rotate, comment, retitle, save through the command line's save path
   (`document::bytes_after_edit`, shared since this change) and reopen in both
-  engines; qpdf and poppler check the saved copies in CI. Before the fixes:
-  1376 ok, 15 expected failures, 41 errors, 0 crashes, 3 hangs. After: 1400
-  ok, 14 expected failures, 19 errors, 0 crashes, 2 hangs (both in PDFium's
-  renderer: tiling-pattern-tiny-steps.pdf and -large.pdf), 1404 round trips
-  verified. Fixed: comment listing hung on large name trees (name-tree
+  engines; qpdf and poppler check the saved copies in CI. Before the fixes
+  (1435 files, on Windows): 1376 ok, 15 expected failures, 41 errors, 0
+  crashes, 3 hangs. After: 1400 ok, 14 expected failures, 19 errors, 0
+  crashes, 2 hangs (both in PDFium's renderer: tiling-pattern-tiny-steps.pdf
+  and -large.pdf), 1404 round trips verified; on Linux in CI, with 8 more
+  linked files: 1408 ok, the same failures. Fixed: comment listing hung on large name trees (name-tree
   lookups now use /Limits and binary search; pdf.pdf went from minutes to
   under a second); every save of a large file spent 50 s in lopdf's
   quadratic `prune_objects` (`document::remove_unreachable_objects`); files
@@ -449,7 +450,12 @@ et.rs`): .pfx/.p12
   lopdf's counter for new objects (renumbered on opening), absurd page-tree
   /Count values overflowed or asked lopdf for 51 GB (recounted on opening),
   and a destination's page index of -1 overflowed; and a PDFium hang
-  decoding a damaged JBIG2 image. qpdf in CI flagged saved copies that lose
+  decoding a damaged JBIG2 image. cargo-fuzz showed lopdf writing an
+  infinite number as "inf", which led to `pages::number` (Quintess's own
+  content writer did the same with "inf" and "NaN") writing 0 instead.
+  lopdf also panics, in builds with overflow checks only, on a PNG
+  predictor whose Columns times Colors overflows (object.rs:1237); release
+  builds wrap instead, so that one is left for lopdf. qpdf in CI flagged saved copies that lose
   objects lopdf can't parse (issue1721: a stream whose data runs into
   `endstream`; issue7496 and issue13783: a corrupt latest copy of a page).
   Tests:

@@ -243,11 +243,13 @@ fn run_check(file: &Path, work: &Path, timeout: Duration) -> (Outcome, String) {
 }
 
 /// Removes chunks while the input still fails the same way.
-fn minimize(work: &Path, data: Vec<u8>, outcome: Outcome, what: &str, timeout: Duration) -> Vec<u8> {
+fn minimize(work: &Path, job: usize, data: Vec<u8>, outcome: Outcome, what: &str, timeout: Duration) -> Vec<u8> {
     let mut best = data;
     let mut chunk = best.len() / 2;
     let mut tries = 0;
-    let probe = work.join("minimize.pdf");
+    // One probe file per job: jobs minimize at the same time, and a shared file
+    // let one job judge another's candidate (it once "minimized" a crash to nothing).
+    let probe = work.join(format!("minimize-{job}.pdf"));
     while chunk >= 1 && tries < 300 {
         let mut index = 0;
         let mut progressed = false;
@@ -338,7 +340,7 @@ pub fn run_mutate(options: &MutateOptions) -> Result<()> {
                         }
                         data.clone()
                     } else {
-                        minimize(work, data.clone(), outcome, &what, options.timeout)
+                        minimize(work, job, data.clone(), outcome, &what, options.timeout)
                     };
                     // Another job may have recorded the same failure while this one
                     // confirmed or minimized it; checked again and claimed under one lock.

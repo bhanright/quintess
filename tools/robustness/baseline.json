@@ -5,9 +5,9 @@
     "error": 19,
     "expected failure": 14,
     "hang": 2,
-    "ok": 1400
+    "ok": 1409
   },
-  "round_trips_verified": 1404,
+  "round_trips_verified": 1412,
   "files": {
     "160F-2019.pdf": "ok",
     "20130226130259.pdf": "ok",
@@ -1426,13 +1426,22 @@
     "xfa_bug1735738.pdf": "ok",
     "xfa_bug1739502.pdf": "ok",
     "xfa_bug1998843.pdf": "ok",
+    "xfa_dhl_shipment.pdf": "ok",
     "xfa_filled_imm1344e.pdf": "ok",
+    "xfa_hsbc_closure.pdf": "ok",
+    "xfa_imm1295e.pdf": "ok",
+    "xfa_imm1344e.pdf": "ok",
+    "xfa_imm5257e.pdf": "ok",
     "xfa_issue13213.pdf": "ok",
     "xfa_issue13500.pdf": "ok",
+    "xfa_issue13556.pdf": "ok",
     "xfa_issue13584.pdf": "ok",
+    "xfa_issue13597.pdf": "ok",
     "xfa_issue13611.pdf": "ok",
     "xfa_issue13631.pdf": "ok",
+    "xfa_issue13633.pdf": "ok",
     "xfa_issue13634.pdf": "ok",
+    "xfa_issue13668.pdf": "ok",
     "xfa_issue13679.pdf": "ok",
     "xfa_issue13855.pdf": "ok",
     "xfa_issue13994.pdf": "ok",
@@ -1449,6 +1458,7 @@
     "Pages-tree-refs.pdf": "pdfinfo counts 2 pages in the saved copy; Quintess wrote 1",
     "issue13783.pdf": "pdfinfo counts 15 pages in the saved copy; Quintess wrote 14",
     "issue1721.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: page object 149 0 (item index 0 (from 0)): ignoring non-stream in an array of streams",
+    "issue5592.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: page object 8 0 (item index 0 (from 0)): ignoring non-stream in an array of streams",
     "issue7496.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: object 5 1: operation for dictionary attempted on object of type null: returning false for a key containment request; pdfinfo counts 220 pages in the saved copy; Quintess wrote 219"
   }
 }

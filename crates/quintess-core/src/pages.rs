@@ -218,7 +218,13 @@ pub(crate) fn placement_matrix(bounds: [f32; 4], rotation: i64, scale: f32, x: f
 }
 
 /// Format for numbers in content streams: short and without exponents.
+/// A value that isn't a number or is infinite (from dividing by a page side
+/// of zero, say) is written as 0: Rust would write "NaN" or "inf", which no
+/// PDF reader can parse, so the whole content stream would be lost.
 pub fn number(value: f32) -> String {
+    if !value.is_finite() {
+        return "0".into();
+    }
     let text = format!("{value:.4}");
     let text = text.trim_end_matches('0').trim_end_matches('.');
     if text == "-0" { "0".into() } else { text.into() }

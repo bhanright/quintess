@@ -26,7 +26,7 @@ fetches pdf.js's `test/pdfs` folder and `test/test_manifest.json` at the
 commit pinned in `tools/robustness/src/corpus.rs` (a sparse Git checkout,
 about 125 MB) and checks it against the recorded SHA-256 manifest digest,
 then downloads the files its `.link` entries point to (each checked against
-the MD5 in pdf.js's manifest; about 450 files from many sites, some long
+the MD5 in pdf.js's manifest; 456 of 459 could be fetched in October 2026, from many sites, some long
 gone). It goes into `corpus/` at the top of the repository (or `--corpus
 DIR`, or `QUINTESS_CORPUS`), which Git ignores. Never commit corpus files:
 they keep their own terms. `corpus/pdfjs-linked/fetch-report.json` lists the

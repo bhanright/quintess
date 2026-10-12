@@ -222,6 +222,20 @@ fn a_destination_with_a_negative_page_index_leads_nowhere() {
 }
 
 #[test]
+fn numbers_that_are_not_finite_are_written_as_zero() {
+    // cargo-fuzz's content-stream target showed lopdf writing an infinite
+    // number as "inf", which can't be read back; Quintess's own writer
+    // wrote "inf" and "NaN" the same way, for example when scaling a page
+    // whose side is zero.
+    use quintess_core::pages::number;
+    assert_eq!(number(f32::INFINITY), "0");
+    assert_eq!(number(f32::NEG_INFINITY), "0");
+    assert_eq!(number(f32::NAN), "0");
+    assert_eq!(number(1.5), "1.5");
+    assert_eq!(number(-0.00001), "0");
+}
+
+#[test]
 fn removing_unreachable_objects_keeps_what_is_reached_and_cycles() {
     let bytes = build_pdf(
         &["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R] >>", "<< /Type /Annot /Subtype /Text /P 3 0 R >>", "<< /Unreached true /Loop 6 0 R >>", "<< /Loop 5 0 R >>"],
