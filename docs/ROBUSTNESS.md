@@ -93,8 +93,10 @@ or once a change is understood, record a new one:
 cargo run -p quintess-robustness -- sweep --update-baseline
 ```
 
-The CI runner is Linux, so record the baseline from a CI run's
-`sweep.json` when the classes differ between systems (they rarely do).
+A sweep without qpdf and poppler (as on Windows) keeps the recorded
+disagreements when it updates the baseline; those come from CI, whose
+`robustness-sweep` artifact holds the run's `sweep.json`. The classes have
+matched between Windows and Linux so far.
 
 ## Fuzzing
 

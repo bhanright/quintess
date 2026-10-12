@@ -1,6 +1,6 @@
 //! Problems the robustness sweep (tools/robustness, docs/ROBUSTNESS.md)
-//! found in the pdf.js test corpus, each reproduced with a small synthetic
-//! file where possible. The corpus itself is never committed; a test that
+//! found in the pdf.js test corpus, and that fuzzing found in mutated
+//! copies, each reproduced with a small synthetic file where possible. The corpus itself is never committed; a test that
 //! needs a corpus file says so and is skipped when the corpus is absent.
 
 use std::path::PathBuf;
@@ -171,6 +171,54 @@ fn a_name_tree_leaf_out_of_order_is_still_searched() {
     let item = dictionary! { "Dest" => Object::String(b"apple".to_vec(), StringFormat::Literal) };
     let numbers = quintess_core::document::page_numbers_by_id(&pdf);
     assert_eq!(quintess_core::bookmarks::destination_page(&pdf, &item, &numbers), Some(1));
+}
+
+#[test]
+fn a_file_claiming_the_largest_object_number_can_still_be_edited() {
+    // Found by mutation fuzzing: a corpus file whose object 13 says
+    // "4294967295 0 obj" in its header. lopdf keeps it under that number and
+    // counts new objects from it, so adding a comment overflowed the counter.
+    let good = build_pdf(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", PAGE, "<< /Unused true >>"], "/Root 1 0 R", "");
+    let text = String::from_utf8(good).unwrap();
+    let bytes = text.replacen("\n4 0 obj", "\n4294967295 0 obj", 1);
+    // The header grew by 9 bytes; the table's offset moves with it.
+    let table = bytes.find("xref\n").unwrap();
+    let start = bytes.rfind("startxref\n").unwrap() + "startxref\n".len();
+    let bytes = format!("{}{table}\n%%EOF\n", &bytes[..start]).into_bytes();
+    assert_eq!(Document::load_mem(&bytes).unwrap().max_id, u32::MAX, "lopdf alone should take the huge number as its counter, or this test proves nothing");
+    let mut pdf = Pdf::from_bytes(&bytes, None).unwrap();
+    let note = quintess_core::annotations::NewAnnotation::new(quintess_core::annotations::AnnotationKind::Note { x: 10.0, y: 10.0 });
+    let added = quintess_core::annotations::add_annotation(&mut pdf, 1, &note).unwrap();
+    assert_ne!(added.0, 0, "object 0 is never a real object");
+    let saved = pdf.to_bytes(&SaveSettings::default()).unwrap();
+    assert_eq!(list_annotations(&Pdf::from_bytes(&saved, None).unwrap()).len(), 1);
+}
+
+#[test]
+fn absurd_page_counts_are_recounted() {
+    // Found by mutation fuzzing: lopdf sizes its page list from /Count, so
+    // 9223372036854775807 overflowed and 4294967296 asked for 51 GB.
+    for count in ["9223372036854775807", "4294967296", "-5"] {
+        let pages_node = format!("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count {count} >>");
+        let bytes = build_pdf(&["<< /Type /Catalog /Pages 2 0 R >>", &pages_node, PAGE, PAGE], "/Root 1 0 R", "");
+        let pdf = Pdf::from_bytes(&bytes, None).unwrap();
+        assert_eq!(pdf.page_count(), 2, "count {count}");
+        let root = pdf.pages_root_id().unwrap();
+        assert_eq!(pdf.doc.get_dictionary(root).unwrap().get(b"Count").unwrap().as_i64().unwrap(), 2);
+    }
+}
+
+#[test]
+fn a_destination_with_a_negative_page_index_leads_nowhere() {
+    // Found by mutation fuzzing: [-1 /Fit] overflowed when made 1-based.
+    let bytes = build_pdf(
+        &["<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", PAGE, "<< /Type /Outlines /First 5 0 R /Last 5 0 R /Count 1 >>", "<< /Title (Nowhere) /Parent 4 0 R /Dest [-1 /Fit] >>"],
+        "/Root 1 0 R",
+        "",
+    );
+    let bookmarks = read_bookmarks(&Pdf::from_bytes(&bytes, None).unwrap()).unwrap();
+    assert_eq!(bookmarks.len(), 1);
+    assert_eq!(bookmarks[0].page, 0, "0 means the destination couldn't be resolved");
 }
 
 #[test]

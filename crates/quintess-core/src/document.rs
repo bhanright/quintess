@@ -18,6 +18,10 @@ const INHERITABLE_PAGE_KEYS: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox"
 /// (see [`Pdf::from_bytes`]); more than the 512 bytes it searches.
 const REBUILD_PADDING: usize = 1024;
 
+/// The most indirect objects a PDF may have (PDF 32000-1, annex C, table
+/// C.1); a file claiming higher object numbers is renumbered on opening.
+const LARGEST_OBJECT_NUMBER: u32 = 8_388_607;
+
 /// A trailer entry marking a document whose contents lopdf could not
 /// decrypt, so saving it would write them out scrambled. Bookkeeping like
 /// the remembered certificate dictionary; [`Pdf::to_bytes`] refuses such a
@@ -53,7 +57,7 @@ fn rebuilt_document(bytes: &[u8], password: Option<&str>, pages_found: usize) ->
     padded.extend_from_slice(bytes);
     padded.resize(bytes.len() + REBUILD_PADDING, b' ');
     let more_pages = |doc: &Document| doc.get_pages().len() > pages_found;
-    if let Some(rebuilt) = load_with_lopdf(&padded, password).ok().map(point_root_at_catalog).filter(more_pages) {
+    if let Some(rebuilt) = load_with_lopdf(&padded, password).ok().map(repair_structure).filter(more_pages) {
         return Some(rebuilt);
     }
     if contains(bytes, b"/Encrypt") {
@@ -63,7 +67,7 @@ fn rebuilt_document(bytes: &[u8], password: Option<&str>, pages_found: usize) ->
     padded.truncate(bytes.len());
     padded.extend_from_slice(format!("\ntrailer\n<< /Root {number} {generation} R >>\n").as_bytes());
     padded.resize(padded.len() + REBUILD_PADDING, b' ');
-    load_with_lopdf(&padded, password).ok().map(point_root_at_catalog).filter(more_pages)
+    load_with_lopdf(&padded, password).ok().map(repair_structure).filter(more_pages)
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -120,6 +124,61 @@ fn page_tree_complete(doc: &Document) -> bool {
     let found = doc.get_pages().len();
     let declared = doc.catalog().ok().and_then(|catalog| catalog.get(b"Pages").ok()).and_then(|pages| doc.dereference(pages).ok()).and_then(|(_, pages)| pages.as_dict().ok()).and_then(|pages| pages.get(b"Count").ok()).and_then(|count| count.as_i64().ok());
     found > 0 && declared.is_none_or(|declared| declared <= found as i64)
+}
+
+/// Mends what would otherwise make lopdf or the rest of Quintess fail on a
+/// freshly loaded document: a `/Root` naming the wrong object and page
+/// counts no document could have.
+fn repair_structure(doc: Document) -> Document {
+    let mut doc = point_root_at_catalog(doc);
+    repair_page_counts(&mut doc);
+    doc
+}
+
+/// Rewrites the `/Count` of page-tree nodes that claim more pages than the
+/// file has objects, or fewer than none, with the number of pages actually
+/// under them. lopdf sizes its page lists from these counts, so a count of
+/// 9223372036854775807 overflowed and one of 4294967296 asked for 51 GB
+/// (both found by mutation fuzzing). Sensible counts, even wrong ones, are
+/// left alone.
+fn repair_page_counts(doc: &mut Document) {
+    let most = doc.objects.len() as i64;
+    let absurd: Vec<ObjectId> = doc
+        .objects
+        .iter()
+        .filter_map(|(id, object)| object.as_dict().ok().map(|dictionary| (*id, dictionary)))
+        .filter(|(_, dictionary)| dictionary.has_type(b"Pages"))
+        .filter(|(_, dictionary)| !matches!(dictionary.get(b"Count").ok().map(|count| doc.dereference(count).map(|(_, count)| count.as_i64())), Some(Ok(Ok(count))) if (0..=most).contains(&count)))
+        .map(|(id, _)| id)
+        .collect();
+    for node in absurd {
+        let count = pages_under(doc, node, &mut HashSet::new());
+        if let Ok(dictionary) = doc.get_dictionary_mut(node) {
+            dictionary.set("Count", count as i64);
+        }
+    }
+}
+
+/// How many pages are under a page-tree node, each node counted once. A
+/// list of nodes still to visit rather than recursion, so a crafted tree a
+/// million levels deep can't overflow the stack.
+fn pages_under(doc: &Document, node: ObjectId, visited: &mut HashSet<ObjectId>) -> usize {
+    let mut pages = 0;
+    let mut pending = vec![node];
+    while let Some(current) = pending.pop() {
+        if !visited.insert(current) {
+            continue;
+        }
+        let Ok(dictionary) = doc.get_dictionary(current) else { continue };
+        if dictionary.has_type(b"Page") {
+            pages += 1;
+            continue;
+        }
+        if let Some(kids) = dictionary.get(b"Kids").ok().and_then(|kids| doc.dereference(kids).ok()).and_then(|(_, kids)| kids.as_array().ok()) {
+            pending.extend(kids.iter().filter_map(|kid| kid.as_reference().ok()));
+        }
+    }
+    pages
 }
 
 /// Repoints the trailer's `/Root` at the catalog when it names something
@@ -199,7 +258,7 @@ impl Pdf {
     }
 
     pub fn from_bytes(bytes: &[u8], password: Option<&str>) -> Result<Self> {
-        let first_attempt = load_with_lopdf(bytes, password).map(point_root_at_catalog);
+        let first_attempt = load_with_lopdf(bytes, password).map(repair_structure);
         let mut doc = match first_attempt {
             Ok(doc) if page_tree_complete(&doc) => doc,
             first_attempt => {
@@ -215,6 +274,13 @@ impl Pdf {
                 bail!("the document is encrypted for specific certificates; open it with a certificate and its private key (a password cannot open it)");
             }
             bail!("the document is encrypted and the password was not accepted");
+        }
+        // lopdf numbers new objects from the highest number in the file, and
+        // a file can claim any number up to 4,294,967,295; then adding one
+        // object overflowed (a panic in debug builds, object 0 in release).
+        // Found by mutation fuzzing. Such files are renumbered from 1.
+        if doc.max_id > LARGEST_OBJECT_NUMBER {
+            doc.renumber_objects();
         }
         if doc.encryption_state.as_ref().is_some_and(crypt_filters_unreadable) {
             doc.trailer.set(UNDECRYPTED_MARKER_KEY, true);

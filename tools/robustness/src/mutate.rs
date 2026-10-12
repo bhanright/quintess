@@ -340,12 +340,20 @@ pub fn run_mutate(options: &MutateOptions) -> Result<()> {
                     } else {
                         minimize(work, data.clone(), outcome, &what, options.timeout)
                     };
+                    // Another job may have recorded the same failure while this one
+                    // confirmed or minimized it; checked again and claimed under one lock.
+                    {
+                        let mut recorded = found.lock().expect("the findings lock is never poisoned");
+                        if recorded.iter().any(|(o, w, s)| key(*o, w, s) == this_key) {
+                            continue;
+                        }
+                        recorded.push((outcome, what.clone(), seed_name.clone()));
+                    }
                     let id = format!("{}-{:016x}", if outcome == Outcome::Hang { "hang" } else { "crash" }, fnv_hash(&smallest));
                     let _ = std::fs::write(findings_folder.join(format!("{id}.pdf")), &smallest);
                     let note = serde_json::json!({ "outcome": if outcome == Outcome::Hang { "hang" } else { "crash" }, "detail": what, "seed_file": seed_name, "bytes": smallest.len(), "original_bytes": data.len() });
                     let _ = std::fs::write(findings_folder.join(format!("{id}.json")), serde_json::to_string_pretty(&note).unwrap_or_default());
                     println!("  {outcome:?} from {seed_name}: {what} -> findings/{id}.pdf ({} bytes)", smallest.len());
-                    found.lock().expect("the findings lock is never poisoned").push((outcome, what, seed_name.clone()));
                 }
             });
         }

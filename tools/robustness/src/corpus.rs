@@ -228,11 +228,30 @@ pub struct LinkedFetch {
 /// Responses larger than this are refused; the biggest linked file is far smaller.
 const LARGEST_LINKED_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
-fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>> {
+fn download_once(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, ureq::Error> {
     let mut response = agent.get(url).header("User-Agent", "quintess-robustness (pdf.js test corpus)").call()?;
     let mut bytes = Vec::new();
     response.body_mut().with_config().limit(LARGEST_LINKED_FILE_BYTES).reader().read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+/// Downloads `url`, trying again after a pause when the server refuses or
+/// drops the connection: web.archive.org, which holds most linked files,
+/// refuses bursts of requests from CI runners. A status such as 404 is final.
+fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>> {
+    const PAUSES_SECONDS: [u64; 3] = [10, 30, 60];
+    let mut attempt = 0;
+    loop {
+        match download_once(agent, url) {
+            Ok(bytes) => return Ok(bytes),
+            Err(error @ ureq::Error::StatusCode(_)) => return Err(error.into()),
+            Err(error) if attempt >= PAUSES_SECONDS.len() => return Err(error.into()),
+            Err(_) => {
+                std::thread::sleep(Duration::from_secs(PAUSES_SECONDS[attempt]));
+                attempt += 1;
+            }
+        }
+    }
 }
 
 /// Downloads every `.link` file's target that isn't already present and

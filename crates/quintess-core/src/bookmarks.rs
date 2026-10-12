@@ -80,8 +80,9 @@ pub fn destination_page(pdf: &Pdf, item: &Dictionary, page_numbers: &std::collec
     };
     match array.first()? {
         Object::Reference(page_id) => page_numbers.get(page_id).copied(),
-        // Remote-style destinations use a 0-based page index.
-        Object::Integer(index) => Some(*index as u32 + 1),
+        // Remote-style destinations use a 0-based page index; a negative or
+        // huge one (mutation fuzzing found -1, which overflowed) leads nowhere.
+        Object::Integer(index) => u32::try_from(*index).ok()?.checked_add(1),
         _ => None,
     }
 }

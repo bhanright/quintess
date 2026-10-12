@@ -444,7 +444,15 @@ et.rs`): .pfx/.p12
   can't open a file lopdf can't; an unreadable /Outlines means no bookmarks
   instead of an error; pages with an empty visible area render blank instead
   of failing; a file whose AES crypt filter lopdf can't follow (issue7665)
-  is refused on saving instead of being written scrambled. Tests:
+  is refused on saving instead of being written scrambled. Fuzzing then
+  found three panics, fixed: an object numbered 4294967295 overflowed
+  lopdf's counter for new objects (renumbered on opening), absurd page-tree
+  /Count values overflowed or asked lopdf for 51 GB (recounted on opening),
+  and a destination's page index of -1 overflowed; and a PDFium hang
+  decoding a damaged JBIG2 image. qpdf in CI flagged saved copies that lose
+  objects lopdf can't parse (issue1721: a stream whose data runs into
+  `endstream`; issue7496 and issue13783: a corrupt latest copy of a page).
+  Tests:
   `crates/quintess-core/tests/corpus_regressions.rs`. The baseline
   (`tools/robustness/baseline.json`) makes `.github/workflows/robustness.yml`
   fail on new crashes, hangs or lost round trips (push to main and nightly);

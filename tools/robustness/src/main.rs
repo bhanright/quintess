@@ -159,7 +159,15 @@ fn run(arguments: Arguments) -> Result<bool> {
             let summary = sweep::run_sweep(&options)?;
             let baseline_path = baseline_path.unwrap_or_else(default_baseline);
             if update_baseline {
-                baseline::Baseline::from_summary(&summary).write(&baseline_path)?;
+                let mut recorded = baseline::Baseline::from_summary(&summary);
+                // Without qpdf and poppler (as on Windows) there is nothing to
+                // say about disagreements, so the recorded ones are kept.
+                if summary.external_tools.is_empty() {
+                    if let Some(previous) = baseline::Baseline::read(&baseline_path) {
+                        recorded.disagreements = previous.disagreements;
+                    }
+                }
+                recorded.write(&baseline_path)?;
                 println!("wrote the baseline to {}", baseline_path.display());
                 return Ok(true);
             }

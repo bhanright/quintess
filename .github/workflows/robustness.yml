@@ -51,15 +51,31 @@ jobs:
       - name: PDFium
         run: mkdir -p vendor/pdfium-linux && curl -sSfL "$PDFIUM_URL" | tar -xz -C vendor/pdfium-linux
       - name: Corpus cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: corpus
-          # Linked files fetched once stay cached; a new pin starts afresh.
-          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v1
+          # The newest saved copy for this pin; linked files fetched once stay
+          # cached, and a new pin starts afresh.
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
+          restore-keys: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-
       - name: Build the sweep tool
         run: cargo build -j 4 -p quintess-robustness
       - name: Fetch the corpus
-        run: target/debug/quintess-robustness fetch --jobs 8
+        id: fetch
+        run: |
+          # Linked files from web.archive.org are fetched a few at a time; it
+          # refuses bursts from CI runners. Files still missing are tried again next run.
+          target/debug/quintess-robustness fetch --jobs 3
+          if grep -q '"outcome": "fetched"' corpus/pdfjs-linked/fetch-report.json; then echo "new_files=true" >> "$GITHUB_OUTPUT"; fi
+      # Saved straight after fetching (so a sweep that finds a regression, and
+      # fails the job, doesn't lose the download), and only when something new
+      # came in, since a cache entry can't be overwritten and each is large.
+      - name: Save the corpus
+        if: steps.fetch.outputs.new_files == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: corpus
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
       - name: Sweep
         env:
           QUINTESS_PDFIUM_DIR: ${{ github.workspace }}/vendor/pdfium-linux/lib
@@ -100,7 +116,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: corpus
-          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v1
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
+          restore-keys: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-
       - name: Fuzzing corpus from earlier nights
         uses: actions/cache@v4
         with:
@@ -149,7 +166,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: corpus
-          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v1
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
+          restore-keys: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-
       - name: Build
         run: cargo build -j 4 -p quintess-robustness
       - name: Fuzz

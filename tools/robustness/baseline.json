@@ -1445,5 +1445,10 @@
     "zero_descent.pdf": "ok",
     "zerowidthline.pdf": "ok"
   },
-  "disagreements": {}
+  "disagreements": {
+    "Pages-tree-refs.pdf": "pdfinfo counts 2 pages in the saved copy; Quintess wrote 1",
+    "issue13783.pdf": "pdfinfo counts 15 pages in the saved copy; Quintess wrote 14",
+    "issue1721.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: page object 149 0 (item index 0 (from 0)): ignoring non-stream in an array of streams",
+    "issue7496.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: object 5 1: operation for dictionary attempted on object of type null: returning false for a key containment request; pdfinfo counts 220 pages in the saved copy; Quintess wrote 219"
+  }
 }
