@@ -1,12 +1,15 @@
 """
-Builds the Linux release of Quintess and packages it two ways:
+Builds the Linux release of Quintess and packages it:
 
     quintess-<version>-linux-x86_64.tar.gz   unpack, then ./install.sh (or --system)
     quintess_<version>_amd64.deb             sudo apt install ./quintess_<version>_amd64.deb
+    Quintess-<version>-x86_64.AppImage       with --appimage: chmod +x, then run it
 
 each with a matching .sha256 file ("<hex>  <name>", as sha256sum writes it).
+The Flatpak bundle is made from the tarball by installer/linux/flatpak/build-bundle.sh.
 
     python3 tools/package_linux.py [--skip-build] [--pdfium DIR] [--models DIR] [--output DIR]
+                                   [--appimage --appimagetool FILE --appimage-runtime FILE]
 
 Run it on Linux (the release workflow uses Ubuntu 22.04, whose glibc 2.35
 sets the oldest system the program runs on). It needs Rust, and for the
@@ -22,7 +25,8 @@ everything sits in one folder beside the program:
     <program folder>/licenses/       LICENSE-MIT, LICENSE-APACHE, notices, PDFium's licenses
 
 The program folder is /usr/lib/quintess for the .deb (linked from
-/usr/bin), and ~/.local/lib/quintess or /opt/quintess for the tarball.
+/usr/bin), ~/.local/lib/quintess or /opt/quintess for the tarball,
+usr/lib/quintess inside the AppImage and /app/lib/quintess in the Flatpak.
 The program finds these files through its own location, following the
 links, so nothing is configured at install time.
 """
@@ -45,6 +49,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "installer" / "linux"
 ICONS = ROOT / "assets" / "linux" / "icons" / "hicolor"
 DICTIONARIES = ROOT / "assets" / "dictionaries"
+# The reverse-DNS name the AppImage and the Flatpak use for the desktop file,
+# the icon and the AppStream metadata (the site is quintess.cc). The .deb and
+# the tarball keep the plain name "quintess".
+APP_ID = "cc.quintess.Quintess"
+METAINFO_TEMPLATE = INSTALLER / f"{APP_ID}.metainfo.xml.in"
 # One program: the app, and with a command the command-line tool.
 PROGRAMS = ["quintess"]
 
@@ -254,6 +263,20 @@ class Tree:
             entry.linkname = self.links[path]
             archive.addfile(entry)
 
+    def write_folder(self, folder):
+        """Writes the tree into a real folder (an AppImage's AppDir)."""
+        folder = pathlib.Path(folder)
+        for path in sorted(self.files):
+            source, mode = self.files[path]
+            destination = folder / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source if isinstance(source, bytes) else pathlib.Path(source).read_bytes())
+            destination.chmod(mode)
+        for path in sorted(self.links):
+            destination = folder / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.symlink_to(self.links[path])
+
 
 def program_folder_files(tree, prefix, binaries, pdfium, models, licenses_extra=()):
     """The program folder's contents under `prefix`."""
@@ -281,6 +304,22 @@ def desktop_integration_files(tree, share):
         tree.add(f"{share}/icons/hicolor/{size}/apps/quintess.png", icon)
 
 
+def metainfo_text(version):
+    """The AppStream metadata with this release's version and today's date."""
+    template = METAINFO_TEMPLATE.read_text(encoding="utf-8")
+    return template.replace("@VERSION@", version).replace("@DATE@", time.strftime("%Y-%m-%d", time.gmtime()))
+
+
+def reverse_dns_desktop_file():
+    """quintess.desktop with the icon named by APP_ID, for the AppImage,
+    whose desktop file and icon are named that way. The window's class stays
+    "quintess" (StartupWMClass), which is what the app sets."""
+    text = (INSTALLER / "quintess.desktop").read_text(encoding="utf-8")
+    if "\nIcon=quintess\n" not in text:
+        raise SystemExit("installer/linux/quintess.desktop has no Icon=quintess line to rename")
+    return text.replace("\nIcon=quintess\n", f"\nIcon={APP_ID}\n")
+
+
 def write_checksum(path):
     checksum = path.with_name(path.name + ".sha256")
     checksum.write_text(f"{sha256_of(path)}  {path.name}\n", encoding="utf-8", newline="\n")
@@ -292,6 +331,8 @@ def make_tarball(output, version, glibc, binaries, pdfium, models):
     tree = Tree()
     program_folder_files(tree, "program", binaries, pdfium, models)
     desktop_integration_files(tree, "share")
+    # Not installed by install.sh; the Flatpak, made from this tarball, uses it.
+    tree.add(f"share/metainfo/{APP_ID}.metainfo.xml", metainfo_text(version).encode())
     tree.add("install.sh", INSTALLER / "install.sh", 0o755)
     tree.add("uninstall.sh", INSTALLER / "uninstall.sh", 0o755)
     tree.add("README.txt", README_TEXT.format(version=version, glibc=glibc).encode())
@@ -322,6 +363,65 @@ speech-dispatcher (read aloud), LibreOffice (converting Office files).
 The user guide: https://quintess.cc/guide/ (also F1 in the app).
 Licenses: program/licenses.
 """
+
+
+# --- The AppImage ------------------------------------------------------------
+
+
+def system_library(name):
+    """Where the dynamic linker finds a 64-bit library on this (build) system."""
+    listing = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
+    for line in listing.splitlines():
+        found = re.match(rf"\s*{re.escape(name)} \(([^)]*)\) => (\S+)", line)
+        if found and "x86-64" in found.group(1):
+            return pathlib.Path(found.group(2)).resolve()
+    raise SystemExit(f"{name} is not installed on this system (on Ubuntu: apt install libspeechd2)")
+
+
+def make_appimage(output, version, binaries, pdfium, models, appimagetool, runtime):
+    """An AppImage: the tarball's program folder under usr/lib/quintess, run
+    by AppRun, plus libspeechd, which the tarball and the .deb take from the
+    system but which not every distribution installs. The rest of what the
+    program links or opens (glibc, OpenGL, X11, Wayland, xkbcommon) is left to
+    the system, as AppImages do: those must match the system's drivers."""
+    appdir = output / "Quintess.AppDir"
+    if appdir.exists():
+        shutil.rmtree(appdir)
+    tree = Tree()
+    speech_library = system_library("libspeechd.so.2")
+    # libspeechd is LGPL-2.1+; its Debian copyright file carries the notice.
+    speech_copyright = pathlib.Path("/usr/share/doc/libspeechd2/copyright")
+    extra_licenses = [("libspeechd/copyright", speech_copyright)] if speech_copyright.is_file() else []
+    program_folder_files(tree, "usr/lib/quintess", binaries, pdfium, models, extra_licenses)
+    tree.add("usr/lib/quintess/libspeechd.so.2", speech_library)
+    tree.link("usr/bin/quintess", "../lib/quintess/quintess")
+    tree.add("AppRun", INSTALLER / "appimage" / "AppRun", 0o755)
+
+    desktop_file = reverse_dns_desktop_file().encode()
+    tree.add(f"{APP_ID}.desktop", desktop_file)
+    tree.add(f"usr/share/applications/{APP_ID}.desktop", desktop_file)
+    for icon in sorted(ICONS.glob("*/apps/quintess.png")):
+        tree.add(f"usr/share/icons/hicolor/{icon.parent.parent.name}/apps/{APP_ID}.png", icon)
+    tree.add(f"{APP_ID}.png", ICONS / "256x256" / "apps" / "quintess.png")
+    tree.link(".DirIcon", f"{APP_ID}.png")
+    tree.add(f"usr/share/metainfo/{APP_ID}.metainfo.xml", metainfo_text(version).encode())
+    tree.write_folder(appdir)
+
+    # The program finds libspeechd.so.2 beside itself. Only the AppImage's
+    # copy of the program is changed; the .deb and tarball keep the original.
+    subprocess.run(["patchelf", "--set-rpath", "$ORIGIN", str(appdir / "usr/lib/quintess/quintess")], check=True)
+
+    path = output / f"Quintess-{version}-x86_64.AppImage"
+    if path.exists():
+        path.unlink()
+    # appimagetool is itself an AppImage; CI runners may lack FUSE, so it
+    # unpacks itself instead of mounting. --no-appstream: the workflow
+    # validates the metadata separately with the distribution's appstreamcli.
+    environment = dict(os.environ, ARCH="x86_64", APPIMAGE_EXTRACT_AND_RUN="1")
+    command = [str(appimagetool), "--no-appstream", "--runtime-file", str(runtime), str(appdir), str(path)]
+    print("+", " ".join(command), flush=True)
+    subprocess.run(command, check=True, env=environment)
+    return path
 
 
 def ar_archive(members):
@@ -424,7 +524,12 @@ def main():
     parser.add_argument("--pdfium", default=str(ROOT / "vendor" / "pdfium-linux"), help="unpacked pdfium-linux-x64.tgz (chromium/8086)")
     parser.add_argument("--models", default=str(ROOT / "vendor" / "ocrs-models"), help="folder with the two OCR models")
     parser.add_argument("--output", default=str(ROOT / "installer" / "output"), help="where the packages are written")
+    parser.add_argument("--appimage", action="store_true", help="also write the AppImage (needs patchelf, --appimagetool and --appimage-runtime)")
+    parser.add_argument("--appimagetool", help="appimagetool-x86_64.AppImage (AppImage/appimagetool 1.9.1)")
+    parser.add_argument("--appimage-runtime", help="runtime-x86_64 from AppImage/type2-runtime, embedded in the AppImage")
     arguments = parser.parse_args()
+    if arguments.appimage and not (arguments.appimagetool and arguments.appimage_runtime):
+        parser.error("--appimage needs --appimagetool and --appimage-runtime")
 
     version = workspace_version()
     pdfium, models, output = pathlib.Path(arguments.pdfium), pathlib.Path(arguments.models), pathlib.Path(arguments.output)
@@ -449,7 +554,10 @@ def main():
     _, glibc = debian_depends(binaries)
     tarball = make_tarball(output, version, glibc, binaries, pdfium, models)
     deb, control, glibc = make_deb(output, version, binaries, pdfium, models)
-    for package in (tarball, deb):
+    packages = [tarball, deb]
+    if arguments.appimage:
+        packages.append(make_appimage(output, version, binaries, pdfium, models, pathlib.Path(arguments.appimagetool).resolve(), pathlib.Path(arguments.appimage_runtime).resolve()))
+    for package in packages:
         write_checksum(package)
         print(f"wrote {package} ({package.stat().st_size / 1e6:.1f} MB)")
     print(f"needs glibc {glibc} or later")

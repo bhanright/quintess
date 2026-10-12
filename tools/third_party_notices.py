@@ -83,6 +83,9 @@ def main():
         "Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):",
         "  a subset of Material Icons (Outlined) by Google, Apache-2.0, from",
         "  https://github.com/google/material-design-icons; text in its section below.",
+        "Linux packaging (the Flatpak manifest and bundle script, the AppStream metadata):",
+        "  adapted from PdfCraft (https://github.com/storytold/pdfcraft), Copyright (c) 2026",
+        "  ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0; MIT text below.",
         "",
         f"Rust crates ({len(packages)}):",
         "",
@@ -109,6 +112,9 @@ def main():
                 lines += [f"{name}:", "", text, ""]
     icons = ROOT / "assets" / "fonts" / "quintess-icons.LICENSE.txt"
     lines += ["", "=" * 78, "Material Icons (the app's fallback icons)", "=" * 78, "", icons.read_text(encoding="utf-8").strip()]
+    # Files under installer/linux adapted from PdfCraft say so in their headers.
+    pdfcraft = ROOT / "licenses" / "pdfcraft" / "LICENSE-MIT"
+    lines += ["", "=" * 78, "PdfCraft (parts of the Linux packaging)", "=" * 78, "", pdfcraft.read_text(encoding="utf-8").strip()]
     # The Windows and Linux builds of PDFium come from the same release of
     # pdfium-binaries and carry the same license files.
     pdfium = ROOT / "vendor" / "pdfium"

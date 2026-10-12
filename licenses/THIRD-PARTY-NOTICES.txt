@@ -20,6 +20,9 @@ Oxi (oxidocs, oxidocs-core, oxidocs-common), the built-in Word layout engine: MP
 Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):
   a subset of Material Icons (Outlined) by Google, Apache-2.0, from
   https://github.com/google/material-design-icons; text in its section below.
+Linux packaging (the Flatpak manifest and bundle script, the AppStream metadata):
+  adapted from PdfCraft (https://github.com/storytold/pdfcraft), Copyright (c) 2026
+  ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0; MIT text below.
 
 Rust crates (613):
 
@@ -23533,6 +23536,32 @@ Apache License, Version 2.0, reproduced below.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+==============================================================================
+PdfCraft (parts of the Linux packaging)
+==============================================================================
+
+MIT License
+
+Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ==============================================================================
 PDFium and its components

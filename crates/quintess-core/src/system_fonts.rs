@@ -27,6 +27,9 @@ fn font_folders() -> Vec<PathBuf> {
             folders.push(PathBuf::from(home).join(".fonts"));
         }
         folders.extend(["/usr/share/fonts", "/usr/local/share/fonts", "/System/Library/Fonts", "/Library/Fonts"].map(PathBuf::from));
+        // Inside a Flatpak, /usr is the runtime's, with few fonts; Flatpak
+        // shows the system's and the person's own fonts here instead.
+        folders.extend(["/run/host/user-fonts", "/run/host/fonts", "/run/host/local-fonts"].map(PathBuf::from));
     }
     folders
 }

@@ -1,8 +1,9 @@
-# Builds the Linux packages (.deb and .tar.gz) on Ubuntu 22.04, whose glibc
-# (2.35) is the oldest the programs then need: Ubuntu 22.04, Debian 12,
-# Fedora 36 and newer run them. Runs by hand (Actions > Linux release > Run
-# workflow) and on version tags, where the packages are attached to the
-# release (a draft release is created if none exists yet).
+# Builds the Linux packages (.deb, .tar.gz, AppImage and Flatpak bundle) on
+# Ubuntu, from one release program built on Ubuntu 22.04, whose glibc (2.35)
+# is the oldest the program then needs: Ubuntu 22.04, Debian 12, Fedora 36
+# and newer run it. Runs by hand (Actions > Linux release > Run workflow) and
+# on version tags, where the packages are attached to the release (a draft
+# release is created if none exists yet).
 name: Linux release
 
 on:
@@ -16,6 +17,13 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   PDFIUM_URL: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086/pdfium-linux-x64.tgz
+  # The AppImage tools, pinned by version and checksum: appimagetool, and the
+  # static type 2 runtime it puts at the front of the AppImage (which works
+  # with FUSE 3, so systems without the old libfuse2 can mount it).
+  APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+  APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+  APPIMAGE_RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+  APPIMAGE_RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 
 jobs:
   test:
@@ -48,7 +56,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libclang-dev libspeechd-dev \
             libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libx11-dev \
-            xvfb libgl1-mesa-dri xdg-utils fonts-dejavu-core
+            xvfb libgl1-mesa-dri xdg-utils fonts-dejavu-core \
+            patchelf appstream desktop-file-utils
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: PDFium
@@ -60,8 +69,24 @@ jobs:
           for model in text-detection text-recognition; do
             curl -sSfL -o "vendor/ocrs-models/$model.onnx" "https://ocrs-models.s3-accelerate.amazonaws.com/$model.onnx"
           done
+      - name: AppImage tools
+        run: |
+          mkdir -p vendor/appimage
+          curl -sSfL -o vendor/appimage/appimagetool-x86_64.AppImage "$APPIMAGETOOL_URL"
+          curl -sSfL -o vendor/appimage/runtime-x86_64 "$APPIMAGE_RUNTIME_URL"
+          echo "$APPIMAGETOOL_SHA256  vendor/appimage/appimagetool-x86_64.AppImage" | sha256sum -c
+          echo "$APPIMAGE_RUNTIME_SHA256  vendor/appimage/runtime-x86_64" | sha256sum -c
+          chmod +x vendor/appimage/appimagetool-x86_64.AppImage
       - name: Build and package
-        run: python3 tools/package_linux.py
+        run: |
+          python3 tools/package_linux.py --appimage \
+            --appimagetool vendor/appimage/appimagetool-x86_64.AppImage \
+            --appimage-runtime vendor/appimage/runtime-x86_64
+      - name: Check the desktop file and AppStream metadata
+        run: |
+          desktop-file-validate installer/linux/quintess.desktop
+          desktop-file-validate installer/output/Quintess.AppDir/cc.quintess.Quintess.desktop
+          appstreamcli validate --no-net installer/output/Quintess.AppDir/usr/share/metainfo/cc.quintess.Quintess.metainfo.xml
       - name: Install the .deb and try it
         run: |
           sudo apt-get install -y ./installer/output/quintess_*_amd64.deb
@@ -84,6 +109,22 @@ jobs:
           QUINTESS_SCREENSHOT="$GITHUB_WORKSPACE/screenshot-tarball.png" timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" ~/.local/bin/quintess "$GITHUB_WORKSPACE/sample.pdf"
           ~/.local/lib/quintess/uninstall.sh
           test ! -e ~/.local/bin/quintess
+      - name: Run the AppImage and try it
+        # Runners have no FUSE, so the AppImage unpacks itself to a temporary
+        # folder (--appimage-extract-and-run) instead of mounting.
+        run: |
+          appimage=$(ls "$PWD"/installer/output/Quintess-*-x86_64.AppImage)
+          chmod +x "$appimage"
+          "$appimage" --appimage-extract-and-run --version
+          "$appimage" --appimage-extract-and-run info sample.pdf
+          "$appimage" --appimage-extract-and-run create markdown sample.md -o sample-appimage.pdf
+          "$appimage" --appimage-extract-and-run info sample-appimage.pdf
+          QUINTESS_SCREENSHOT="$PWD/screenshot-appimage.png" QUINTESS_SETUP=wait=3 timeout 120 xvfb-run -a -s "-screen 0 1400x900x24" \
+            "$appimage" --appimage-extract-and-run sample.pdf
+          # The bundled libspeechd is the one the program loads.
+          mkdir -p appimage-contents && (cd appimage-contents && "$appimage" --appimage-extract >/dev/null)
+          ldd appimage-contents/squashfs-root/usr/lib/quintess/quintess | tee ldd.txt
+          grep -q "libspeechd.so.2 => .*/squashfs-root/usr/lib/quintess/libspeechd.so.2" ldd.txt
       - uses: actions/upload-artifact@v4
         with:
           name: quintess-linux
@@ -92,16 +133,99 @@ jobs:
             installer/output/quintess_*_amd64.deb.sha256
             installer/output/quintess-*-linux-x86_64.tar.gz
             installer/output/quintess-*-linux-x86_64.tar.gz.sha256
+            installer/output/Quintess-*-x86_64.AppImage
+            installer/output/Quintess-*-x86_64.AppImage.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
           path: screenshot-*.png
+
+  flatpak:
+    name: Flatpak
+    needs: package
+    # A newer Ubuntu for a newer flatpak-builder; the bundle's contents come
+    # from the tarball built on 22.04 and the Flathub runtime.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: quintess-linux
+          path: dist
+      - name: Flatpak tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder xvfb dbus-daemon cups cups-client
+          # Ubuntu 24.04 stops unprivileged programs from making user
+          # namespaces, which bubblewrap (flatpak's sandbox) needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Build the bundle
+        run: bash installer/linux/flatpak/build-bundle.sh dist/quintess-*-linux-x86_64.tar.gz dist
+      - name: Install the bundle and try it
+        run: |
+          flatpak install --user -y --noninteractive dist/Quintess-*-x86_64.flatpak
+          # Mesa for the runtime, to draw under Xvfb (normally installed with the runtime).
+          flatpak install --user -y --noninteractive flathub org.freedesktop.Platform.GL.default//26.08 || true
+          flatpak info --user --show-permissions cc.quintess.Quintess
+          flatpak run cc.quintess.Quintess --version
+          # The sandbox sees Documents (and Downloads), not the workspace.
+          mkdir -p ~/.config ~/Documents
+          printf 'XDG_DOCUMENTS_DIR="$HOME/Documents"\nXDG_DOWNLOAD_DIR="$HOME/Downloads"\n' > ~/.config/user-dirs.dirs
+          printf '# Quintess in a Flatpak\n\nA **sample** page with *styles*.\n\n- One\n- Two\n' > ~/Documents/sample.md
+          flatpak run cc.quintess.Quintess create markdown ~/Documents/sample.md -o ~/Documents/sample.pdf
+          flatpak run cc.quintess.Quintess info ~/Documents/sample.pdf
+          # What the sandbox has for the optional features.
+          flatpak run --command=sh cc.quintess.Quintess -c 'command -v lp lpstat lpoptions xdg-open fc-match; ls -l /app/lib/quintess /app/lib/libspeechd.so.2; fc-match sans-serif; echo "CUPS_SERVER=$CUPS_SERVER"'
+          # The self-check screenshot, drawn with the runtime's Mesa.
+          dbus-run-session -- timeout 180 xvfb-run -a -s "-screen 0 1400x900x24" \
+            flatpak run --env=QUINTESS_SCREENSHOT="$HOME/Documents/screenshot-flatpak.png" --env=QUINTESS_SETUP=wait=3 \
+            cc.quintess.Quintess ~/Documents/sample.pdf
+          cp ~/Documents/screenshot-flatpak.png .
+      - name: Print through the system's CUPS from the sandbox
+        # A queue that throws the output away, then a real job sent from
+        # inside the sandbox through the CUPS socket.
+        run: |
+          sudo sed -i 's/^#\?FileDevice.*/FileDevice Yes/' /etc/cups/cups-files.conf
+          grep -q '^FileDevice Yes' /etc/cups/cups-files.conf || echo 'FileDevice Yes' | sudo tee -a /etc/cups/cups-files.conf
+          sudo systemctl restart cups
+          sudo lpadmin -p QuintessTest -E -v file:///dev/null -m drv:///sample.drv/generic.ppd
+          lpstat -p
+          flatpak run cc.quintess.Quintess printers
+          flatpak run cc.quintess.Quintess print ~/Documents/sample.pdf --printer QuintessTest
+          sleep 5
+          lpstat -W completed -o QuintessTest | tee jobs.txt
+          test -s jobs.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quintess-flatpak
+          path: |
+            dist/Quintess-*-x86_64.flatpak
+            dist/Quintess-*-x86_64.flatpak.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-flatpak
+          path: screenshot-flatpak.png
+
+  release:
+    name: Attach to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, flatpak]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: quintess-linux
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: quintess-flatpak
+          path: dist
       - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          files=$(ls installer/output/quintess_*_amd64.deb* installer/output/quintess-*-linux-x86_64.tar.gz*)
+          files=$(ls dist/quintess_*_amd64.deb* dist/quintess-*-linux-x86_64.tar.gz* dist/Quintess-*-x86_64.AppImage* dist/Quintess-*-x86_64.flatpak*)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" $files --clobber
           else

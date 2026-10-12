@@ -1,0 +1,161 @@
+# Flatpak manifest for the single-file bundle attached to each GitHub release,
+# Quintess-<version>-x86_64.flatpak. Build it with build-bundle.sh (beside
+# this file), which unpacks the release tarball into `stage/` next to a copy
+# of this manifest.
+#
+# It repackages the release's own tarball (quintess-<version>-linux-x86_64.tar.gz,
+# built on Ubuntu 22.04 by tools/package_linux.py) instead of compiling Rust
+# inside flatpak-builder: the same program as the .deb, the tarball and the
+# AppImage, and a build of minutes instead of half an hour. The program needs
+# glibc 2.35 or later and opens OpenGL, X11, Wayland and xkbcommon at run time;
+# the runtime has all of them, and the GPU driver comes from its
+# org.freedesktop.Platform.GL extension. Two things the program uses are not
+# in the runtime and are built here from source: libspeechd (read aloud) and
+# CUPS's lp, lpstat and lpoptions (printing).
+#
+# For a Flathub submission, which must build from source, see the notes at the
+# end of this file.
+#
+# Adapted from PdfCraft's packaging/linux/flatpak/ai.storyteller.pdfcraft.bundle.yml
+# (https://github.com/storytold/pdfcraft, commit 6d843a8e8b22e4442666eb9e12f506c40458af3d),
+# Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0.
+# Modified: Quintess's names, layout, permissions and the libspeechd and CUPS modules.
+
+id: cc.quintess.Quintess
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: quintess
+finish-args:
+  # Display: Wayland first; X11 only when no Wayland compositor is running.
+  - --socket=wayland
+  - --socket=fallback-x11
+  # X11 shared memory (MIT-SHM); without it the X11 fallback is slow.
+  - --share=ipc
+  # The GPU, for drawing the window with OpenGL.
+  - --device=dri
+  # Files. Open and Save dialogs go through the file chooser portal (rfd's
+  # xdg-portal backend talks to org.freedesktop.portal.FileChooser over D-Bus,
+  # which every Flatpak may use), and dropped files through the document
+  # portal, so a file picked or dropped anywhere opens and saves without broad
+  # access. Documents and Downloads, where PDFs usually live, are granted too,
+  # so what works with paths there works fully: files given on the command
+  # line, Recent files, Search a folder, a watched folder, and commands that
+  # write new files beside the original (split, OCR copies, batch output).
+  - --filesystem=xdg-documents
+  - --filesystem=xdg-download
+  # Network, used only when asked: Check for updates (GitHub), downloading
+  # more spelling dictionaries, trusted timestamps for signatures (a TSA
+  # server) and checking certificates for revocation (OCSP and CRLs).
+  # Opening links needs no network permission: it goes through the OpenURI
+  # portal to the desktop's browser.
+  - --share=network
+  # Printing: the app runs lp, lpstat and lpoptions (built below), which talk
+  # to the system's CUPS through its socket.
+  - --socket=cups
+  # Read aloud: libspeechd connects to speech-dispatcher's socket in the
+  # runtime folder. The sandbox can't start speech-dispatcher itself, so the
+  # system's must be running (desktops start it on demand for other programs).
+  - --filesystem=xdg-run/speech-dispatcher:ro
+  # Not granted, on purpose:
+  # - home or host file access (see the portals above);
+  # - scanning: SANE's scanimage isn't in the runtime and USB scanners would
+  #   need --device=all, so File > Create > From a scanner reports that no
+  #   scanner program is installed;
+  # - converting with LibreOffice or Chrome (Office files, web pages and web
+  #   addresses): those are other installed programs, which a sandboxed app
+  #   can only start through flatpak-spawn --host
+  #   (--talk-name=org.freedesktop.Flatpak), a full escape from the sandbox.
+  #   Quintess's built-in converters still work.
+modules:
+  # The speech-dispatcher client library, LGPL-2.1-or-later. The program links
+  # libspeechd.so.2, so it wouldn't start without it. Only the one C file of
+  # the client library is needed; it is compiled directly rather than running
+  # speech-dispatcher's configure, which wants the server's dependencies.
+  - name: libspeechd
+    buildsystem: simple
+    build-commands:
+      - >-
+        gcc -O2 -fPIC -shared -DHAVE_STRNDUP -DSPD_SPAWN_CMD='"speech-dispatcher"'
+        -Iinclude -Isrc/api/c src/api/c/libspeechd.c
+        $(pkg-config --cflags --libs glib-2.0)
+        -Wl,-soname,libspeechd.so.2 -o libspeechd.so.2
+      - install -Dm755 libspeechd.so.2 /app/lib/libspeechd.so.2
+      - install -Dm644 COPYING.LGPL /app/share/licenses/cc.quintess.Quintess/libspeechd/COPYING.LGPL
+    sources:
+      - type: archive
+        url: https://github.com/brailcom/speechd/releases/download/0.12.1/speech-dispatcher-0.12.1.tar.gz
+        sha256: b14a5238d287d2dcce4dd42bbd66ca65fa228e7e683708267f7b34036f7ba4b4
+
+  # CUPS's command-line client (lp, lpstat, lpoptions), Apache-2.0. The
+  # runtime has libcups but not these programs. libcups is linked in
+  # statically, so nothing replaces the runtime's copy. Flatpak points them at
+  # the system's CUPS socket (CUPS_SERVER) when --socket=cups is granted.
+  - name: cups-client
+    buildsystem: simple
+    build-commands:
+      - >-
+        ./configure --prefix=/app --disable-shared --with-tls=openssl --with-dnssd=no
+        --disable-pam --disable-dbus --disable-gssapi --without-rcdir
+      - make -C cups -j "$FLATPAK_BUILDER_N_JOBS" libcups.a
+      - make -C systemv lp lpstat lpoptions
+      - install -Dm755 -t /app/bin systemv/lp systemv/lpstat systemv/lpoptions
+      - install -Dm644 LICENSE /app/share/licenses/cc.quintess.Quintess/cups/LICENSE
+      - install -Dm644 NOTICE /app/share/licenses/cc.quintess.Quintess/cups/NOTICE
+    sources:
+      - type: archive
+        url: https://github.com/OpenPrinting/cups/releases/download/v2.4.19/cups-2.4.19-source.tar.gz
+        sha256: 820984b12a67f98705785aae2dd1347fe0ac097828001d4583ff64574aed6389
+
+  # Quintess itself, from the release tarball's program folder: the program,
+  # libpdfium.so, dictionaries, OCR models and licenses, found by the program
+  # next to its own file (/app/lib/quintess), as in every other package.
+  - name: quintess
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib /app/bin && cp -R program /app/lib/quintess
+      - ln -s ../lib/quintess/quintess /app/bin/quintess
+      # Flatpak exports only files named after the app ID.
+      - >-
+        sed -e 's/^Icon=quintess$/Icon=cc.quintess.Quintess/' share/applications/quintess.desktop
+        > quintess-flatpak.desktop
+      - install -Dm644 quintess-flatpak.desktop /app/share/applications/cc.quintess.Quintess.desktop
+      - >-
+        for icon in share/icons/hicolor/*/apps/quintess.png; do
+        size=$(basename "$(dirname "$(dirname "$icon")")");
+        install -Dm644 "$icon" "/app/share/icons/hicolor/$size/apps/cc.quintess.Quintess.png";
+        done
+      # Already has the release's version and date, from package_linux.py.
+      - install -Dm644 share/metainfo/cc.quintess.Quintess.metainfo.xml /app/share/metainfo/cc.quintess.Quintess.metainfo.xml
+    sources:
+      - type: dir
+        path: stage
+
+# Building from source for Flathub
+#
+# Flathub builds every app from source, offline, on its own builders, so a
+# submission replaces the `quintess` module above with one that compiles the
+# workspace. What it needs:
+#
+# - sdk-extensions: org.freedesktop.Sdk.Extension.rust-stable (cargo, rustc)
+#   and org.freedesktop.Sdk.Extension.llvm<N> (libclang, for the bindgen run
+#   of speech-dispatcher-sys), with build-options append-path and
+#   LIBCLANG_PATH set from them.
+# - The crates, vendored: flatpak-cargo-generator.py (flatpak/flatpak-builder-tools)
+#   turns Cargo.lock into cargo-sources.json, listed as a source; then
+#   `cargo --offline build --release --locked -p quintess-cli` with CARGO_HOME
+#   in the build folder.
+# - The libspeechd headers, from the module above (install libspeechd.h,
+#   libspeechd_version.h and include/speechd_types.h into /app/include).
+# - PDFium: a `file` source for pdfium-linux-x64.tgz from bblanchon/pdfium-binaries
+#   chromium/8086, with its sha256 (Flathub accepts checksummed binary sources
+#   for libraries that can't reasonably be built, but asks for a reason).
+# - The OCR models: two `file` sources from ocrs-models.s3-accelerate.amazonaws.com
+#   with the checksums in tools/package_linux.py.
+# - licenses/THIRD-PARTY-NOTICES.txt, generated before the tag, as for every release.
+# - The source as a `git` source pinned to a release tag and commit, then the
+#   same install commands as above, from the build tree instead of `stage`.
+#
+# Then fork flathub/flathub, add cc.quintess.Quintess.yml (and
+# cargo-sources.json) on a branch from new-pr, and open the pull request; the
+# app ID's domain (quintess.cc) must be verified for the "verified" badge.

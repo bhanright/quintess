@@ -67,6 +67,30 @@ pub fn program_folder() -> Option<PathBuf> {
     std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
 }
 
+/// How this copy of Quintess was installed on Linux, as far as the program
+/// can tell, so advice about updating names the right download.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinuxPackage {
+    /// Running inside a Flatpak (Flatpak sets `FLATPAK_ID` for the app it runs).
+    Flatpak,
+    /// Running from an AppImage (its runtime sets `APPIMAGE` to the image's path).
+    AppImage,
+    /// The .deb, the tarball or a build from source.
+    Installed,
+}
+
+/// Which [`LinuxPackage`] this is, from what the Flatpak and AppImage
+/// runtimes put in the environment.
+pub fn linux_package() -> LinuxPackage {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        LinuxPackage::Flatpak
+    } else if std::env::var_os("APPIMAGE").is_some() {
+        LinuxPackage::AppImage
+    } else {
+        LinuxPackage::Installed
+    }
+}
+
 /// The program that hands a file or address to the desktop's default
 /// application, with the arguments that go before the target.
 fn opener() -> (&'static str, &'static [&'static str]) {

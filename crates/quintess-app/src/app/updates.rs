@@ -115,7 +115,13 @@ impl QuintessApp {
                 if cfg!(not(windows)) {
                     // Linux installs come from a package; Quintess doesn't replace itself.
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Download it from the release page: the .deb if you installed with apt or dpkg, the .tar.gz if you used install.sh.").color(colors.text_muted));
+                    use quintess_core::system::{linux_package, LinuxPackage};
+                    let advice = match linux_package() {
+                        LinuxPackage::Flatpak => "Download the new .flatpak file from the release page and install it with flatpak install --user, as before.",
+                        LinuxPackage::AppImage => "Download the new .AppImage from the release page, make it executable and use it in place of this one.",
+                        LinuxPackage::Installed => "Download it from the release page: the .deb if you installed with apt or dpkg, the .tar.gz if you used install.sh.",
+                    };
+                    ui.label(RichText::new(advice).color(colors.text_muted));
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {

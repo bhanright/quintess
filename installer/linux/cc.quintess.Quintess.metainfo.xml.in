@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for software centers and Flathub, used by the AppImage
+  and the Flatpak. tools/package_linux.py fills in @VERSION@ (from Cargo.toml)
+  and @DATE@ (the build day) and puts the result in the tarball's
+  share/metainfo, which the Flatpak manifest installs.
+
+  Adapted from PdfCraft's packaging/linux/ai.storyteller.pdfcraft.metainfo.xml.in
+  (https://github.com/storytold/pdfcraft, commit 6d843a8e8b22e4442666eb9e12f506c40458af3d),
+  Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0.
+  Modified: Quintess's names, text, links, screenshot and colors.
+-->
+<component type="desktop-application">
+  <id>cc.quintess.Quintess</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>Quintess</name>
+  <summary>Private PDF reader and editor</summary>
+  <developer id="cc.quintess">
+    <name>William Hanright</name>
+  </developer>
+  <description>
+    <p>
+      Quintess reads and edits PDF files on your own computer. No account, no uploads;
+      it works offline.
+    </p>
+    <ul>
+      <li>Edit text: change any line or paragraph, which re-wraps at its width and alignment</li>
+      <li>Comment and mark up: highlights, notes, shapes, freehand ink and stamps</li>
+      <li>Organize pages: merge, split, rotate, insert, extract, crop and resize</li>
+      <li>Fill and create forms, including one copy per row of a spreadsheet</li>
+      <li>Redact for real, then check the file for anything left behind</li>
+      <li>Sign digitally, verify signatures, encrypt with AES-256</li>
+      <li>Make scans searchable with offline OCR</li>
+      <li>Compare, convert and automate, with a command-line tool for scripts</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">cc.quintess.Quintess.desktop</launchable>
+  <icon type="stock">cc.quintess.Quintess</icon>
+  <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates this file). -->
+  <url type="homepage">https://quintess.cc</url>
+  <url type="bugtracker">https://github.com/bhanright/quintess/issues</url>
+  <url type="help">https://quintess.cc/guide/</url>
+  <categories>
+    <category>Office</category>
+    <category>Viewer</category>
+  </categories>
+  <keywords>
+    <keyword>pdf</keyword>
+    <keyword>editor</keyword>
+    <keyword>sign</keyword>
+    <keyword>redact</keyword>
+    <keyword>forms</keyword>
+    <keyword>ocr</keyword>
+  </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Editing a newsletter: a picture with its paragraphs wrapped around it</caption>
+      <image>https://quintess.cc/assets/img/app-wrap.png</image>
+    </screenshot>
+  </screenshots>
+  <requires>
+    <display_length compare="ge">640</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <provides>
+    <binary>quintess</binary>
+    <mediatype>application/pdf</mediatype>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

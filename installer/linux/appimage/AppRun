@@ -1,0 +1,19 @@
+#!/bin/sh
+# Starts Quintess from inside its AppImage.
+#
+# The AppImage runtime mounts the image (or unpacks it, with
+# --appimage-extract-and-run) and runs this script with APPDIR set to that
+# folder. The program sits in $APPDIR/usr/lib/quintess with everything it
+# bundles beside it, the same program folder as the .deb and the tarball:
+#
+#   quintess, libpdfium.so, libspeechd.so.2, dictionaries/, models/, licenses/
+#
+# Nothing has to be configured here. Quintess finds PDFium, the dictionaries
+# and the OCR models next to its own file (std::env::current_exe, which reads
+# /proc/self/exe), and libspeechd through the program's RUNPATH ($ORIGIN, set
+# by tools/package_linux.py when it builds the AppImage). LD_LIBRARY_PATH is
+# deliberately left alone, so the programs Quintess starts (lp, xdg-open,
+# LibreOffice, a browser) see the system's libraries, not the bundled ones.
+
+here="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+exec "$here/usr/lib/quintess/quintess" "$@"
