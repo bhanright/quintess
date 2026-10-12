@@ -10,7 +10,11 @@ use quintess_core::lopdf::content::Content;
 use quintess_core::lopdf::{Dictionary, Object, Stream};
 use quintess_core::{Pdf, objects, pages};
 
-fuzz_target!(|data: &[u8]| {
+mod large_stack;
+
+fuzz_target!(|data: &[u8]| large_stack::run_with_large_stack(data, check));
+
+fn check(data: &[u8]) {
     if let Ok(content) = Content::decode(data) {
         if let Ok(encoded) = content.encode() {
             // lopdf reads a malformed inline image as a bare BI operator (and
@@ -36,4 +40,4 @@ fuzz_target!(|data: &[u8]| {
         page.set("Contents", content_id);
     }
     let _ = objects::list_objects(&pdf, 1);
-});
+}

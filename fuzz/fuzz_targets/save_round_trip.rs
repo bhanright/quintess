@@ -10,7 +10,11 @@ use quintess_core::document::{EditKind, bytes_after_edit};
 use quintess_core::metadata::{DocumentInfo, write_info};
 use quintess_core::{Pdf, pages};
 
-fuzz_target!(|data: &[u8]| {
+mod large_stack;
+
+fuzz_target!(|data: &[u8]| large_stack::run_with_large_stack(data, check));
+
+fn check(data: &[u8]) {
     let Ok(mut pdf) = Pdf::from_bytes(data, None) else { return };
     if pdf.page_count() == 0 {
         return;
@@ -29,4 +33,4 @@ fuzz_target!(|data: &[u8]| {
     if let Err(error) = Pdf::from_bytes(&edited.bytes, None) {
         panic!("Quintess saved a file it can't open again: {error:#}");
     }
-});
+}

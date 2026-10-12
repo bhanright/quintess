@@ -457,9 +457,11 @@ et.rs`): .pfx/.p12
   predictor whose Columns times Colors overflows (object.rs:1237) and on a
   cross-reference stream /Index near the largest integer
   (parser_aux.rs:633); release builds wrap instead, so those are left for
-  lopdf and listed as known in `mutate.rs`. One night's save_round_trip
-  fuzzing died of a SIGSEGV with no input saved (likely a stack overflow);
-  CI now fuzzes in fork mode so the next one is kept. qpdf in CI flagged saved copies that lose
+  lopdf and listed as known in `mutate.rs`. Twice save_round_trip fuzzing
+  died of a bare SIGSEGV with no input saved (likely a stack overflow on
+  libFuzzer's thread, where Rust has no overflow handler); the targets now
+  run each input on a 64 MB thread, where an overflow is reported and
+  saved. qpdf in CI flagged saved copies that lose
   objects lopdf can't parse (issue1721: a stream whose data runs into
   `endstream`; issue7496 and issue13783: a corrupt latest copy of a page).
   Tests:

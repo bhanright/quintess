@@ -6,7 +6,11 @@
 use libfuzzer_sys::fuzz_target;
 use quintess_core::{Pdf, annotations, bookmarks, forms, metadata};
 
-fuzz_target!(|data: &[u8]| {
+mod large_stack;
+
+fuzz_target!(|data: &[u8]| large_stack::run_with_large_stack(data, check));
+
+fn check(data: &[u8]) {
     let Ok(pdf) = Pdf::from_bytes(data, None) else { return };
     let _ = pdf.page_count();
     for page_id in pdf.page_ids() {
@@ -18,4 +22,4 @@ fuzz_target!(|data: &[u8]| {
     let _ = bookmarks::read_bookmarks(&pdf);
     let _ = metadata::read_info(&pdf);
     let _ = metadata::page_labels(&pdf);
-});
+}

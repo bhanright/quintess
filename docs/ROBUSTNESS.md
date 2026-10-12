@@ -143,8 +143,11 @@ so far every one has been PDFium rendering (damaged JBIG2 images, tiny
 tiling steps).
 
 The sweep and the mutation fuzzer use debug builds, whose overflow checks
-turn silent wraparounds into findings. CI runs libFuzzer in fork mode, so a
-crash that kills its process outright (a stack overflow) is still saved.
+turn silent wraparounds into findings. The cargo-fuzz targets run each
+input on a thread with a 64 MB stack (`fuzz/fuzz_targets/large_stack.rs`):
+on libFuzzer's own thread a stack overflow is a bare SIGSEGV that loses the
+input, while on a Rust thread it is reported and saved. CI runs libFuzzer
+in fork mode, two inputs at a time.
 
 Never commit a finding made from a corpus file: turn each bug into a
 regression test with a small synthetic file.
