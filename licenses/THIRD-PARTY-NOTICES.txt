@@ -20,9 +20,11 @@ Oxi (oxidocs, oxidocs-core, oxidocs-common), the built-in Word layout engine: MP
 Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):
   a subset of Material Icons (Outlined) by Google, Apache-2.0, from
   https://github.com/google/material-design-icons; text in its section below.
-Linux packaging (the Flatpak manifest and bundle script, the AppStream metadata):
-  adapted from PdfCraft (https://github.com/storytold/pdfcraft), Copyright (c) 2026
-  ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0; MIT text below.
+Code adapted from PdfCraft (https://github.com/storytold/pdfcraft), Copyright (c) 2026
+  ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0: the Linux packaging
+  (Flatpak manifest and bundle script, AppStream metadata), the recovery folder
+  (crates/quintess-core/src/recovery.rs) and syncing a file to disk before it replaces
+  another (write_file_safely); MIT license text below.
 
 Rust crates (613):
 
@@ -23538,7 +23540,7 @@ Apache License, Version 2.0, reproduced below.
    limitations under the License.
 
 ==============================================================================
-PdfCraft (parts of the Linux packaging)
+PdfCraft (adapted code, see above)
 ==============================================================================
 
 MIT License

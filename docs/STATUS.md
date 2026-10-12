@@ -138,6 +138,44 @@ saves a picture of the window and exits (setup options are documented on
 - Watched folder (`watch.rs`, Tools ▸ Watch a folder, CLI `watch`): PDFs
   dropped into a folder are run through an action once their size settles;
   originals move to Processed (or Failed with a note), results to Done.
+- Saving (2026-10-11, `saving.rs`, `incremental.rs`, `DocumentTab::bytes_to_save`):
+  Save appends an incremental update to the file the document came from
+  (`DocumentTab::bytes_on_disk`), so its existing bytes stay an exact
+  prefix; password-protected files take an update encrypted with their own
+  key (lopdf 0.45 re-encrypts appended objects; an edit that reuses the
+  /Encrypt object's number is refused). Every update is read back (pages
+  counted, prefix checked) before it is written. The whole file is written
+  anew when: an edit since the last save removed content
+  (`removed_content_since_save`, set by `apply_removing`/`removes_content`:
+  redaction, deleting pages, removing blank pages, comments, metadata,
+  attachments, portfolio files or a layer's content, flattening comments or
+  fields, clearing a form, Reduce file size), protection is added, changed
+  or removed, the file is protected for certificates, Save as goes to
+  another file, File ▸ Save as ▸ Save a clean copy, the preference
+  `Settings::save_incrementally` is off, the file has grown more than 50%
+  and 1 MB past its first version (`GrowthLimit`, done without asking),
+  or the update fails. Signed documents are written as their edits left
+  them (updates appended at edit time). The CLI appends ordinary edits
+  written over the input. Writes fsync the temporary file before the
+  rename. Text edits stay updates (the old text remains in the earlier
+  version; the guide says to redact or save a clean copy). qpdf was not
+  available to check outputs; they are checked with lopdf and PDFium.
+- Autosave and recovery (`recovery.rs`, `app/autosave.rs`, `crash.rs`):
+  recovery copies (`<key>.pdf` + `<key>.json`) in the data folder's
+  `Recovered`, written on a thread after `Settings::autosave_seconds` of no
+  further change (default 60; off, 30 s, 1, 2, 5 min), removed on save,
+  discard-close and clean quit (`Drop for QuintessApp`, skipped after a
+  crash). Protected documents' copies are encrypted as the saved file
+  will be (`DocumentTab::rewritten_bytes`, `rewrite_protected`); the crash
+  handler writes only unprotected documents and keeps protected ones as
+  of their last autosave. Over 200 MB: one copy per 5 minutes; over 2 GB:
+  none. Each session holds `<session>.lock`; at start, copies of sessions
+  whose lock can be taken are offered (`Dialog::Recovery`: Open as
+  "<name> (recovered)" with Save asking where, starting at the old path;
+  Delete; Decide later). Older versions' bare crash copies are listed too.
+  The recovery store is adapted from PdfCraft (MIT, notice in
+  licenses/THIRD-PARTY-NOTICES.txt). Self-check: `autosave=seconds`,
+  `recover-open`; `crash` now waits for `wait`.
 - Signed documents: edits are saved as incremental updates after the
   signed bytes (`incremental.rs`, used by `DocumentTab::replace_bytes` and
   the CLI's `save`), so signatures stay valid and verification reports the
@@ -181,7 +219,7 @@ saves a picture of the window and exits (setup options are documented on
 - Audit fixes (2026-10-10, from a blind audit): removal edits rewrite
   signed files; saves keep the original encryption (`Pdf::to_bytes_keeping_encryption`,
   `DocumentTab::original_encryption`) and write through a temporary file
-  (`write_file_safely`); unsigned files save without earlier versions;
+  (`write_file_safely`); unsigned files save without earlier versions (superseded by incremental saving, which rewrites only after removals);
   redaction flattens a page instead of deleting an undecodable image or
   keeping a detailed shape that crosses a box (simple shapes are clipped);
   find and replace terminates; signature byte ranges are checked safely and

@@ -31,6 +31,8 @@ mod watching;
 mod split;
 mod spelling;
 mod read_aloud;
+mod autosave;
+pub(crate) use autosave::AUTOSAVE_CHOICES;
 
 /// Thumbnail resolution in the page organizer (not a multiple of 24, so it
 /// never collides with the viewer's resolutions).
@@ -85,6 +87,8 @@ pub struct QuintessApp {
     /// The status line as the frame began, to tell whether this frame's
     /// edit wrote its own message (see `announce_signature_changes`).
     status_at_frame_start: String,
+    /// Recovery copies of unsaved documents (see `autosave.rs`).
+    autosave: autosave::Autosave,
 }
 
 /// A developer aid: with `QUINTESS_SCREENSHOT=<file.png>` the app sets itself
@@ -103,7 +107,10 @@ pub struct QuintessApp {
 /// `close-window` (marks them changed and asks the window to close),
 /// `redact-search=words` (Find and redact with its matches found),
 /// `batch=action.json` (the Run an action dialog with that action),
-/// `confirm-trust` (the question Trust asks), `permissions-password`.
+/// `confirm-trust` (the question Trust asks), `permissions-password`,
+/// `autosave=seconds` (writes recovery copies after this long instead of
+/// the preference), `recover-open` (opens the first document the recovery
+/// question lists). `crash` waits for `wait` before crashing.
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -157,6 +164,7 @@ impl QuintessApp {
             watch: None,
             close_confirmed: false,
             status_at_frame_start: String::new(),
+            autosave: autosave::Autosave::start(),
         };
         app.tool_settings.author = app.settings.author.clone();
         app.configure_spelling();
@@ -175,6 +183,19 @@ impl QuintessApp {
         if let Ok(path) = std::env::var("QUINTESS_SCREENSHOT") {
             app.self_check = Some(SelfCheck { path: path.into(), frames: 0, requested: false, not_before: std::time::Instant::now(), crash: false });
             app.apply_setup(&std::env::var("QUINTESS_SETUP").unwrap_or_default(), &cc.egui_ctx);
+        }
+        app.offer_recovery();
+        if let Some(setup) = std::env::var("QUINTESS_SETUP").ok().filter(|_| app.self_check.is_some()) {
+            if setup.split(',').any(|item| item.trim() == "recover-open") {
+                let first = app.dialogs.iter().find_map(|dialog| match dialog {
+                    Dialog::Recovery { entries } => entries.first().cloned(),
+                    _ => None,
+                });
+                if let Some(entry) = first {
+                    app.dialogs.retain(|dialog| !matches!(dialog, Dialog::Recovery { .. }));
+                    app.open_recovered(entry);
+                }
+            }
         }
         app
     }
@@ -295,6 +316,7 @@ impl QuintessApp {
 Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://github.com/bhanright/quintess/releases".into(), installer: Some(quintess_core::updates::Asset { name: "Quintess-0.2.0-setup.exe".into(), url: String::new(), size: 0 }), checksum: None };
                     self.update_window = Some(updates::UpdateWindow::Available(release));
                 }
+                "autosave" => self.autosave.seconds_override = value.parse().ok(),
                 "crash" => {
                     if let Some(check) = self.self_check.as_mut() {
                         check.crash = true;
@@ -465,7 +487,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     fn run_self_check(&mut self, ctx: &egui::Context) {
         let Some(check) = self.self_check.as_mut() else { return };
         check.frames += 1;
-        if check.crash && check.frames == 5 {
+        if check.crash && check.frames >= 5 && std::time::Instant::now() >= check.not_before {
             panic!("a crash requested by the self-check");
         }
         let screenshot = ctx.input(|i| {
@@ -531,9 +553,12 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: String::new() });
             return;
         }
-        self.settings.remember_file(path.clone());
-        let _ = self.settings.save();
-        let position = self.settings.reading_position(&path).cloned();
+        let recovery_copy = self.autosave.is_recovery_copy(&path);
+        if !recovery_copy {
+            self.settings.remember_file(path.clone());
+            let _ = self.settings.save();
+        }
+        let position = self.settings.reading_position(&path).cloned().filter(|_| !recovery_copy);
         if self.add_tab(Some(path), bytes, None) {
             // Reopen where the file was left.
             if let (Some(position), Some(tab)) = (position, self.tabs.last_mut()) {
@@ -567,9 +592,12 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     fn add_tab(&mut self, path: Option<PathBuf>, bytes: Vec<u8>, password: Option<String>) -> bool {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
-        match DocumentTab::open(id, path, bytes, password) {
-            Ok(tab) => {
+        match DocumentTab::open(id, path.clone(), bytes, password) {
+            Ok(mut tab) => {
                 self.info(format!("Opened {} ({} pages)", tab.title, tab.pages.len()));
+                if let Some(message) = path.as_deref().and_then(|path| self.autosave.finish_recovery(path, &mut tab)) {
+                    self.info(message);
+                }
                 self.tabs.push(tab);
                 self.active = self.tabs.len() - 1;
                 true
@@ -597,19 +625,64 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// Saves one document, asking where when it has no file yet (or
     /// `choose_location`). Returns whether it was saved.
     fn save_tab(&mut self, index: usize, choose_location: bool) -> bool {
-        let Some(tab) = self.tabs.get_mut(index) else { return false };
+        let Some(tab) = self.tabs.get(index) else { return false };
         let path = match (&tab.path, choose_location) {
             (Some(path), false) => Some(path.clone()),
-            _ => rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(&tab.title).save_file(),
+            _ => choose_save_path(tab),
         };
         let Some(path) = path else { return false };
-        let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
-        let result = tab.save_to(path.clone());
+        let choices = crate::tab::SaveChoices { incremental_preferred: self.settings.save_incrementally, clean_copy: false };
+        let Some(tab) = self.tabs.get_mut(index) else { return false };
+        let tab_id = tab.id;
+        let result = tab.save_to(path.clone(), choices);
+        match self.report(result) {
+            Some(method) => {
+                self.autosave.forget(tab_id);
+                let mut message = format!("Saved {}", path.display());
+                if let Some(note) = method.note() {
+                    message.push_str(". ");
+                    message.push_str(&note);
+                }
+                self.info(message);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// File ▸ Save as ▸ Save a clean copy: the whole document written as one
+    /// new file, without the earlier versions incremental saves keep. Saved
+    /// over the document's own file, it rewrites that file (and the document
+    /// counts as saved); under another name it is a copy, and the document
+    /// stays with its file.
+    fn save_clean_copy(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.signed {
+            let answer = rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("Save a clean copy")
+                .set_description("This document is signed. Writing it as one new file invalidates its digital signatures. Save a clean copy anyway?")
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show();
+            if answer != rfd::MessageDialogResult::Yes {
+                return;
+            }
+        }
+        let Some(path) = choose_save_path(tab) else { return };
+        let index = self.active;
+        let tab = &mut self.tabs[index];
+        if tab.path.as_ref() != Some(&path) {
+            let result = tab.save_copy_to(&path);
+            if self.report(result).is_some() {
+                self.info(format!("Saved a clean copy as {}", path.display()));
+            }
+            return;
+        }
+        let tab_id = tab.id;
+        let result = tab.save_to(path.clone(), crate::tab::SaveChoices { incremental_preferred: self.settings.save_incrementally, clean_copy: true });
         if self.report(result).is_some() {
-            self.info(format!("Saved {}", path.display()));
-            true
-        } else {
-            false
+            self.autosave.forget(tab_id);
+            self.info(format!("Saved {} as one clean file, without earlier versions.", path.display()));
         }
     }
 
@@ -681,6 +754,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             return;
         }
         let tab = self.tabs.remove(index);
+        // Closed with its changes discarded (or none): no copy to keep.
+        self.autosave.forget(tab.id);
         self.viewer_states.remove(&tab.id);
         self.other_panes.remove(&tab.id);
         let _ = self.settings.save();
@@ -1327,7 +1402,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     });
                 }
                 ui.separator();
-                self.command_buttons_except(ui, "File", &["Open…", "Close", "Quit"]);
+                self.command_button(ui, "File", "Save");
+                ui.menu_button("Save as", |ui| self.command_buttons(ui, "File ▸ Save as"));
+                self.command_buttons_except(ui, "File", &["Open…", "Close", "Quit", "Save"]);
                 ui.menu_button("Export as", |ui| self.command_buttons(ui, "File ▸ Export as"));
                 ui.menu_button("Export", |ui| self.export_menu(ui));
                 ui.separator();
@@ -1615,12 +1692,16 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let Some(plain) = self.report(opened.pdf.to_bytes(&quintess_core::SaveSettings::default())) else { return };
         // The key file is not made the signing default: it may be a kind
         // signing can't read, and opening a file is no choice to sign with it.
-        self.settings.remember_file(choice.path.clone());
-        let _ = self.settings.save();
+        if !self.autosave.is_recovery_copy(&choice.path) {
+            self.settings.remember_file(choice.path.clone());
+            let _ = self.settings.save();
+        }
         if self.add_tab(Some(choice.path), plain, None) {
             if let Some(tab) = self.tabs.last_mut() {
                 tab.original_encryption = encryption;
                 tab.certificate_dictionary = dictionary;
+                // The tab holds the decrypted document, not the file's bytes.
+                tab.bytes_on_disk = None;
                 tab.may_change_security = opened.may_change_security;
             }
             let restricted = crate::tool_dialogs::restrictions(&opened.allowed);
@@ -2306,6 +2387,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.compare_with(&ctx, path, bytes, Some(password));
                 }
                 AppRequest::SaveAndClose { tab_ids, quitting } => self.save_and_close(tab_ids, quitting),
+                AppRequest::OpenRecovered(entry) => self.open_recovered(*entry),
+                AppRequest::DeleteRecovered(key) => self.autosave.delete_copy(&key),
                 AppRequest::CloseDiscarding { tab_ids, quitting } => self.close_discarding(tab_ids, quitting),
                 AppRequest::StartOptimize { settings, step } => {
                     let ctx = self.worker_context.clone();
@@ -2655,6 +2738,30 @@ struct ScrollTest {
     blank: u32,
 }
 
+/// Asks where to save a document, starting at its file, or for a
+/// recovered document where it was saved before.
+fn choose_save_path(tab: &DocumentTab) -> Option<PathBuf> {
+    let start = tab.path.clone().or_else(|| tab.suggested_path.clone());
+    let mut dialog = rfd::FileDialog::new().add_filter("PDF", &["pdf"]);
+    match start.as_ref().and_then(|path| Some((path.parent()?, path.file_name()?))) {
+        Some((folder, name)) => dialog = dialog.set_directory(folder).set_file_name(name.to_string_lossy()),
+        None => dialog = dialog.set_file_name(&tab.title),
+    }
+    let path = dialog.save_file()?;
+    Some(if path.extension().is_none() { path.with_extension("pdf") } else { path })
+}
+
+impl Drop for QuintessApp {
+    /// A clean quit removes this session's recovery copies: every unsaved
+    /// document was saved or discarded by the person before the window
+    /// could close. After a crash the copies stay, for the next start.
+    fn drop(&mut self) {
+        if !std::thread::panicking() && !crate::crash::has_crashed() {
+            self.autosave.finish();
+        }
+    }
+}
+
 /// Writes an exported file safely and says where it went.
 fn write_export(path: &std::path::Path, bytes: Vec<u8>) -> anyhow::Result<JobOutcome> {
     quintess_core::document::write_file_safely(path, &bytes)?;
@@ -2675,7 +2782,10 @@ impl eframe::App for QuintessApp {
         self.receive_rendered_pages(&ctx);
         self.run_scroll_test(&ctx);
         self.receive_watch_events();
-        crate::crash::note_unsaved(self.tabs.iter().filter(|t| t.dirty).map(|t| (t.title.clone(), t.bytes.clone())).collect());
+        self.note_unsaved_for_crash();
+        for message in self.autosave.tick(&self.tabs, self.settings.autosave_seconds, &ctx) {
+            self.info(message);
+        }
         self.run_self_check(&ctx);
         self.intercept_close_request(&ctx);
         if self.self_check.is_none() {

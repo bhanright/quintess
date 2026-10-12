@@ -921,7 +921,7 @@ impl PortfolioDialog {
         match moved {
             Some(RowMove::Remove(index)) => {
                 let name = names[index].clone();
-                tab.apply("Remove from portfolio", |pdf| quintess_core::portfolio::remove_file(pdf, &name).map(|_| ()))?;
+                tab.apply_removing("Remove from portfolio", |pdf| quintess_core::portfolio::remove_file(pdf, &name).map(|_| ()))?;
             }
             Some(RowMove::Up(index)) if index > 0 => {
                 names.swap(index, index - 1);

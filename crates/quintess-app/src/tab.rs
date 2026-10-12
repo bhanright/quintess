@@ -18,6 +18,7 @@ use quintess_core::forms::{FieldInfo, list_fields};
 use quintess_core::metadata::page_labels;
 use quintess_core::text_wrap::WrapOptions;
 use quintess_core::pdfium_render::prelude::PdfDocument;
+use quintess_core::saving::{GrowthLimit, RewriteReason, SaveMethod, SaveRequest, SaveTarget, SavedBytes};
 use quintess_core::{Pdf, SaveSettings};
 
 /// How many earlier versions undo can return to.
@@ -147,6 +148,28 @@ pub struct DocumentTab {
     pub certificate_dictionary: Option<quintess_core::lopdf::Dictionary>,
     /// Whether the certificate it was opened with may change its security.
     pub may_change_security: bool,
+    /// The bytes `path` holds, as read when opened or written by the last
+    /// save: what the next save appends its update to. `None` when the
+    /// document has no file, or its file's bytes aren't what Quintess holds
+    /// (one opened with a certificate keeps the decrypted document).
+    pub bytes_on_disk: Option<Arc<Vec<u8>>>,
+    /// An edit since the last save removed content for good, so the next
+    /// save rewrites the file rather than keep what was removed in an
+    /// earlier version (see `saving.rs`).
+    pub removed_content_since_save: bool,
+    /// Where a document recovered after a crash was saved before: Save asks
+    /// where to save it, starting there.
+    pub suggested_path: Option<PathBuf>,
+}
+
+/// What a save is asked to do, besides where.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SaveChoices {
+    /// Preferences ▸ "Save changes as an incremental update".
+    pub incremental_preferred: bool,
+    /// File ▸ Save as ▸ Save a clean copy: the whole file, without the
+    /// earlier versions updates keep.
+    pub clean_copy: bool,
 }
 
 /// What an edit did to a signed document's signatures.
@@ -236,7 +259,13 @@ impl DocumentTab {
             certificate_protection: None,
             certificate_dictionary: None,
             may_change_security: true,
+            bytes_on_disk: None,
+            removed_content_since_save: false,
+            suggested_path: None,
         };
+        if tab.path.is_some() {
+            tab.bytes_on_disk = Some(tab.bytes.clone());
+        }
         tab.refresh()?;
         tab.original_encryption = tab.load_pdf().ok().and_then(|pdf| pdf.original_encryption());
         Ok(tab)
@@ -328,6 +357,9 @@ impl DocumentTab {
                 new_bytes = updated;
                 self.last_edit_kept_signatures = true;
             }
+        }
+        if removes_content {
+            self.removed_content_since_save = true;
         }
         self.signature_notice = was_signed.then(|| match self.last_edit_kept_signatures {
             true => SignatureNotice::KeptValid,
@@ -595,47 +627,167 @@ impl DocumentTab {
         if self.dirty { format!("{} •", self.title) } else { self.title.clone() }
     }
 
-    pub fn save_to(&mut self, path: PathBuf) -> Result<()> {
-        let bytes = match (&self.certificate_protection, &self.protection) {
-            (Some(settings), _) => {
-                let mut pdf = self.load_pdf()?;
-                pdf.forget_encryption();
-                quintess_core::public_key::protect_with_certificates(&mut pdf, settings)?;
-                // Encrypted objects must be written exactly as encrypted.
-                pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?
-            }
-            (None, Some(settings)) => {
-                let mut pdf = self.load_pdf()?;
-                pdf.forget_encryption();
-                quintess_core::security::protect(&mut pdf, settings)?;
-                // Encrypted objects must be written exactly as encrypted.
-                pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false })?
-            }
-            (None, None) => {
-                let still_encrypted = quintess_core::security::inspect_security(&self.bytes).encrypted;
-                match &self.original_encryption {
-                    // Edits leave the bytes unprotected; protect them as the file was.
-                    // Opened with a certificate: the same people can open it, with the same permissions.
-                    Some(encryption) if !still_encrypted && self.certificate_dictionary.is_some() => {
-                        quintess_core::document::encrypt_for_certificates_as_before(&self.bytes, encryption, self.certificate_dictionary.clone().expect("checked above"))?
-                    }
-                    Some(encryption) if !still_encrypted => quintess_core::document::encrypt_as_before(&self.bytes, encryption)?,
-                    // An unsigned file is written without the earlier versions an
-                    // incremental save may have left in it (they can hold removed
-                    // content); a signed one needs them for its signatures.
-                    _ if !self.signed && !still_encrypted && quintess_core::incremental::revision_count(&self.bytes) > 1 => self.load_pdf()?.to_bytes(&SaveSettings::default())?,
-                    _ => self.bytes.as_ref().clone(),
-                }
-            }
-        };
-        quintess_core::document::write_file_safely(&path, &bytes)?;
+    /// Saves the document to `path` and makes that its file. How the bytes
+    /// are made (an update appended to the file, or the whole file anew) is
+    /// decided by `bytes_to_save`.
+    pub fn save_to(&mut self, path: PathBuf, choices: SaveChoices) -> Result<SaveMethod> {
+        let saved = self.bytes_to_save(&path, choices)?;
+        quintess_core::document::write_file_safely(&path, &saved.bytes)?;
         self.title = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         self.path = Some(path);
         self.dirty = false;
-        Ok(())
+        self.removed_content_since_save = false;
+        self.suggested_path = None;
+        // Share the tab's own bytes when they are what was written (signed
+        // documents, unchanged files), rather than hold a second copy.
+        self.bytes_on_disk = Some(if saved.bytes == *self.bytes { self.bytes.clone() } else { Arc::new(saved.bytes) });
+        Ok(saved.method)
+    }
+
+    /// Writes the whole document to another file without making it the
+    /// document's file (File ▸ Save as ▸ Save a clean copy to a new name).
+    pub fn save_copy_to(&self, path: &std::path::Path) -> Result<()> {
+        let bytes = self.rewritten_bytes()?;
+        quintess_core::document::write_file_safely(path, &bytes)
+    }
+
+    /// The bytes a save to `path` writes, and how they were made.
+    ///
+    /// Protection decides first: adding, changing or removing it, or a file
+    /// protected for certificates, rewrites the file (lopdf appends updates
+    /// only to password-protected files, encrypting them with the file's
+    /// own key). A signed document's bytes already carry its edits as
+    /// updates (see `replace_bytes_as`), so they are written as they are;
+    /// making another update of them would break a signature added since.
+    /// Everything else goes to `saving::prepare_save`, which appends an
+    /// update to the file unless content was removed, the target is
+    /// another file, a clean copy was asked for, the preference is off, or
+    /// the file has grown too much.
+    pub fn bytes_to_save(&self, path: &std::path::Path, choices: SaveChoices) -> Result<SavedBytes> {
+        let bytes_on_disk = self.bytes_on_disk.as_deref().map(Vec::as_slice).filter(|_| self.path.as_deref() == Some(path));
+        let rewrite = |reason| -> Result<SavedBytes> { Ok(SavedBytes { bytes: self.rewritten_bytes()?, method: SaveMethod::Rewritten(reason) }) };
+        let file_was_protected = bytes_on_disk.is_some_and(|bytes| quintess_core::security::inspect_security(bytes).encrypted);
+        let protection_changes = self.protection.is_some() || self.certificate_protection.is_some() || (bytes_on_disk.is_some() && file_was_protected != self.original_encryption.is_some());
+        if protection_changes {
+            return rewrite(RewriteReason::ProtectionChanged);
+        }
+        if self.certificate_dictionary.is_some() {
+            return rewrite(RewriteReason::CertificateProtected);
+        }
+        if self.signed && !choices.clean_copy {
+            return self.signed_bytes_to_save(bytes_on_disk);
+        }
+        let request = SaveRequest {
+            current: &self.bytes,
+            password: self.password.as_deref(),
+            target: match bytes_on_disk {
+                Some(bytes_on_disk) => SaveTarget::SameFile { bytes_on_disk },
+                None => SaveTarget::OtherFile,
+            },
+            incremental_preferred: choices.incremental_preferred,
+            clean_copy: choices.clean_copy,
+            removed_content: self.removed_content_since_save,
+            growth_limit: GrowthLimit::default(),
+        };
+        quintess_core::saving::prepare_save(&request, || self.rewritten_bytes())
+    }
+
+    /// A signed document is written as its edits left it: they were added
+    /// as updates after the signed bytes, or (removal edits, or edits that
+    /// couldn't be updates) rewrote it at the time, with the person told.
+    /// Only a password-protected file whose edits left it unprotected in
+    /// memory is encrypted again, which rewrites it.
+    fn signed_bytes_to_save(&self, bytes_on_disk: Option<&[u8]>) -> Result<SavedBytes> {
+        let still_protected = quintess_core::security::inspect_security(&self.bytes).encrypted;
+        if let (Some(encryption), false) = (&self.original_encryption, still_protected) {
+            let bytes = quintess_core::document::encrypt_as_before(&self.bytes, encryption)?;
+            return Ok(SavedBytes { bytes, method: SaveMethod::Rewritten(RewriteReason::ProtectionChanged) });
+        }
+        let method = match bytes_on_disk {
+            Some(on_disk) if on_disk == self.bytes.as_slice() => SaveMethod::Unchanged,
+            Some(on_disk) if is_incremental_update_of(on_disk, &self.bytes) => SaveMethod::AppendedUpdate,
+            Some(_) if self.removed_content_since_save => SaveMethod::Rewritten(RewriteReason::RemovedContent),
+            Some(_) => SaveMethod::Rewritten(RewriteReason::SignedDocumentRewrittenByAnEdit),
+            None => SaveMethod::Rewritten(RewriteReason::OtherFile),
+        };
+        Ok(SavedBytes { bytes: self.bytes.as_ref().clone(), method })
+    }
+
+    /// The whole document as one new file, protected as it will be when
+    /// saved: with the protection chosen in this session, or as the file
+    /// was (same key, passwords and permissions; the same certificates).
+    /// Earlier versions kept by incremental updates are left out. Also what
+    /// autosave writes for a protected document, so its recovery copy is
+    /// never left unprotected on disk.
+    pub fn rewritten_bytes(&self) -> Result<Vec<u8>> {
+        let mut pdf = self.load_pdf()?;
+        rewrite_protected(&mut pdf, &self.protection_to_apply())
+    }
+
+    /// The protection a save puts on the document, as data that can go to
+    /// another thread (autosave encrypts there).
+    pub fn protection_to_apply(&self) -> ProtectionToApply {
+        match (&self.certificate_protection, &self.protection) {
+            (Some(settings), _) => ProtectionToApply::Certificates(settings.clone()),
+            (None, Some(settings)) => ProtectionToApply::Password(settings.clone()),
+            (None, None) => match (&self.original_encryption, &self.certificate_dictionary) {
+                (Some(encryption), Some(dictionary)) => ProtectionToApply::AsBeforeForCertificates(encryption.clone(), dictionary.clone()),
+                (Some(encryption), None) => ProtectionToApply::AsBefore(encryption.clone()),
+                (None, _) => ProtectionToApply::None,
+            },
+        }
+    }
+
+    /// Whether a save protects the document (so autosave must too).
+    pub fn will_be_protected(&self) -> bool {
+        !matches!(self.protection_to_apply(), ProtectionToApply::None)
     }
 }
 
+/// How a whole new file is protected when it is written.
+#[derive(Clone)]
+pub enum ProtectionToApply {
+    None,
+    /// Password protection chosen in this session.
+    Password(quintess_core::security::ProtectionSettings),
+    /// Certificate protection chosen in this session.
+    Certificates(quintess_core::public_key::CertificateProtection),
+    /// As the file was when opened: the same key, passwords and permissions.
+    AsBefore(quintess_core::lopdf::EncryptionState),
+    /// As the file was when opened with a certificate: the same recipients.
+    AsBeforeForCertificates(quintess_core::lopdf::EncryptionState, quintess_core::lopdf::Dictionary),
+}
+
+/// Writes `pdf` as one new file with `protection` applied. A free function
+/// so autosave can run it on its own thread with a document loaded there.
+pub fn rewrite_protected(pdf: &mut Pdf, protection: &ProtectionToApply) -> Result<Vec<u8>> {
+    // Encrypted objects must be written exactly as encrypted.
+    let as_encrypted = SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false };
+    match protection {
+        ProtectionToApply::Certificates(settings) => {
+            pdf.forget_encryption();
+            quintess_core::public_key::protect_with_certificates(pdf, settings)?;
+            pdf.to_bytes(&as_encrypted)
+        }
+        ProtectionToApply::Password(settings) => {
+            pdf.forget_encryption();
+            quintess_core::security::protect(pdf, settings)?;
+            pdf.to_bytes(&as_encrypted)
+        }
+        ProtectionToApply::AsBefore(encryption) => {
+            pdf.forget_encryption();
+            quintess_core::document::encrypt_as_before(&pdf.to_bytes(&SaveSettings::default())?, encryption)
+        }
+        ProtectionToApply::AsBeforeForCertificates(encryption, dictionary) => {
+            pdf.forget_encryption();
+            quintess_core::document::encrypt_for_certificates_as_before(&pdf.to_bytes(&SaveSettings::default())?, encryption, dictionary.clone())
+        }
+        ProtectionToApply::None => {
+            pdf.forget_encryption();
+            pdf.to_bytes(&SaveSettings::default())
+        }
+    }
+}
 /// Whether `new` keeps `old` byte for byte and only adds to its end, as an
 /// incremental update (such as a new signature) does.
 pub fn is_incremental_update_of(old: &[u8], new: &[u8]) -> bool {
@@ -687,6 +839,139 @@ mod tests {
         assert_eq!(tab.measuring_scale(0, (300.0, 300.0), &chosen).label(), "1 in = 4 ft");
         assert_eq!(tab.measuring_scale(0, (300.0, 300.0), &chosen).label(), "1 in = 4 ft", "from the cache too");
         assert_eq!(tab.measuring_scale(0, (10.0, 10.0), &chosen).label(), "1 in = 10 ft", "outside the drawing");
+    }
+
+    fn temporary_folder(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("quintess-tab-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    const INCREMENTAL: SaveChoices = SaveChoices { incremental_preferred: true, clean_copy: false };
+
+    fn opened_from_file(folder: &std::path::Path, bytes: Vec<u8>, password: Option<&str>) -> (DocumentTab, PathBuf) {
+        let path = folder.join("document.pdf");
+        std::fs::write(&path, &bytes).unwrap();
+        (DocumentTab::open(1, Some(path.clone()), bytes, password.map(String::from)).unwrap(), path)
+    }
+
+    fn sample() -> Vec<u8> {
+        text_to_pdf("Payroll for October.\nEmployee 4417 earns a secret amount.", &TextPageSettings::default()).unwrap().to_bytes(&SaveSettings::default()).unwrap()
+    }
+
+    #[test]
+    fn saving_an_edit_appends_an_update_to_the_file() {
+        let folder = temporary_folder("append");
+        let original = sample();
+        let (mut tab, path) = opened_from_file(&folder, original.clone(), None);
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.save_to(path.clone(), INCREMENTAL).unwrap(), SaveMethod::AppendedUpdate);
+        let written = std::fs::read(&path).unwrap();
+        assert!(written.starts_with(&original));
+        assert!(!tab.dirty);
+        // The next save appends to what the first one wrote.
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.save_to(path.clone(), INCREMENTAL).unwrap(), SaveMethod::AppendedUpdate);
+        let again = std::fs::read(&path).unwrap();
+        assert!(again.starts_with(&written));
+        assert_eq!(quintess_core::incremental::revision_count(&again), 3);
+        let reread = Pdf::from_bytes(&again, None).unwrap();
+        assert_eq!(reread.page_rotation(reread.page_id(1).unwrap()).unwrap(), 180);
+        // With the preference off, the same save writes the file anew.
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        let off = SaveChoices { incremental_preferred: false, clean_copy: false };
+        assert_eq!(tab.save_to(path.clone(), off).unwrap(), SaveMethod::Rewritten(RewriteReason::IncrementalSavingOff));
+        assert_eq!(quintess_core::incremental::revision_count(&std::fs::read(&path).unwrap()), 1);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_removal_edit_makes_the_next_save_rewrite_the_file() {
+        let folder = temporary_folder("removal");
+        let original = sample();
+        let (mut tab, path) = opened_from_file(&folder, original.clone(), None);
+        tab.apply("Add a note", |pdf| quintess_core::annotations::add_annotation(pdf, 1, &quintess_core::annotations::NewAnnotation::new(quintess_core::annotations::AnnotationKind::Note { x: 300.0, y: 300.0 })).map(|_| ())).unwrap();
+        tab.save_to(path.clone(), INCREMENTAL).unwrap();
+        tab.apply_removing("Remove metadata", quintess_core::metadata::strip_metadata).unwrap();
+        assert!(tab.removed_content_since_save);
+        // Even undone and redone, the flag stays until the next save.
+        tab.undo().unwrap();
+        tab.redo().unwrap();
+        assert_eq!(tab.save_to(path.clone(), INCREMENTAL).unwrap(), SaveMethod::Rewritten(RewriteReason::RemovedContent));
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(quintess_core::incremental::revision_count(&written), 1);
+        assert!(!tab.removed_content_since_save, "cleared once saved");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn save_as_to_another_file_writes_it_clean_and_moves_the_document_there() {
+        let folder = temporary_folder("save-as");
+        let (mut tab, path) = opened_from_file(&folder, sample(), None);
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        tab.save_to(path.clone(), INCREMENTAL).unwrap();
+        let other = folder.join("copy.pdf");
+        assert_eq!(tab.save_to(other.clone(), INCREMENTAL).unwrap(), SaveMethod::Rewritten(RewriteReason::OtherFile));
+        assert_eq!(quintess_core::incremental::revision_count(&std::fs::read(&other).unwrap()), 1);
+        assert_eq!(tab.path.as_ref(), Some(&other));
+        // Saving there again appends to the copy.
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.save_to(other.clone(), INCREMENTAL).unwrap(), SaveMethod::AppendedUpdate);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_signed_document_saves_its_edits_after_the_signed_bytes() {
+        let folder = temporary_folder("signed");
+        let signed = signed_once();
+        let (mut tab, path) = opened_from_file(&folder, signed.clone(), None);
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.save_to(path.clone(), INCREMENTAL).unwrap(), SaveMethod::AppendedUpdate);
+        let written = std::fs::read(&path).unwrap();
+        assert!(written.starts_with(&signed));
+        assert!(verify(&written).unwrap()[0].intact);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_password_protected_document_stays_protected_through_saves() {
+        use quintess_core::security::{ProtectionSettings, protect};
+        let folder = temporary_folder("protected");
+        let mut pdf = Pdf::from_bytes(&sample(), None).unwrap();
+        protect(&mut pdf, &ProtectionSettings { user_password: "pw".into(), owner_password: "owner".into(), ..Default::default() }).unwrap();
+        let protected = pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false }).unwrap();
+        let (mut tab, path) = opened_from_file(&folder, protected.clone(), Some("pw"));
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.save_to(path.clone(), INCREMENTAL).unwrap(), SaveMethod::AppendedUpdate);
+        let written = std::fs::read(&path).unwrap();
+        assert!(written.starts_with(&protected));
+        assert!(Pdf::from_bytes(&written, None).is_err());
+        assert!(Pdf::from_bytes(&written, Some("pw")).is_ok());
+        // Taking the protection off rewrites the file without it.
+        tab.original_encryption = None;
+        tab.apply("Remove protection", |_| Ok(())).unwrap();
+        assert_eq!(tab.save_to(path.clone(), INCREMENTAL).unwrap(), SaveMethod::Rewritten(RewriteReason::ProtectionChanged));
+        assert!(Pdf::from_bytes(&std::fs::read(&path).unwrap(), None).is_ok());
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// What autosave writes for a protected document is encrypted, never
+    /// the decrypted bytes the tab works on.
+    #[test]
+    fn rewritten_bytes_of_a_protected_document_stay_protected() {
+        use quintess_core::security::{ProtectionSettings, protect};
+        let mut pdf = Pdf::from_bytes(&sample(), None).unwrap();
+        protect(&mut pdf, &ProtectionSettings { user_password: "pw".into(), owner_password: "owner".into(), ..Default::default() }).unwrap();
+        let protected = pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false }).unwrap();
+        let mut tab = DocumentTab::open(1, None, protected, Some("pw".into())).unwrap();
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert!(!quintess_core::security::inspect_security(&tab.bytes).encrypted, "the tab works on decrypted bytes");
+        assert!(tab.will_be_protected());
+        let copy = tab.rewritten_bytes().unwrap();
+        assert!(quintess_core::security::inspect_security(&copy).encrypted);
+        assert!(Pdf::from_bytes(&copy, None).is_err());
+        assert_eq!(Pdf::from_bytes(&copy, Some("pw")).unwrap().page_count(), 1);
     }
 
     #[test]

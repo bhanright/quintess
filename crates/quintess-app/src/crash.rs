@@ -1,66 +1,83 @@
 //! What happens if the app hits a bug it can't recover from: unsaved
-//! documents are written to a "Recovered" folder, the details go to a crash
-//! log, and a message says where both are, rather than the window simply
-//! vanishing.
+//! documents are written to the data folder's "Recovered" folder as
+//! recovery copies (the same kind autosave writes, see `app/autosave.rs`),
+//! the details go to a crash log, and a message says where both are,
+//! rather than the window simply vanishing. The next start offers the
+//! copies.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Unsaved documents (title and bytes), kept current by the app each frame
-/// so a crash can still write them out.
-static UNSAVED: Mutex<Vec<(String, Arc<Vec<u8>>)>> = Mutex::new(Vec::new());
+use quintess_core::recovery::{RecoveryEntry, RecoveryStore};
+
+/// A document with unsaved changes, as the crash handler needs it.
+pub struct UnsavedDocument {
+    /// The name of its recovery copy, shared with autosave so a crash
+    /// replaces the autosaved copy rather than adding a second one.
+    pub key: String,
+    pub session: String,
+    pub title: String,
+    pub original_path: Option<PathBuf>,
+    /// The bytes to write, or `None` for a protected document: its last
+    /// autosaved copy (encrypted) is what stays, because its plain bytes
+    /// must never reach the disk.
+    pub plain_bytes: Option<Arc<Vec<u8>>>,
+}
+
+/// Unsaved documents, kept current by the app each frame so a crash can
+/// still write them out.
+static UNSAVED: Mutex<Vec<UnsavedDocument>> = Mutex::new(Vec::new());
+
+/// Set once the handler has run, so a clean-up on the way out doesn't
+/// remove the copies it wrote (see `QuintessApp`'s `Drop`).
+static CRASHED: AtomicBool = AtomicBool::new(false);
 
 /// Records which documents have unsaved changes.
-pub fn note_unsaved(documents: Vec<(String, Arc<Vec<u8>>)>) {
+pub fn note_unsaved(documents: Vec<UnsavedDocument>) {
     if let Ok(mut unsaved) = UNSAVED.try_lock() {
         *unsaved = documents;
     }
 }
 
-/// `%LOCALAPPDATA%\Quintess` on Windows, `~/.local/share/quintess` on Linux.
-fn data_folder() -> PathBuf {
-    quintess_core::system::data_folder()
+pub fn has_crashed() -> bool {
+    CRASHED.load(Ordering::SeqCst)
 }
 
 pub fn install_handler() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        CRASHED.store(true, Ordering::SeqCst);
         default_hook(info);
-        let folder = data_folder();
+        let folder = quintess_core::system::data_folder();
         let _ = std::fs::create_dir_all(&folder);
         // Save unsaved work first, in case anything below fails too.
-        let mut recovered = Vec::new();
+        let store = RecoveryStore::standard();
+        let (mut recovered, mut protected_kept) = (0, 0);
         if let Ok(unsaved) = UNSAVED.try_lock() {
-            let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S");
-            let recovery = folder.join("Recovered");
-            let _ = std::fs::create_dir_all(&recovery);
-            for (title, bytes) in unsaved.iter() {
-                let stem = title.trim_end_matches(".pdf").replace(|c: char| r#"\/:*?"<>|"#.contains(c), "-");
-                let path = recovery.join(format!("{stem} (recovered {stamp}).pdf"));
-                if std::fs::write(&path, bytes.as_slice()).is_ok() {
-                    recovered.push(path);
+            for document in unsaved.iter() {
+                match &document.plain_bytes {
+                    Some(bytes) => {
+                        let entry = RecoveryEntry { key: document.key.clone(), session: document.session.clone(), title: document.title.clone(), original_path: document.original_path.clone(), written_at: chrono::Local::now().to_rfc3339(), protected: false };
+                        if store.write(&entry, bytes).is_ok() {
+                            recovered += 1;
+                        }
+                    }
+                    None if store.pdf_path(&document.key).exists() => protected_kept += 1,
+                    None => {}
                 }
             }
         }
         let log = folder.join("crash.log");
-        let details = format!(
-            "Quintess {} crashed at {}
-{info}
-
-{}
-",
-            env!("CARGO_PKG_VERSION"),
-            chrono::Local::now().to_rfc3339(),
-            std::backtrace::Backtrace::force_capture()
-        );
+        let details = format!("Quintess {} crashed at {}\n{info}\n\n{}\n", env!("CARGO_PKG_VERSION"), chrono::Local::now().to_rfc3339(), std::backtrace::Backtrace::force_capture());
         let _ = std::fs::write(&log, details);
-        let mut message = format!("Quintess ran into a problem it couldn't recover from and has to close.
-
-Details were saved to {}.", log.display());
-        if !recovered.is_empty() {
-            message.push_str(&format!("
-
-Your unsaved documents were saved to {}.", folder.join("Recovered").display()));
+        let mut message = format!("Quintess ran into a problem it couldn't recover from and has to close.\n\nDetails were saved to {}.", log.display());
+        if recovered + protected_kept > 0 {
+            message.push_str(&format!("\n\nYour unsaved documents were kept in {}. Quintess offers to open them when it next starts.", store.folder().display()));
+        }
+        if protected_kept > 0 {
+            message.push_str("\n\nPassword-protected documents are kept as of their last autosave, still protected.");
         }
         // Unattended self-check runs have nobody to read a message.
         if std::env::var_os("QUINTESS_SCREENSHOT").is_some() {
