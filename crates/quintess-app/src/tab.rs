@@ -3,6 +3,13 @@
 //! The saved bytes are the single source of truth. Every edit loads them
 //! into the editable model, changes it, writes new bytes and pushes the old
 //! ones onto the undo stack, so undo and redo are exact.
+//!
+//! A file the editable model can't read but PDFium can is opened for
+//! reading only (`DocumentTab::read_only`): pages, text, links, bookmarks
+//! and properties come from PDFium, and every path that would change the
+//! bytes is refused with [`OpenForReadingOnly`] (`load_pdf` and
+//! `replace_bytes_as`, which every edit goes through). The app turns that
+//! state into disabled commands and tools.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -23,6 +30,29 @@ use quintess_core::{Pdf, SaveSettings};
 
 /// How many earlier versions undo can return to.
 const UNDO_LIMIT: usize = 60;
+
+/// The error every editing path gets for a document open for reading only.
+/// The app checks for it (`is_read_only_refusal`) to tell it apart from a
+/// failed edit.
+#[derive(Debug)]
+pub struct OpenForReadingOnly;
+
+impl std::fmt::Display for OpenForReadingOnly {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("This document is open for reading only: the file is damaged in a way Quintess can't edit, so it can't be changed. Save as still saves an exact copy, and Try repairing (above the page) can make an editable copy.")
+    }
+}
+
+impl std::error::Error for OpenForReadingOnly {}
+
+/// The hover text of commands and tools grayed out on a document open for
+/// reading only.
+pub const UNAVAILABLE_WHILE_READ_ONLY: &str = "Not available: this file is open for reading only, because it is damaged in a way Quintess can't edit. Try repairing (above the page) can make an editable copy.";
+
+/// Whether an error is a refusal to change a document open for reading only.
+pub fn is_read_only_refusal(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<OpenForReadingOnly>().is_some()
+}
 
 /// Where a page sits in its own coordinate space and how it is shown.
 #[derive(Clone, Copy, Debug)]
@@ -101,6 +131,10 @@ pub struct DocumentTab {
     /// The password protection the file had when opened (key, passwords and
     /// permissions), put back when it is saved unless taken off.
     pub original_encryption: Option<quintess_core::lopdf::EncryptionState>,
+    /// Set when the editable model couldn't read the file but PDFium could:
+    /// the editable model's error, shown under the banner's Details. The
+    /// document can be viewed, searched and printed but never changed.
+    read_only: Option<String>,
     /// PDFium's view of the current bytes, for text and search on this thread.
     document: Option<PdfDocument<'static>>,
     text_cache: RefCell<HashMap<usize, Rc<PageText>>>,
@@ -229,6 +263,7 @@ impl DocumentTab {
             last_edit_kept_signatures: false,
             signature_notice: None,
             original_encryption: None,
+            read_only: None,
             document: None,
             text_cache: RefCell::new(HashMap::new()),
             line_cache: RefCell::new(HashMap::new()),
@@ -266,19 +301,88 @@ impl DocumentTab {
         if tab.path.is_some() {
             tab.bytes_on_disk = Some(tab.bytes.clone());
         }
-        tab.refresh()?;
-        tab.original_encryption = tab.load_pdf().ok().and_then(|pdf| pdf.original_encryption());
+        match Pdf::from_bytes(&tab.bytes, tab.password.as_deref()) {
+            Ok(pdf) => {
+                tab.original_encryption = pdf.original_encryption();
+                tab.refresh_from(pdf)?;
+                // Some damaged files the editable model reads wrongly, finding
+                // fewer pages (often none) than PDFium draws. Edits name pages
+                // by the model's count and show them by PDFium's, so they
+                // could land on the wrong page: such a file opens for reading only too.
+                let pages_drawn = tab.document.as_ref().map_or(0, |document| document.pages().len() as usize);
+                if pages_drawn > 0 && pages_drawn != tab.pages.len() {
+                    if let Some(document) = tab.document.take() {
+                        let pages_read = tab.pages.len();
+                        tab.read_only = Some(format!("Quintess's editor reads {pages_read} page{} in this file where PDFium, which draws the pages, reads {pages_drawn}, so an edit could change the wrong page.", if pages_read == 1 { "" } else { "s" }));
+                        tab.original_encryption = None;
+                        tab.refresh_read_only(document);
+                    }
+                }
+            }
+            Err(editor_error) => {
+                // PDFium reads many damaged files the editable model can't;
+                // then the document opens for reading only rather than not at all.
+                let document = engine::open_document(tab.bytes.as_ref().clone(), tab.password.as_deref()).map_err(|viewer_error| anyhow::anyhow!("{editor_error:#}. {viewer_error:#}"))?;
+                tab.read_only = Some(format!("{editor_error:#}"));
+                tab.refresh_read_only(document);
+            }
+        }
         Ok(tab)
     }
 
-    /// The editable model of the current bytes.
+    /// Whether the document is open for reading only (see `read_only`).
+    pub fn is_read_only(&self) -> bool {
+        self.read_only.is_some()
+    }
+
+    /// Why the document is open for reading only: the editable model's own
+    /// error message, for the banner's Details.
+    pub fn read_only_reason(&self) -> Option<&str> {
+        self.read_only.as_deref()
+    }
+
+    /// Fails with [`OpenForReadingOnly`] when the document can't be changed.
+    pub fn ensure_editable(&self) -> Result<()> {
+        match self.read_only {
+            Some(_) => Err(OpenForReadingOnly.into()),
+            None => Ok(()),
+        }
+    }
+
+    /// The editable model of the current bytes. A document open for reading
+    /// only has none: this fails with [`OpenForReadingOnly`] without trying
+    /// again (its bytes haven't changed since the model failed on them).
     pub fn load_pdf(&self) -> Result<Pdf> {
+        self.ensure_editable()?;
         Pdf::from_bytes(&self.bytes, self.password.as_deref())
+    }
+
+    /// The document's properties, from the editable model or, for a
+    /// document open for reading only, from PDFium.
+    pub fn document_info(&self) -> Result<quintess_core::metadata::DocumentInfo> {
+        match (&self.read_only, &self.document) {
+            (Some(_), Some(document)) => Ok(engine::document_info(document)),
+            (Some(_), None) => Err(anyhow::anyhow!("the document is not loaded")),
+            (None, _) => Ok(quintess_core::metadata::read_info(&self.load_pdf()?)),
+        }
     }
 
     /// Re-reads everything derived from the bytes after they change.
     fn refresh(&mut self) -> Result<()> {
+        if self.is_read_only() {
+            // A document open for reading only never takes new bytes, so this
+            // only reloads it, which PDFium does alone.
+            let document = engine::open_document(self.bytes.as_ref().clone(), self.password.as_deref())?;
+            self.refresh_read_only(document);
+            return Ok(());
+        }
         let pdf = self.load_pdf()?;
+        self.refresh_from(pdf)
+    }
+
+    /// Reads pages, labels, bookmarks, comments, fields and attachments from
+    /// the editable model, and opens the bytes in PDFium.
+    fn refresh_from(&mut self, pdf: Pdf) -> Result<()> {
         self.pages = pdf
             .page_ids()
             .into_iter()
@@ -298,6 +402,54 @@ impl DocumentTab {
         self.signed = self.fields.iter().any(|f| f.field_type == quintess_core::forms::FieldType::Signature && !f.value.is_empty());
         self.document = None;
         self.document = Some(engine::open_document(self.bytes.as_ref().clone(), self.password.as_deref())?);
+        self.forget_derived();
+        Ok(())
+    }
+
+    /// Reads what PDFium can tell about a document the editable model can't
+    /// read: page boxes, labels, bookmarks and links. Comments, form fields
+    /// and attachments are read through the editable model, so it shows none.
+    fn refresh_read_only(&mut self, document: PdfDocument<'static>) {
+        self.pages = engine::page_boxes(&document)
+            .into_iter()
+            .map(|page| {
+                let (width, height) = (page.bounds[2] - page.bounds[0], page.bounds[3] - page.bounds[1]);
+                let display_size = if page.rotation % 180 == 0 { (width, height) } else { (height, width) };
+                PageGeometry { bounds: page.bounds, rotation: page.rotation, display_size }
+            })
+            .collect();
+        self.labels = engine::page_labels(&document);
+        self.bookmarks = engine::outline(&document);
+        // Links are kept as the editable model lists them, so clicking one in
+        // the viewer works the same. Nothing selects links, so they share an id.
+        self.annotations = (0..self.pages.len())
+            .flat_map(|page_index| engine::page_links(&document, page_index).unwrap_or_default().into_iter().map(move |link| (page_index, link)))
+            .map(|(page_index, link)| AnnotationSummary {
+                page: page_index as u32 + 1,
+                id: (0, 0),
+                subtype: "Link".into(),
+                rect: link.rect,
+                contents: String::new(),
+                author: String::new(),
+                modified: String::new(),
+                color: None,
+                reply_to: None,
+                link_target: Some(match link.target {
+                    engine::LinkTarget::Address(address) => address,
+                    engine::LinkTarget::Page(index) => format!("page {}", index + 1),
+                }),
+                quad_rects: Vec::new(),
+            })
+            .collect();
+        self.fields = Vec::new();
+        self.attachments = Vec::new();
+        self.signed = false;
+        self.document = Some(document);
+        self.forget_derived();
+    }
+
+    /// Clears every cache read from the old bytes, and the pictures of pages.
+    fn forget_derived(&mut self) {
         self.text_cache.borrow_mut().clear();
         self.line_cache.borrow_mut().clear();
         self.paragraph_cache.borrow_mut().clear();
@@ -312,7 +464,6 @@ impl DocumentTab {
         self.pending.clear();
         self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
         self.selection = None;
-        Ok(())
     }
 
     /// Applies an edit as one undoable step.
@@ -344,6 +495,8 @@ impl DocumentTab {
     /// remove content (`removes_content`) rewrite the whole file instead, so
     /// nothing removed survives inside it.
     pub fn replace_bytes_as(&mut self, label: &str, new_bytes: Vec<u8>, removes_content: bool) -> Result<()> {
+        // Every edit, from menus, dialogs or background jobs, comes through here.
+        self.ensure_editable()?;
         let mut new_bytes = new_bytes;
         let was_signed = self.signed;
         self.last_edit_kept_signatures = false;
@@ -664,6 +817,14 @@ impl DocumentTab {
     /// another file, a clean copy was asked for, the preference is off, or
     /// the file has grown too much.
     pub fn bytes_to_save(&self, path: &std::path::Path, choices: SaveChoices) -> Result<SavedBytes> {
+        if self.is_read_only() {
+            // Nothing can have changed, and the editable model can't write the
+            // file anew: Save as writes an exact copy of the bytes.
+            if choices.clean_copy {
+                return Err(OpenForReadingOnly.into());
+            }
+            return Ok(SavedBytes { bytes: self.bytes.as_ref().clone(), method: SaveMethod::Unchanged });
+        }
         let bytes_on_disk = self.bytes_on_disk.as_deref().map(Vec::as_slice).filter(|_| self.path.as_deref() == Some(path));
         let rewrite = |reason| -> Result<SavedBytes> { Ok(SavedBytes { bytes: self.rewritten_bytes()?, method: SaveMethod::Rewritten(reason) }) };
         let file_was_protected = bytes_on_disk.is_some_and(|bytes| quintess_core::security::inspect_security(bytes).encrypted);
@@ -972,6 +1133,145 @@ mod tests {
         assert!(quintess_core::security::inspect_security(&copy).encrypted);
         assert!(Pdf::from_bytes(&copy, None).is_err());
         assert_eq!(Pdf::from_bytes(&copy, Some("pw")).unwrap().page_count(), 1);
+    }
+
+    /// A file the editable model refuses but PDFium reads: AES-256 with an
+    /// empty open password whose encryption dictionary lost its owner key
+    /// (/OE). The editable model wants /OE for every revision 6 file;
+    /// PDFium needs only the user key to open it.
+    fn refused_by_the_editor() -> Vec<u8> {
+        use quintess_core::security::{ProtectionSettings, protect};
+        let mut pdf = text_to_pdf("Damaged but readable.\nThe second line.", &TextPageSettings::default()).unwrap();
+        protect(&mut pdf, &ProtectionSettings { user_password: String::new(), owner_password: "owner".into(), ..Default::default() }).unwrap();
+        let protected = pdf.to_bytes(&SaveSettings { compress_streams: false, use_object_streams: false, remove_unused_objects: false }).unwrap();
+        let at = protected.windows(3).position(|window| window == b"/OE").expect("the encryption dictionary has an owner key");
+        let mut damaged = protected;
+        damaged[at..at + 3].copy_from_slice(b"/XO");
+        assert!(Pdf::from_bytes(&damaged, None).is_err(), "this sample stopped being refused by the editable model; read-only tests need a new one");
+        assert!(engine::open_document(damaged.clone(), None).is_ok(), "PDFium must read the sample");
+        damaged
+    }
+
+    /// A file the editable model reads wrongly: the page tree's /Kids array
+    /// lacks its closing bracket, so the model finds no pages, while PDFium
+    /// shows the page. It has a bookmark and a web link for PDFium to find.
+    fn misread_by_the_editor() -> Vec<u8> {
+        let content = b"BT /F1 24 Tf 72 700 Td (Damaged but readable) Tj ET";
+        let objects: Vec<Vec<u8>> = vec![
+            b"<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [8 0 R] >>".to_vec(),
+            [format!("<< /Length {} >>\nstream\n", content.len()).into_bytes(), content.to_vec(), b"\nendstream".to_vec()].concat(),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+            b"<< /Type /Outlines /First 7 0 R /Last 7 0 R /Count 1 >>".to_vec(),
+            b"<< /Title (Chapter one) /Parent 6 0 R /Dest [3 0 R /Fit] >>".to_vec(),
+            b"<< /Type /Annot /Subtype /Link /Rect [72 600 300 640] /Border [0 0 0] /A << /S /URI /URI (https://example.com/) >> >>".to_vec(),
+        ];
+        let mut file = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, body) in objects.iter().enumerate() {
+            offsets.push(file.len());
+            file.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+            file.extend_from_slice(body);
+            file.extend_from_slice(b"\nendobj\n");
+        }
+        let cross_reference = file.len();
+        file.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in offsets {
+            file.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        file.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{cross_reference}\n%%EOF\n", objects.len() + 1).as_bytes());
+        let read = Pdf::from_bytes(&file, None).map(|pdf| pdf.page_count());
+        assert!(!matches!(read, Ok(1)), "this sample stopped being misread by the editable model; read-only tests need a new one");
+        file
+    }
+
+    #[test]
+    fn a_file_only_pdfium_reads_opens_for_reading_only() {
+        let damaged = refused_by_the_editor();
+        let mut tab = DocumentTab::open(1, None, damaged.clone(), None).unwrap();
+        assert!(tab.is_read_only());
+        assert!(tab.read_only_reason().is_some_and(|reason| reason.contains("encrypted")), "{:?}", tab.read_only_reason());
+        assert_eq!(tab.pages.len(), 1);
+        assert_eq!(tab.labels, vec!["1".to_string()]);
+        // Text, selection and search come from PDFium.
+        let text = tab.page_text(0).expect("PDFium reads the page's text");
+        assert!(text.as_string().0.contains("Damaged but readable"), "{}", text.as_string().0);
+        tab.selection = Some(TextSelection { page_index: 0, anchor: 0, focus: 6 });
+        assert_eq!(tab.selected_text().as_deref(), Some("Damaged"));
+        tab.search.query = "second line".into();
+        tab.run_search();
+        assert_eq!(tab.search.results.len(), 1, "{}", tab.search.message);
+        // The page renders, with dark text on it.
+        let picture = engine::render_page(tab.pdfium_document().unwrap(), 0, &engine::RenderOptions { dpi: 36.0, ..Default::default() }).unwrap();
+        assert!(picture.pixels().any(|pixel| pixel.0[0] < 128), "the page shows its text");
+        assert!(tab.document_info().is_ok());
+        // Every edit is refused the same way, and nothing changes.
+        assert!(is_read_only_refusal(&tab.load_pdf().err().unwrap()));
+        let refused = tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap_err();
+        assert!(is_read_only_refusal(&refused), "{refused:#}");
+        let refused = tab.replace_bytes("Signed", b"%PDF-1.4 not really".to_vec()).unwrap_err();
+        assert!(is_read_only_refusal(&refused), "{refused:#}");
+        assert_eq!(tab.bytes.as_ref(), &damaged);
+        assert_eq!(tab.version, 0);
+        assert!(!tab.dirty);
+        assert!(tab.undo_label().is_none());
+        // The caches that need the editable model come back empty, not broken.
+        assert!(tab.page_objects(0).is_empty());
+        assert!(tab.layers().is_empty());
+        assert!(!tab.tag_tree().exists);
+    }
+
+    #[test]
+    fn save_as_writes_an_exact_copy_of_a_read_only_file() {
+        let folder = temporary_folder("read-only-save-as");
+        let damaged = refused_by_the_editor();
+        let (mut tab, path) = opened_from_file(&folder, damaged.clone(), None);
+        assert!(tab.is_read_only());
+        let clean = SaveChoices { incremental_preferred: true, clean_copy: true };
+        assert!(is_read_only_refusal(&tab.bytes_to_save(&folder.join("clean.pdf"), clean).err().expect("a clean copy needs the editable model")));
+        let copy = folder.join("copy.pdf");
+        assert_eq!(tab.save_to(copy.clone(), INCREMENTAL).unwrap(), SaveMethod::Unchanged);
+        assert_eq!(std::fs::read(&copy).unwrap(), damaged, "an exact copy");
+        assert_eq!(std::fs::read(&path).unwrap(), damaged, "the original is untouched");
+        assert_eq!(tab.path.as_ref(), Some(&copy));
+        assert!(tab.is_read_only());
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_misread_file_opens_for_reading_only_with_its_bookmarks_and_links() {
+        let tab = DocumentTab::open(1, None, misread_by_the_editor(), None).unwrap();
+        assert!(tab.is_read_only());
+        assert!(tab.read_only_reason().is_some_and(|reason| reason.contains("PDFium, which draws the pages, reads 1")), "{:?}", tab.read_only_reason());
+        assert_eq!(tab.pages.len(), 1);
+        assert_eq!(tab.pages[0].bounds, [0.0, 0.0, 612.0, 792.0]);
+        assert_eq!(tab.bookmarks.len(), 1);
+        assert_eq!((tab.bookmarks[0].title.as_str(), tab.bookmarks[0].page), ("Chapter one", 1));
+        let link = tab.annotations.iter().find(|annotation| annotation.subtype == "Link").expect("the link is found");
+        assert_eq!(link.link_target.as_deref(), Some("https://example.com/"));
+        assert_eq!(link.rect, [72.0, 600.0, 300.0, 640.0]);
+        assert!(tab.page_text(0).unwrap().as_string().0.contains("Damaged but readable"));
+    }
+
+    #[test]
+    fn repairing_with_pdfium_makes_an_editable_copy() {
+        let repaired = engine::repair_with_pdfium(misread_by_the_editor(), None).unwrap();
+        assert_eq!(repaired.pages, 1);
+        let mut tab = DocumentTab::open(2, None, repaired.bytes, None).unwrap();
+        assert!(!tab.is_read_only(), "{:?}", tab.read_only_reason());
+        assert!(tab.page_text(0).unwrap().as_string().0.contains("Damaged but readable"));
+        assert_eq!(tab.bookmarks.first().map(|bookmark| bookmark.title.as_str()), Some("Chapter one"));
+        tab.apply("Rotate", |pdf| quintess_core::pages::rotate_pages(pdf, &[1], 90)).unwrap();
+        assert_eq!(tab.pages[0].rotation, 90);
+    }
+
+    /// PDFium keeps a protected file's encryption dictionary as it is, so a
+    /// damaged one stays damaged: repair says so instead of making a copy.
+    #[test]
+    fn repairing_a_file_with_damaged_protection_says_it_cannot() {
+        let error = engine::repair_with_pdfium(refused_by_the_editor(), None).err().expect("no editable copy");
+        assert!(format!("{error:#}").contains("still can't edit its copy"), "{error:#}");
     }
 
     #[test]

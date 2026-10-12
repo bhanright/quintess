@@ -121,11 +121,15 @@ impl QuintessApp {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(4.0);
                 let dirty = self.tabs.get(self.active).map(|t| t.dirty);
+                let read_only = self.active_is_read_only();
                 match dirty {
                     None => {
                         if theme::primary_button(ui, "Open PDF").clicked() {
                             self.menu_open();
                         }
+                    }
+                    Some(_) if read_only => {
+                        ui.label(RichText::new("Read only").color(colors.text_faint)).on_hover_text("This file is damaged in a way Quintess can't edit, so it's open for reading only. File ▸ Save as saves an exact copy.");
                     }
                     Some(true) => {
                         if theme::primary_button(ui, "Save").on_hover_text(super::commands::shortcut_label("Ctrl+S")).clicked() {
@@ -238,8 +242,13 @@ impl QuintessApp {
                             ui.spacing_mut().item_spacing.x = 2.0;
                             self.dock_pages(ui, &colors);
                             divider(ui, &colors);
+                            // Tools that would change a document open for reading
+                            // only stay in place, grayed out, saying why.
+                            let read_only = self.active_is_read_only();
                             for (tool, glyph, fallback) in DOCK_TOOLS {
-                                if theme::icon_button(ui, glyph, fallback, self.tool == tool, tool.label()).clicked() {
+                                let available = !(read_only && tool.changes_document());
+                                let response = ui.add_enabled_ui(available, |ui| theme::icon_button(ui, glyph, fallback, self.tool == tool, tool.label())).inner;
+                                if response.on_disabled_hover_text(format!("{}. {}", tool.label(), crate::tab::UNAVAILABLE_WHILE_READ_ONLY)).clicked() {
                                     self.tool = tool;
                                 }
                             }
@@ -248,9 +257,10 @@ impl QuintessApp {
                             egui::Popup::menu(&more).show(|ui| {
                                 for (tool, glyph, fallback) in MORE_TOOLS {
                                     let label = RichText::new(format!("  {}", tool.label()));
+                                    let available = !(read_only && tool.changes_document());
                                     ui.horizontal(|ui| {
                                         ui.label(theme::icon_text(ui.ctx(), glyph, fallback, 13.0));
-                                        if ui.selectable_label(self.tool == tool, label).clicked() {
+                                        if ui.add_enabled(available, egui::Button::selectable(self.tool == tool, label)).on_disabled_hover_text(crate::tab::UNAVAILABLE_WHILE_READ_ONLY).clicked() {
                                             self.tool = tool;
                                             ui.close();
                                         }
@@ -329,6 +339,9 @@ impl QuintessApp {
                     ui.label(mono(format!("p. {}/{}", tab.current_page + 1, tab.pages.len())));
                     if tab.protection.is_some() {
                         ui.label(theme::icon_text(ui.ctx(), icon::LOCK, "🔒", 11.0).color(colors.text_faint)).on_hover_text("Protected with a password when saved");
+                    }
+                    if tab.is_read_only() {
+                        ui.label(mono("read only".into())).on_hover_text("Open for reading only: Quintess can't edit this file");
                     }
                 }
                 ui.label(mono(self.tool.label().to_lowercase()));

@@ -131,6 +131,15 @@ While a document has unsaved changes, Quintess keeps a recovery copy of it, writ
 
 A password-protected document's copy is protected with the same password, and a document protected for certificates gets a copy for the same certificates: Quintess never writes the unprotected contents to disk. Documents over 200 MB get a copy at most every 5 minutes, and documents over 2 GB get none (the status line says so).
 
+## Damaged files: reading only, and repairing
+
+Quintess shows pages with one engine (PDFium) and edits them with another. Some damaged files can be shown but not edited: the editing engine can't read them, or reads them wrongly (finding fewer pages than there are). Such a file still opens, **for reading only**, with a bar above the page that says so.
+
+- **What works:** every page, zoom, split view and the page organizer for looking, thumbnails, selecting and copying text, searching (and **Search a folder**), reading aloud, printing, going to pages, bookmarks and links the file has, **File ▸ Properties…** (without changes), **File ▸ Export as** (Word, Markdown, web page, Excel, CSV, PowerPoint), **File ▸ Export ▸ Text, Pages as images, Embedded images**, QR codes, comparing and the object inspector.
+- **What doesn't:** anything that changes the document (text, pictures, comments, forms, pages, stamps, protection, signing, redaction, OCR, Save) and the tools that read comments, form fields, attached files, layers or tags. Those commands and tools stay in their places, grayed out; hovering over one says why. **File ▸ Save as ▸ Save as…** still works and writes an exact copy of the file.
+- **Details** in the bar shows what the editing engine reported about the file.
+- **Try repairing** asks PDFium to write the document out again as it understands it, and opens that copy in a new, unsaved tab where everything works. Check the copy against the original: anything PDFium couldn't read is missing from it. If the editing engine still can't read PDFium's copy (for example when the damage is in the file's password protection, which PDFium keeps as it is), Quintess says so and the original stays open for reading. The same repair is **File ▸ Repair by rewriting with PDFium** for any document, and `quintess repair file.pdf` on the command line.
+
 ## Studio and Classic
 
 Quintess has two looks. **Studio** (the default) has a slim header with the menus and a command field, and a floating dock of tools at the bottom of the page. **Classic** has a traditional menu bar and toolbar. Switch in **Edit ▸ Preferences…** under **Look**, with **View ▸ Studio look**, or with **Studio or classic look** in the command palette. Both looks have dark and light modes (**View ▸ Dark interface**). The View menu shows these and the other display toggles (split view, organizing pages, the sidebar, night reading) as checkboxes.
@@ -788,7 +797,9 @@ The `quintess` command does most of what the app does, for scripts and batch wor
 - `quintess qr flyer.pdf`
 - `quintess watch ./Inbox --action stamp.json`
 
-Commands that edit a PDF usually overwrite the input. Use `-o` to save a separate copy, and check each command's `--help`. Set the `QUINTESS_PASSWORD` environment variable to open protected files without typing the password on the command line.
+Commands that edit a PDF usually overwrite the input. Use `-o` to save a separate copy, and check each command's `--help`.
+
+A damaged file that Quintess can show but not edit (see "Damaged files: reading only, and repairing") still works with the commands that only read: `info` (which then shows what PDFium reads, with a note), `text`, `render`, `search`, `images` and `qr`. Editing commands stop with a message saying the file can't be edited. `quintess repair damaged.pdf` writes PDFium's rewritten copy to `damaged-repaired.pdf` (or `-o`), never over the original, and only when Quintess can edit the copy. Set the `QUINTESS_PASSWORD` environment variable to open protected files without typing the password on the command line.
 
 Commands that write many files, `batch` and `form merge`, never replace a file silently: a name already taken gets a number unless you pass `--overwrite` or `--skip-existing`, and `form merge --combined` refuses an existing file without `--overwrite`. For actions with a password step, give `--owner-password` (or set `QUINTESS_OWNER_PASSWORD`, which keeps it off the command line) and optionally `--user-password` (`QUINTESS_USER_PASSWORD`); for an OCR step without installed models, pass `--download-models`. `batch` and `watch` stop before touching any file when one of these is missing.
 

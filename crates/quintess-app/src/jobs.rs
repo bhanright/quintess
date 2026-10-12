@@ -21,6 +21,9 @@ pub enum JobOutcome {
     Signatures(Vec<quintess_core::signatures::SignatureCheck>),
     /// A document made from another kind of file, and what the converter said.
     Converted { title: String, bytes: Vec<u8>, note: String },
+    /// PDFium's rewritten copy of a document, opened as a new unsaved one
+    /// (with the password the original took, which the copy keeps).
+    Repaired { title: String, bytes: Vec<u8>, password: Option<String>, note: String },
     /// Pages from the scanner, made into a PDF; OCR follows if asked for.
     Scanned { bytes: Vec<u8>, pages: usize, recognize_text: bool },
     /// `manual` checks report even when nothing is new.

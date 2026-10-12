@@ -570,7 +570,8 @@ et.rs`): .pfx/.p12
   whose cross-reference table is wrong, misses appended objects, has no
   classic trailer, or whose /Root names the wrong object now open (lopdf's
   rebuild is forced by `Pdf::from_bytes`, 14 more files), since the app
-  can't open a file lopdf can't; an unreadable /Outlines means no bookmarks
+  couldn't open a file lopdf can't (it now opens such files for reading
+  only, see "Reading only and repair"); an unreadable /Outlines means no bookmarks
   instead of an error; pages with an empty visible area render blank instead
   of failing; a file whose AES crypt filter lopdf can't follow (issue7665)
   is refused on saving instead of being written scrambled. Fuzzing then
@@ -604,6 +605,45 @@ et.rs`): .pfx/.p12
   fuzzed files. Corpus fetch, child runner, baseline comparison and mutation
   fuzzer are adapted from PdfCraft (MIT OR Apache-2.0, credited in
   licenses/THIRD-PARTY-NOTICES.txt).
+
+- Reading only and repair (2026-10-12): a file lopdf can't read, or reads
+  with a different page count than PDFium (often zero pages), opens
+  anyway for reading only instead of failing (`DocumentTab::read_only`
+  holds lopdf's error or the page counts; `refresh_read_only` takes page
+  boxes, labels, bookmarks and links from PDFium through new `engine.rs`
+  functions: `page_boxes`, `page_labels`, `outline`, `page_links`,
+  `document_info`, `file_version`). Every edit is refused at the two
+  places all edits pass (`load_pdf`, `replace_bytes_as`) with
+  `OpenForReadingOnly`, which `report` shows as one calm sentence; paths
+  that work on bytes or start jobs refuse first (`refuse_if_read_only`).
+  The UI grays out what can't work, with the reason as hover text:
+  `Command::works_read_only` (`.reads_only()`; everything else that needs
+  a document is disabled, also in the palette, which lists them dimmed),
+  `Tool::changes_document` (dock, "more" tools, Classic toolbar and Tools
+  menu; the active tool falls back to Select), the organizer's page
+  buttons and drag and drop, the export menu's form data and comment
+  summary, bookmark editing, the Comments/Fields/Files/Layers/Tags panels
+  (a note instead) and Properties (shown, not editable). A bar above the
+  page explains it, with Details (lopdf's message) and Try repairing.
+  Save as writes an exact copy (`SaveMethod::Unchanged`); Save says
+  there is nothing to save. The security check (lopdf) calls any file it
+  can't read password-protected, so `open_path` asks PDFium before
+  showing the password dialog, and the password dialog accepts a password
+  PDFium takes. Repair by rewriting with PDFium
+  (`engine::repair_with_pdfium`, `FPDF_SaveAsCopy` via pdfium-render's
+  `save_to_bytes`): the copy is accepted only if lopdf reads it with
+  PDFium's page count, and opens as a new unsaved tab ("<name>
+  (repaired)", File ▸ Repair by rewriting with PDFium, any document).
+  PDFium keeps a protected file's encryption dictionary, so damage there
+  isn't repaired (stripping protection would bypass the owner password).
+  CLI: `info` falls back to PDFium (note on stderr, `read_only` in JSON),
+  `render` counts pages with PDFium, editing commands say the file can't
+  be edited (`READ_ONLY_FILE`), new `repair` command. Tests in `tab.rs`
+  (an AES-256 file missing /OE, which lopdf refuses; a /Kids array
+  missing its bracket, which lopdf reads as no pages) and `cli.rs`;
+  self-check `read-only-details`. Not done: comments, form fields and
+  attachments of a read-only file (lopdf reads those; PDFium could list
+  attachments), and its links open only web addresses and pages.
 
 ## Ideas for next
 

@@ -112,7 +112,8 @@ pub struct QuintessApp {
 /// `confirm-trust` (the question Trust asks), `permissions-password`,
 /// `autosave=seconds` (writes recovery copies after this long instead of
 /// the preference), `recover-open` (opens the first document the recovery
-/// question lists). `crash` waits for `wait` before crashing.
+/// question lists), `read-only-details` (opens Details in the bar shown on a
+/// document open for reading only). `crash` waits for `wait` before crashing.
 struct SelfCheck {
     path: PathBuf,
     frames: u32,
@@ -313,6 +314,12 @@ impl QuintessApp {
                     }
                 }
                 "palette" => self.open_palette_with(value),
+                "read-only-details" => {
+                    // Opens the Details of the read-only banner, as its button does.
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        ctx.data_mut(|data| data.insert_temp(egui::Id::new(("read-only details", tab.id)), true));
+                    }
+                }
                 "help" => self.open_help(value),
                 "update-sample" => {
                     // A made-up release, to check the update window's layout.
@@ -544,11 +551,32 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     fn report<T>(&mut self, result: anyhow::Result<T>) -> Option<T> {
         match result {
             Ok(value) => Some(value),
+            // A refusal reads the same whatever the edit added to it.
+            Err(error) if crate::tab::is_read_only_refusal(&error) => {
+                self.error(crate::tab::OpenForReadingOnly.to_string());
+                None
+            }
             Err(error) => {
                 self.error(format!("{error:#}"));
                 None
             }
         }
+    }
+
+    /// Whether the active document is open for reading only.
+    fn active_is_read_only(&self) -> bool {
+        self.tabs.get(self.active).is_some_and(DocumentTab::is_read_only)
+    }
+
+    /// Refuses, saying why, when the active document is open for reading
+    /// only. For edits that work on the bytes directly or in the background,
+    /// which would otherwise fail later with the editable model's error.
+    fn refuse_if_read_only(&mut self) -> bool {
+        if self.active_is_read_only() {
+            self.error(crate::tab::OpenForReadingOnly.to_string());
+            return true;
+        }
+        false
     }
 
     fn open_path(&mut self, path: PathBuf) {
@@ -562,7 +590,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             self.dialogs.push(Dialog::OpenWithCertificate(Box::new(crate::tool_dialogs::CertificateOpenDialog::new(path, bytes, remembered))));
             return;
         }
-        if report.needs_password_to_open {
+        // The security check reads the file with the editable model, and
+        // takes a file that model can't read for one that needs a password.
+        // PDFium settles it: a damaged file it opens without one opens for
+        // reading only, without asking for a password it doesn't have.
+        if report.needs_password_to_open && !opens_without_password(&bytes) {
             self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: String::new() });
             return;
         }
@@ -607,7 +639,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         self.next_tab_id += 1;
         match DocumentTab::open(id, path.clone(), bytes, password) {
             Ok(mut tab) => {
-                self.info(format!("Opened {} ({} pages)", tab.title, tab.pages.len()));
+                if tab.is_read_only() {
+                    self.info(format!("Opened {} for reading only ({} pages): the file is damaged in a way Quintess can't edit.", tab.title, tab.pages.len()));
+                } else {
+                    self.info(format!("Opened {} ({} pages)", tab.title, tab.pages.len()));
+                }
                 if let Some(message) = path.as_deref().and_then(|path| self.autosave.finish_recovery(path, &mut tab)) {
                     self.info(message);
                 }
@@ -632,6 +668,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn save(&mut self, choose_location: bool) {
+        // Nothing in a document open for reading only can change, so Save
+        // has nothing to write; Save as still writes an exact copy.
+        if !choose_location && self.active_is_read_only() && self.tabs.get(self.active).is_some_and(|tab| tab.path.is_some()) {
+            return self.info("This document is open for reading only, so there is nothing to save. File ▸ Save as ▸ Save as saves an exact copy.");
+        }
         self.save_tab(self.active, choose_location);
     }
 
@@ -647,12 +688,15 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let choices = crate::tab::SaveChoices { incremental_preferred: self.settings.save_incrementally, clean_copy: false };
         let Some(tab) = self.tabs.get_mut(index) else { return false };
         let tab_id = tab.id;
+        let read_only = tab.is_read_only();
         let result = tab.save_to(path.clone(), choices);
         match self.report(result) {
             Some(method) => {
                 self.autosave.forget(tab_id);
                 let mut message = format!("Saved {}", path.display());
-                if let Some(note) = method.note() {
+                if read_only {
+                    message.push_str(", an exact copy of the file. It stays open for reading only.");
+                } else if let Some(note) = method.note() {
                     message.push_str(". ");
                     message.push_str(&note);
                 }
@@ -948,7 +992,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::E) {
             self.stop_reading();
         }
-        if shortcut(Modifiers::NONE, Key::F7) && !self.tabs.is_empty() {
+        if shortcut(Modifiers::NONE, Key::F7) && !self.tabs.is_empty() && !self.refuse_if_read_only() {
             self.start_spell_check(ctx);
         }
         if shortcut(Modifiers::COMMAND, Key::K) || shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::P) {
@@ -970,7 +1014,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         if shortcut(Modifiers::COMMAND, Key::P) {
             self.open_print_dialog();
         }
-        if shortcut(Modifiers::COMMAND, Key::H) && !self.tabs.is_empty() {
+        if shortcut(Modifiers::COMMAND, Key::H) && !self.tabs.is_empty() && !self.refuse_if_read_only() {
             self.dialogs.push(Dialog::FindReplace { find: String::new(), replace: String::new(), use_regex: false, match_case: false });
         }
         if shortcut(Modifiers::COMMAND, Key::W) {
@@ -1111,6 +1155,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             self.dialogs.push(Dialog::DownloadOcrModels);
             return;
         }
+        if self.refuse_if_read_only() {
+            return;
+        }
         let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
         let work = move |progress: &dyn Fn(u32, u32)| {
             let document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
@@ -1138,6 +1185,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn start_optimize(&mut self, ctx: &egui::Context, settings: quintess_core::optimize::OptimizeSettings, step: quintess_core::batch::Step) {
+        if self.refuse_if_read_only() {
+            return;
+        }
         let Some((tab_id, bytes, password, _)) = self.job_input() else { return };
         self.start_recorded_job(ctx, "Reducing file size", step, move |_| {
             let mut pdf = Pdf::from_bytes(&bytes, password.as_deref())?;
@@ -1153,7 +1203,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let Some(other) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_title("Compare with which version?").pick_file() else { return };
         let Some(other_bytes) = self.report(std::fs::read(&other).map_err(anyhow::Error::from)) else { return };
         // A protected older version needs its own password first.
-        if quintess_core::security::inspect_security(&other_bytes).needs_password_to_open {
+        if quintess_core::security::inspect_security(&other_bytes).needs_password_to_open && !opens_without_password(&other_bytes) {
             self.dialogs.push(Dialog::ComparePassword { path: other, password: String::new(), error: String::new() });
             return;
         }
@@ -1236,6 +1286,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
 
     /// Applies a bytes-to-bytes text edit to the active tab as one undoable step.
     fn edit_page_text(&mut self, label: &str, change: impl FnOnce(&[u8], Option<&str>) -> anyhow::Result<Vec<u8>>) {
+        if self.refuse_if_read_only() {
+            return;
+        }
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let result = change(&tab.bytes, tab.password.as_deref()).and_then(|bytes| tab.replace_bytes(label, bytes));
         if self.report(result).is_some() {
@@ -1277,6 +1330,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn sign_here(&mut self, page: u32, rect: [f32; 4]) {
+        if self.refuse_if_read_only() {
+            return;
+        }
         let dialog = dialogs::SignDialog::new(page, rect, &self.settings);
         if dialog.source == dialogs::SignSource::OwnIdentity && dialog.identity_file.is_none() && dialog.store_certificates.is_empty() && dialog.certificate_file.is_none() {
             self.error("Create a signing identity first, or sign with a certificate file.");
@@ -1288,6 +1344,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// means asking a server, which can take a moment).
     fn sign_with(&mut self, ctx: &egui::Context, choice: dialogs::SignDialog) {
         use quintess_core::signatures::{SignOptions, SigningIdentity};
+        if self.refuse_if_read_only() {
+            return;
+        }
         let identity = match choice.source {
             dialogs::SignSource::OwnIdentity => choice.identity_file.as_deref().map(SigningIdentity::load),
             dialogs::SignSource::CertificateFile => choice.certificate_file.as_deref().map(|path| std::fs::read(path).map_err(anyhow::Error::from).and_then(|bytes| SigningIdentity::from_pkcs12(&bytes, &choice.password))),
@@ -1347,6 +1406,16 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 self.open_new_document(title, bytes);
                 self.info(note);
             }
+            JobOutcome::Repaired { title, bytes, password, note } => {
+                if !self.add_tab(None, bytes, password) {
+                    return false;
+                }
+                if let Some(tab) = self.tabs.last_mut() {
+                    tab.title = title;
+                    tab.dirty = true;
+                }
+                self.info(note);
+            }
             JobOutcome::Scanned { bytes, pages, recognize_text } => {
                 self.open_new_document("Scan.pdf".into(), bytes);
                 self.info(format!("Scanned {pages} page{}.", if pages == 1 { "" } else { "s" }));
@@ -1370,6 +1439,61 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             }
         }
         true
+    }
+
+    /// Repair by rewriting with PDFium (the read-only banner's Try repairing,
+    /// and a File command for any document): PDFium reads the file and
+    /// writes it out again, and the copy opens as a new unsaved document if
+    /// the editable model can read it. The original tab stays as it is.
+    fn repair_with_pdfium(&mut self, ctx: &egui::Context) {
+        let Some((_, bytes, password, title)) = self.job_input() else { return };
+        let stem = title.trim_end_matches(".pdf").to_string();
+        self.start_job(ctx, "Repairing", move |_| {
+            // The point is a copy Quintess can edit; the engine refuses one it can't.
+            let copy = quintess_core::engine::repair_with_pdfium(bytes.as_ref().clone(), password.as_deref()).map_err(|error| anyhow::anyhow!("{error:#}. The original stays open as it was"))?;
+            let pages = copy.pages;
+            let note = format!(
+                "PDFium read {title} and wrote it out again as a new document ({pages} page{}), which Quintess can edit. Check it against the original: anything PDFium couldn't read is missing from the copy. Save it to keep it.",
+                if pages == 1 { "" } else { "s" }
+            );
+            Ok(JobOutcome::Repaired { title: format!("{stem} (repaired).pdf"), bytes: copy.bytes, password, note })
+        });
+    }
+
+    /// The bar above the page of a document open for reading only: what that
+    /// means, the editable model's own error under Details, and Try repairing.
+    fn read_only_banner(&mut self, ui: &mut egui::Ui) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let Some(reason) = tab.read_only_reason().map(str::to_string) else { return };
+        let colors = crate::theme::palette(ui.ctx());
+        let details_id = egui::Id::new(("read-only details", tab.id));
+        let mut details_open = ui.data(|data| data.get_temp::<bool>(details_id).unwrap_or(false));
+        let mut repair = false;
+        let frame = egui::Frame::new().fill(colors.surface).stroke(egui::Stroke::new(1.0, colors.border)).corner_radius(10).inner_margin(egui::Margin::symmetric(14, 9)).outer_margin(egui::Margin { left: 12, right: 12, top: 10, bottom: 2 });
+        frame.show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(crate::theme::icon_text(ui.ctx(), crate::theme::icon::LOCK, "🔒", 14.0).color(colors.accent_hover));
+                ui.label(RichText::new("This file is damaged in a way Quintess can't edit, so it's open for reading only. Viewing, searching and printing work.").color(colors.text));
+                let label = if details_open { "Hide details" } else { "Details" };
+                if ui.button(label).on_hover_text("What Quintess's editor reported about the file").clicked() {
+                    details_open = !details_open;
+                }
+                if ui.button("Try repairing").on_hover_text("PDFium reads the file and writes it out again, as a new unsaved document Quintess can edit. The original stays open as it is.").clicked() {
+                    repair = true;
+                }
+            });
+            if details_open {
+                ui.add_space(4.0);
+                ui.label(RichText::new("What Quintess's editor reported about the file:").size(12.0).color(colors.text_muted));
+                ui.add(egui::Label::new(RichText::new(&reason).family(egui::FontFamily::Monospace).size(11.5).color(colors.text_muted)).selectable(true).wrap());
+                ui.label(RichText::new("PDFium, which draws the pages, could read it, so the document is shown as PDFium understands it.").size(12.0).color(colors.text_faint));
+            }
+        });
+        ui.data_mut(|data| data.insert_temp(details_id, details_open));
+        if repair {
+            let ctx = ui.ctx().clone();
+            self.repair_with_pdfium(&ctx);
+        }
     }
 
     fn check_accessibility(&mut self) {
@@ -1463,12 +1587,19 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         }
     }
 
+    /// A menu entry that picks a tool, grayed out with the reason when the
+    /// tool would change a document open for reading only.
+    fn tool_menu_button(&mut self, ui: &mut egui::Ui, tool: Tool, label: &str) {
+        let available = !(self.active_is_read_only() && tool.changes_document());
+        if ui.add_enabled(available, egui::Button::new(label)).on_disabled_hover_text(crate::tab::UNAVAILABLE_WHILE_READ_ONLY).clicked() {
+            self.tool = tool;
+        }
+    }
+
     fn tools_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Comment", |ui| {
             for tool in [Tool::Highlight, Tool::Underline, Tool::StrikeOut, Tool::Squiggly, Tool::Note, Tool::TextBox, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Arrow, Tool::Ink, Tool::Stamp, Tool::Link] {
-                if ui.button(tool.label()).clicked() {
-                    self.tool = tool;
-                }
+                self.tool_menu_button(ui, tool, tool.label());
             }
             ui.separator();
             self.command_buttons(ui, "Tools ▸ Comment");
@@ -1483,18 +1614,14 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         ui.menu_button("Pages", |ui| self.command_buttons(ui, "Tools ▸ Pages"));
         ui.menu_button("Forms", |ui| {
             for tool in [Tool::TextField, Tool::CheckBox, Tool::SignatureField] {
-                if ui.button(format!("Add {}", tool.label().to_lowercase())).clicked() {
-                    self.tool = tool;
-                }
+                self.tool_menu_button(ui, tool, &format!("Add {}", tool.label().to_lowercase()));
             }
             ui.separator();
             self.command_buttons(ui, "Tools ▸ Forms");
         });
         ui.menu_button("Redact", |ui| {
             for tool in [Tool::RedactText, Tool::RedactArea] {
-                if ui.button(tool.label()).clicked() {
-                    self.tool = tool;
-                }
+                self.tool_menu_button(ui, tool, tool.label());
             }
             self.command_buttons(ui, "Tools ▸ Redact");
         });
@@ -1548,9 +1675,12 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 })());
             }
         }
+        // Form data and comments are read through the editable model, which a
+        // document open for reading only doesn't have.
+        let editable = !tab.is_read_only();
         ui.menu_button("Form data", |ui| {
             for (label, extension) in [("JSON…", "json"), ("XFDF…", "xfdf"), ("CSV…", "csv")] {
-                if ui.button(label).clicked() {
+                if ui.add_enabled(editable, egui::Button::new(label)).on_disabled_hover_text(crate::tab::UNAVAILABLE_WHILE_READ_ONLY).clicked() {
                     if let Some(path) = rfd::FileDialog::new().add_filter(extension, &[extension]).set_file_name(format!("{stem}.{extension}")).save_file() {
                         outcome = Some(tab.load_pdf().and_then(|pdf| {
                             let text = match extension {
@@ -1565,7 +1695,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 }
             }
         });
-        if ui.button("Comment summary…").clicked() {
+        if ui.add_enabled(editable, egui::Button::new("Comment summary…")).on_disabled_hover_text(crate::tab::UNAVAILABLE_WHILE_READ_ONLY).clicked() {
             if let Some(path) = rfd::FileDialog::new().add_filter("Text", &["txt"]).set_file_name(format!("{stem} comments.txt")).save_file() {
                 outcome = Some(tab.load_pdf().and_then(|pdf| {
                     std::fs::write(&path, quintess_core::annotations::comments_summary(&pdf))?;
@@ -1672,6 +1802,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// Lays out again the paragraphs wrapped around a picture that moved
     /// from `old_bounds` to `new_bounds`, or stopped wrapping (`None`).
     fn reflow_around(&mut self, page_index: usize, old_bounds: [f32; 4], new_bounds: Option<[f32; 4]>) {
+        if self.refuse_if_read_only() {
+            return;
+        }
         let Some(tab) = self.tabs.get(self.active) else { return };
         match quintess_core::text_wrap::obstacle_changed(&tab.bytes, tab.password.as_deref(), page_index, old_bounds, new_bounds) {
             Ok(Some((bytes, _))) => {
@@ -1872,11 +2005,12 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let read_only = self.active_is_read_only();
         ui.horizontal_wrapped(|ui| {
             if ui.button("📂").on_hover_text("Open (Ctrl+O)").clicked() {
                 self.menu_open();
             }
-            if ui.add_enabled(!self.tabs.is_empty(), egui::Button::new("💾")).on_hover_text("Save (Ctrl+S)").clicked() {
+            if ui.add_enabled(!self.tabs.is_empty() && !read_only, egui::Button::new("💾")).on_hover_text("Save (Ctrl+S)").on_disabled_hover_text(if read_only { crate::tab::UNAVAILABLE_WHILE_READ_ONLY } else { "Save (Ctrl+S)" }).clicked() {
                 self.save(false);
             }
             if ui.add_enabled(!self.tabs.is_empty(), egui::Button::new("🖨")).on_hover_text("Print (Ctrl+P)").clicked() {
@@ -1936,7 +2070,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 (Tool::RedactText, "▇ Redact"),
                 (Tool::Sign, "✍ Sign"),
             ] {
-                ui.selectable_value(&mut self.tool, tool, icon).on_hover_text(tool.label());
+                let available = !(read_only && tool.changes_document());
+                let response = ui.add_enabled(available, egui::Button::selectable(self.tool == tool, icon)).on_hover_text(tool.label()).on_disabled_hover_text(crate::tab::UNAVAILABLE_WHILE_READ_ONLY);
+                if response.clicked() {
+                    self.tool = tool;
+                }
             }
             ui.separator();
             ui.color_edit_button_rgb(&mut self.tool_settings.color).on_hover_text("Markup color");
@@ -1949,7 +2087,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 ui.color_edit_button_rgb(fill);
             }
             ui.separator();
-            ui.toggle_value(&mut self.organizer, "▦ Organize").on_hover_text("Rearrange, rotate and delete pages");
+            ui.toggle_value(&mut self.organizer, "▦ Organize").on_hover_text(if read_only { "See the pages side by side (this file is open for reading only, so they can't be rearranged)" } else { "Rearrange, rotate and delete pages" });
         });
     }
 
@@ -1980,33 +2118,24 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let selected: Vec<u32> = tab.organizer_selection.iter().map(|i| *i as u32 + 1).collect();
         let mut request: Option<OrganizerRequest> = None;
+        // A document open for reading only can be looked at here, not rearranged.
+        let editable = !tab.is_read_only();
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(format!("{} selected", selected.len())).strong());
-            let any = !selected.is_empty();
-            if ui.add_enabled(any, egui::Button::new("⟲ Rotate left")).clicked() {
-                request = Some(OrganizerRequest::Rotate(-90));
-            }
-            if ui.add_enabled(any, egui::Button::new("⟳ Rotate right")).clicked() {
-                request = Some(OrganizerRequest::Rotate(90));
-            }
-            if ui.add_enabled(any, egui::Button::new("🗑 Delete")).clicked() {
-                request = Some(OrganizerRequest::Delete);
-            }
-            if ui.add_enabled(any, egui::Button::new("⧉ Duplicate")).clicked() {
-                request = Some(OrganizerRequest::Duplicate);
-            }
-            if ui.add_enabled(any, egui::Button::new("⇪ Extract")).clicked() {
-                request = Some(OrganizerRequest::Extract);
-            }
-            if ui.add_enabled(any, egui::Button::new("◀ Move earlier")).clicked() {
-                request = Some(OrganizerRequest::Move(-1));
-            }
-            if ui.add_enabled(any, egui::Button::new("Move later ▶")).clicked() {
-                request = Some(OrganizerRequest::Move(1));
-            }
-            if ui.button("＋ Blank page after").clicked() {
-                request = Some(OrganizerRequest::InsertBlank);
-            }
+            let any = !selected.is_empty() && editable;
+            let mut page_button = |ui: &mut egui::Ui, enabled: bool, label: &str, chosen: OrganizerRequest| {
+                if ui.add_enabled(enabled, egui::Button::new(label)).on_disabled_hover_text(if editable { "Select pages first" } else { crate::tab::UNAVAILABLE_WHILE_READ_ONLY }).clicked() {
+                    request = Some(chosen);
+                }
+            };
+            page_button(ui, any, "⟲ Rotate left", OrganizerRequest::Rotate(-90));
+            page_button(ui, any, "⟳ Rotate right", OrganizerRequest::Rotate(90));
+            page_button(ui, any, "🗑 Delete", OrganizerRequest::Delete);
+            page_button(ui, any, "⧉ Duplicate", OrganizerRequest::Duplicate);
+            page_button(ui, any, "⇪ Extract", OrganizerRequest::Extract);
+            page_button(ui, any, "◀ Move earlier", OrganizerRequest::Move(-1));
+            page_button(ui, any, "Move later ▶", OrganizerRequest::Move(1));
+            page_button(ui, editable, "＋ Blank page after", OrganizerRequest::InsertBlank);
             if ui.button("Select all").clicked() {
                 tab.organizer_selection = (0..tab.pages.len()).collect();
             }
@@ -2014,7 +2143,11 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 request = Some(OrganizerRequest::Close);
             }
         });
-        ui.weak("Click to select, Ctrl+click to add, Shift+click for a range. Drag a page onto another to move it there.");
+        if editable {
+            ui.weak("Click to select, Ctrl+click to add, Shift+click for a range. Drag a page onto another to move it there.");
+        } else {
+            ui.weak("This file is open for reading only, so its pages can't be rearranged. Double-click a page to go to it.");
+        }
         ui.separator();
         let cell_width = 150.0;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -2064,10 +2197,10 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     if response.double_clicked() {
                         request = Some(OrganizerRequest::Open(index));
                     }
-                    if let Some(dragged) = cell.dnd_release_payload::<usize>() {
+                    if let Some(dragged) = cell.dnd_release_payload::<usize>().filter(|_| editable) {
                         request = Some(OrganizerRequest::DropOnto { dragged: *dragged, target: index });
                     }
-                    if cell.dnd_hover_payload::<usize>().is_some() {
+                    if editable && cell.dnd_hover_payload::<usize>().is_some() {
                         ui.painter().rect_stroke(cell.rect, 4.0, egui::Stroke::new(2.0, Color32::from_rgb(255, 140, 0)), egui::StrokeKind::Outside);
                     }
                 }
@@ -2169,6 +2302,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 ViewerAction::DeleteText(line) => self.edit_page_text("Delete text", |bytes, password| quintess_core::edit_text::delete_line(bytes, password, &line)),
                 ViewerAction::MoveText { page_index, bounds, offset } => self.edit_page_text("Move text", |bytes, password| quintess_core::edit_text::move_text(bytes, password, page_index, bounds, offset)),
                 ViewerAction::ReplaceParagraph { paragraph, rich, style, precomputed } => {
+                    if self.refuse_if_read_only() {
+                        continue;
+                    }
                     let Some(tab) = self.tabs.get_mut(self.active) else { continue };
                     // The preview already did the work when it matches this edit.
                     let edited = match precomputed {
@@ -2383,7 +2519,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     }
                 }
                 AppRequest::UnlockAndOpen { path, bytes, password } => {
-                    if quintess_core::Pdf::from_bytes(&bytes, Some(&password)).is_ok() {
+                    // A damaged file the editable model can't read is checked by
+                    // PDFium, and then opens for reading only.
+                    if quintess_core::Pdf::from_bytes(&bytes, Some(&password)).is_ok() || quintess_core::engine::open_document(bytes.clone(), Some(&password)).is_ok() {
                         self.add_tab(Some(path), bytes, Some(password));
                     } else {
                         self.dialogs.push(Dialog::Password { path, bytes, password: String::new(), error: "That password is not correct.".into() });
@@ -2392,7 +2530,8 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 AppRequest::RemoveProtection { owner_password } => self.remove_protection(Some(owner_password)),
                 AppRequest::CompareWithPassword { path, password } => {
                     let Some(bytes) = self.report(std::fs::read(&path).map_err(anyhow::Error::from)) else { continue };
-                    if quintess_core::Pdf::from_bytes(&bytes, Some(&password)).is_err() {
+                    // Comparing reads through PDFium, so PDFium judges the password.
+                    if quintess_core::engine::open_document(bytes.clone(), Some(&password)).is_err() {
                         self.dialogs.push(Dialog::ComparePassword { path, password: String::new(), error: "That password is not correct.".into() });
                         continue;
                     }
@@ -2549,6 +2688,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     });
                 }
                 AppRequest::AddLongTermValidation => {
+                    if self.refuse_if_read_only() {
+                        continue;
+                    }
                     let Some(tab) = self.tabs.get(self.active) else { continue };
                     let (tab_id, bytes) = (tab.id, tab.bytes.clone());
                     let ctx = self.worker_context.clone();
@@ -2649,6 +2791,9 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     });
                 }
                 AppRequest::StartFindReplace { pattern, replacement } => {
+                    if self.refuse_if_read_only() {
+                        continue;
+                    }
                     let Some((tab_id, bytes, password, _)) = self.job_input() else { continue };
                     let ctx = self.worker_context.clone();
                     self.start_job(&ctx, "Replacing text", move |_| {
@@ -2751,6 +2896,13 @@ struct ScrollTest {
     blank: u32,
 }
 
+/// Whether PDFium opens the file without a password. Asked only when the
+/// security check says one is needed, which it also says of a file the
+/// editable model can't read at all.
+fn opens_without_password(bytes: &[u8]) -> bool {
+    quintess_core::engine::open_document(bytes.to_vec(), None).is_ok()
+}
+
 /// Asks where to save a document, starting at its file, or for a
 /// recovered document where it was saved before.
 fn choose_save_path(tab: &DocumentTab) -> Option<PathBuf> {
@@ -2828,6 +2980,11 @@ impl eframe::App for QuintessApp {
         // The palette goes first, so its Enter, arrows and Esc reach it before the shortcuts.
         self.show_palette(&ctx);
         self.shortcuts(&ctx);
+        // However a tool was chosen (dock, menu, palette, a tab switch), a
+        // document open for reading only gets none that would change it.
+        if self.active_is_read_only() && self.tool.changes_document() {
+            self.tool = Tool::Select;
+        }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F11)) {
             let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
@@ -2930,8 +3087,10 @@ impl eframe::App for QuintessApp {
             } else if self.tabs.is_empty() {
                 self.welcome(ui);
             } else if self.organizer {
+                self.read_only_banner(ui);
                 egui::Frame::new().inner_margin(10.0).show(ui, |ui| self.organizer_view(ui));
             } else {
+                self.read_only_banner(ui);
                 if self.split_view {
                     viewer_actions = self.split_viewer(ui);
                 } else {

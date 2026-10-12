@@ -1914,14 +1914,17 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         }
         Dialog::Properties { info, loaded } => {
             if !*loaded {
-                *info = metadata::read_info(&tab.load_pdf()?);
+                *info = tab.document_info()?;
                 *loaded = true;
             }
+            // A document open for reading only shows what PDFium reads, and
+            // can't take changes.
+            let editable = !tab.is_read_only();
             egui::Grid::new("properties").num_columns(2).show(ui, |ui| {
                 for (label, value) in [("Title", &mut info.title), ("Author", &mut info.author), ("Subject", &mut info.subject), ("Keywords", &mut info.keywords), ("Creator", &mut info.creator)] {
                     ui.label(label);
                     let mut text = value.clone().unwrap_or_default();
-                    if ui.add(egui::TextEdit::singleline(&mut text).desired_width(260.0)).changed() {
+                    if ui.add_enabled(editable, egui::TextEdit::singleline(&mut text).desired_width(260.0)).changed() {
                         *value = Some(text);
                     }
                     ui.end_row();
@@ -1941,21 +1944,35 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 ui.label("File size");
                 ui.label(format!("{:.1} KB", tab.bytes.len() as f64 / 1024.0));
                 ui.end_row();
-                let report = security::inspect_security(&tab.bytes);
                 ui.label("Security");
-                ui.label(if report.encrypted { report.cipher } else { "None".into() });
+                if editable {
+                    let report = security::inspect_security(&tab.bytes);
+                    ui.label(if report.encrypted { report.cipher } else { "None".into() });
+                } else {
+                    // The security check reads the file with the editable model,
+                    // which can't read this one; what is known is whether it took a password.
+                    ui.label(if tab.password.is_some() { "Protected with a password" } else { "Not known (the file is damaged)" });
+                }
                 ui.end_row();
             });
-            ui.horizontal(|ui| {
-                if ui.button("Remove all metadata").clicked() {
+            if !editable {
+                ui.weak("This file is open for reading only, so its properties can't be changed.");
+            }
+            ui.add_enabled_ui(editable, |ui| ui.horizontal(|ui| {
+                if ui.button("Remove all metadata").on_disabled_hover_text(crate::tab::UNAVAILABLE_WHILE_READ_ONLY).clicked() {
                     match tab.apply_removing("Remove metadata", metadata::strip_metadata) {
                         Ok(()) => outcome.requests.push(AppRequest::Record(Step::RemoveMetadata)),
                         Err(error) => outcome.error = Some(error.to_string()),
                     }
                     outcome.keep_open = false;
                 }
-            });
-            if buttons(ui, "Save properties", outcome) {
+            }));
+            if !editable {
+                ui.separator();
+                if ui.button("Close").clicked() {
+                    outcome.keep_open = false;
+                }
+            } else if buttons(ui, "Save properties", outcome) {
                 let changes = DocumentInfo { producer: None, creation_date: None, modification_date: None, ..info.clone() };
                 tab.apply("Document properties", |pdf| metadata::write_info(pdf, &changes))?;
                 outcome.requests.push(AppRequest::Record(Step::Properties { info: changes }));
