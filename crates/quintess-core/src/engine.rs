@@ -298,7 +298,12 @@ impl Default for RenderOptions {
 
 /// Renders page `page_index` (0-based) to an RGBA image.
 pub fn render_page(document: &PdfDocument, page_index: usize, options: &RenderOptions) -> Result<RgbaImage> {
-    let page = document.pages().get(page_index as i32)?;
+    render_loaded_page(&document.pages().get(page_index as i32)?, options)
+}
+
+/// Renders a page already loaded, including any changes made to its objects
+/// in memory (fetching the page again would read it fresh from the file).
+pub fn render_loaded_page(page: &PdfPage, options: &RenderOptions) -> Result<RgbaImage> {
     let (width, height) = render_size(page.width().value, page.height().value, options.dpi);
     // A page whose visible area is empty (a crop box outside its media box,
     // as in pdf.js's boundingBox_invalid.pdf) shows nothing; PDFium refuses
@@ -376,20 +381,20 @@ pub fn page_text(document: &PdfDocument, page_index: usize) -> Result<PageText> 
             Ok(bounds) => [bounds.left().value, bounds.bottom().value, bounds.right().value, bounds.top().value],
             Err(_) => [0.0; 4],
         };
-        let weight_is_bold = matches!(item.font_weight(), Some(PdfFontWeight::Weight700Bold | PdfFontWeight::Weight800 | PdfFontWeight::Weight900));
-        let font_name = item.font_name();
-        let lowercase_name = font_name.to_ascii_lowercase();
-        chars.push(TextChar {
-            character,
-            rect,
-            font_size: item.scaled_font_size().value,
-            bold: weight_is_bold || lowercase_name.contains("bold") || lowercase_name.contains("black") || item.font_is_bold_reenforced(),
-            italic: item.font_is_italic() || lowercase_name.contains("italic") || lowercase_name.contains("oblique"),
-            font_name,
-            generated,
-        });
+        let (bold, italic) = character_weight_and_slant(&item);
+        chars.push(TextChar { character, rect, font_size: item.scaled_font_size().value, bold, italic, font_name: item.font_name(), generated });
     }
     Ok(PageText { page_index, width: page.width().value, height: page.height().value, chars })
+}
+
+/// Whether a character is set in a bold face and in an italic one, from
+/// its font's weight and flags and, for fonts that don't say, its name.
+pub fn character_weight_and_slant(item: &PdfPageTextChar) -> (bool, bool) {
+    let weight_is_bold = matches!(item.font_weight(), Some(PdfFontWeight::Weight700Bold | PdfFontWeight::Weight800 | PdfFontWeight::Weight900));
+    let lowercase_name = item.font_name().to_ascii_lowercase();
+    let bold = weight_is_bold || lowercase_name.contains("bold") || lowercase_name.contains("black") || item.font_is_bold_reenforced();
+    let italic = item.font_is_italic() || lowercase_name.contains("italic") || lowercase_name.contains("oblique");
+    (bold, italic)
 }
 
 impl PageText {

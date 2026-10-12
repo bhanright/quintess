@@ -80,6 +80,7 @@ pub mod unicode_text;
 pub mod updates;
 pub mod validation;
 pub mod watch;
+pub mod word_export;
 
 pub use document::{Pdf, SaveSettings};
 

@@ -41,9 +41,13 @@ pub enum MoreCommand {
         /// The file to write; for csv without --table, the folder for one file per table.
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Leave images out of Markdown, HTML and Word output.
+        /// Leave images out of Markdown, HTML and flowing Word output.
         #[arg(long)]
         no_images: bool,
+        /// docx: the text alone, as flowing headings and paragraphs, instead
+        /// of each page's layout with the text set where it stands.
+        #[arg(long)]
+        flowing: bool,
         /// xlsx: only the detected tables, one per sheet ("Page 3 table 1"),
         /// instead of every page as a sheet.
         #[arg(long)]
@@ -54,7 +58,7 @@ pub enum MoreCommand {
         /// pptx: text boxes, pictures and lines you can edit.
         #[arg(long)]
         editable: bool,
-        /// pptx pictures: resolution of the page pictures.
+        /// pptx pictures and docx page backgrounds: resolution of the pictures.
         #[arg(long, default_value_t = 150.0)]
         dpi: f32,
         /// csv: write only this table (its number from `quintess tables`) to one file.
@@ -659,7 +663,7 @@ pub fn run(command: MoreCommand) -> Result<()> {
             println!("wrote {} ({:.0} KB → {:.0} KB, {:.0}% smaller)", target.display(), original_size / 1024.0, bytes.len() as f64 / 1024.0, (1.0 - bytes.len() as f64 / original_size.max(1.0)) * 100.0);
             println!("{} images resampled, {} recompressed, {} duplicate streams merged", report.images_resampled, report.images_recompressed, report.duplicate_streams_merged);
         }
-        MoreCommand::Export { input, format, output, no_images, tables_only, pictures: _, editable, dpi, table } => {
+        MoreCommand::Export { input, format, output, no_images, flowing, tables_only, pictures: _, editable, dpi, table } => {
             let document = document(&input)?;
             let stem = input.input.file_stem().unwrap_or_default().to_string_lossy().into_owned();
             let target = |extension: &str| output.clone().unwrap_or_else(|| input.input.with_file_name(format!("{stem}.{extension}")));
@@ -680,9 +684,13 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     println!("wrote {}", path.display());
                 }
                 "docx" | "word" => {
-                    let structure = convert::analyze(&document, !no_images)?;
                     let path = target("docx");
-                    quintess_core::document::write_file_safely(&path, &convert::to_docx(&structure)?)?;
+                    let bytes = if flowing {
+                        convert::to_docx(&convert::analyze(&document, !no_images)?)?
+                    } else {
+                        quintess_core::word_export::document_to_docx_with_layout(&document, &quintess_core::word_export::WordLayoutSettings { background_dpi: dpi })?
+                    };
+                    quintess_core::document::write_file_safely(&path, &bytes)?;
                     println!("wrote {}", path.display());
                 }
                 "xlsx" | "excel" => {

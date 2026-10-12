@@ -54,7 +54,7 @@ const NAMESPACES: &str = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml
 const RELATIONSHIP_BASE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const XML_HEADER: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
 
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for character in text.chars() {
         match character {
@@ -73,7 +73,7 @@ fn escape(text: &str) -> String {
 /// The font family to ask PowerPoint for, from the name inside the PDF
 /// ("ABCDEF+Arial-BoldMT" becomes "Arial"); PowerPoint substitutes a
 /// similar font when the family is not installed.
-fn font_family(pdf_font_name: &str) -> String {
+pub(crate) fn font_family(pdf_font_name: &str) -> String {
     let without_subset = match pdf_font_name.split_once('+') {
         Some((prefix, rest)) if prefix.len() == 6 && prefix.chars().all(|c| c.is_ascii_uppercase()) => rest,
         _ => pdf_font_name,
@@ -161,7 +161,7 @@ impl Slide {
 
 /// Encodes a picture as PNG, or as JPEG when it is large and opaque.
 /// Returns the bytes and the file extension.
-fn encode_picture(picture: &DynamicImage) -> Result<(Vec<u8>, &'static str)> {
+pub(crate) fn encode_picture(picture: &DynamicImage) -> Result<(Vec<u8>, &'static str)> {
     let mut bytes = Vec::new();
     let pixels = u64::from(picture.width()) * u64::from(picture.height());
     if pixels > JPEG_PIXEL_THRESHOLD && !picture.color().has_alpha() {

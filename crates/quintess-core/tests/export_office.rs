@@ -363,3 +363,46 @@ fn libreoffice_opens_the_presentation() {
         assert_eq!(open(converted).pages().len(), 2);
     }
 }
+
+/// Word with the layout kept: a red band with white text on it, and a line
+/// of text turned on its side.
+#[test]
+fn exports_word_pages_that_keep_the_layout() {
+    let mut banner = String::from("1 0 0 rg 72 680 300 60 re f\n");
+    banner += "1 1 1 rg BT /F2 24 Tf 90 700 Td (WHITE ON RED) Tj ET\n";
+    banner += "0 0 0 rg BT /F1 12 Tf 0 1 -1 0 500 300 Tm (Turned aside) Tj ET\n";
+    banner += &text(72.0, 600.0, false, 10.0, "Figures are in thousands of dollars.");
+    let document = open(pdf_with_pages(&[banner, unruled_page()]));
+    let bytes = quintess_core::word_export::document_to_docx_with_layout(&document, &quintess_core::word_export::WordLayoutSettings { background_dpi: 72.0 }).unwrap();
+    std::fs::write(folder().join("layout.docx"), &bytes).unwrap();
+    assert_well_formed_xml(&bytes);
+
+    let body = zip_text(&bytes, "word/document.xml");
+    // The text is Word text, in its color, size and weight, fixed to the page.
+    for expected in ["WHITE ON RED", "<w:color w:val=\"FFFFFF\"/>", "<w:sz w:val=\"48\"/>", "<w:b/>", "Figures are in thousands of dollars.", "Quarterly results", "w:hAnchor=\"page\""] {
+        assert!(body.contains(expected), "document.xml lacks {expected}");
+    }
+    // 90 points from the left is 1800 twips.
+    assert!(body.contains("w:x=\"1800\""), "the banner text starts where it stood");
+    // Turned text can't sit in a Word frame, so it stays in the picture.
+    assert!(!body.contains("Turned aside"));
+    // One section per page, each US Letter with no margins.
+    assert_eq!(body.matches("<w:pgSz w:w=\"12240\" w:h=\"15840\"/>").count(), 2);
+    assert_eq!(body.matches("behindDoc=\"1\"").count(), 2);
+
+    // The background has the red band without the white text, and keeps the
+    // turned text.
+    let picture_name = zip_entries(&bytes).into_iter().find(|name| name.starts_with("word/media/page1.")).expect("page 1 has a background");
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    let mut picture = Vec::new();
+    archive.by_name(&picture_name).unwrap().read_to_end(&mut picture).unwrap();
+    let background = image::load_from_memory(&picture).unwrap().to_rgb8();
+    // At 72 dpi one pixel is one point; the page's y runs up, the picture's down.
+    let band_is_plain_red = (95..360).flat_map(|x| (56..108).map(move |y| (x, y))).all(|(x, y)| {
+        let [red, green, blue] = background.get_pixel(x, y).0;
+        red > 200 && green < 80 && blue < 80
+    });
+    assert!(band_is_plain_red, "the white text was taken out of the background");
+    let turned_text_drawn = (488..502).flat_map(|x| (400..500).map(move |y| (x, y))).any(|(x, y)| background.get_pixel(x, y).0[0] < 128);
+    assert!(turned_text_drawn, "the turned text stays in the background");
+}

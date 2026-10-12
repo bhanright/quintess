@@ -617,7 +617,8 @@ When a signer isn't trusted, the result offers **Trust…** with the certificate
 
 ## Text, Word, Markdown and web pages
 
-- **File ▸ Export as ▸ Word document (.docx)…**, **Markdown (.md)…** and **Web page (.html)…** rebuild the text into headings, paragraphs and lists from the page layout, with the pictures. The result is meant for reuse, not an exact copy of the pages. Markdown puts its pictures in a folder beside the file.
+- **File ▸ Export as ▸ Word document (.docx)…** makes Word pages that look like the PDF's. Each page keeps its size, and what it draws (colored areas, lines, pictures) becomes the page's background. The text goes on top, in the PDF's fonts, sizes and colors, where it stood, and you can edit it in Word. Shapes and pictures can't be moved separately. Rotated text stays part of the background. If you don't have a font the PDF uses, Word puts a similar one in its place, so lines can come out a little longer or shorter.
+- **Word, text only (.docx)…**, **Markdown (.md)…** and **Web page (.html)…** rebuild the text into headings, paragraphs and lists from the page layout, with the pictures. The result is meant for reuse, not an exact copy of the pages. Markdown puts its pictures in a folder beside the file.
 - **File ▸ Export ▸ Text…** saves the plain text.
 
 ## Pictures
