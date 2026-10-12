@@ -39,9 +39,12 @@ opt-level = "s"
 [profile.release.package.regress]
 opt-level = "s"
 
-# Window-layer fixes carried as patched copies of two crates (vendor/README.md
-# lists each patch, the bug it fixes and the test that keeps it). They come from
-# PdfCraft (MIT OR Apache-2.0). Drop a copy once an upstream release has its fixes.
+# Fixes carried as patched copies of three crates (vendor/README.md lists each
+# patch, the bug it fixes and the test that keeps it): the window layer (winit,
+# egui-wgpu, from PdfCraft, MIT OR Apache-2.0) and the PDF object model (lopdf,
+# PdfCraft's copy with Quintess's own patches). Drop a copy once an upstream
+# release has its fixes.
 [patch.crates-io]
 winit = { path = "vendor/winit" }
 egui-wgpu = { path = "vendor/egui-wgpu" }
+lopdf = { path = "vendor/lopdf" }

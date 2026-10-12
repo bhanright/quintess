@@ -88,8 +88,22 @@ fn candidate_folders() -> Vec<PathBuf> {
 }
 
 /// Opens a document in PDFium from bytes it takes ownership of.
+///
+/// An AES-256 (revision 6) password is meant to be prepared with SASLprep
+/// before hashing (ISO 32000-2, algorithm 2.A), which PDFium skips: a
+/// password that SASLprep changes (a soft hyphen dropped, "ª" read as "a", as
+/// in pdf.js's saslprep-r6.pdf) is refused as typed, so it is tried again
+/// prepared.
 pub fn open_document(bytes: Vec<u8>, password: Option<&str>) -> Result<PdfDocument<'static>> {
-    pdfium()?.load_pdf_from_byte_vec(bytes, password).map_err(|error| anyhow!("PDFium could not open the document: {error}"))
+    let pdfium = pdfium()?;
+    let prepared = password.and_then(|password| stringprep::saslprep(password).ok().filter(|prepared| prepared != password).map(|prepared| prepared.into_owned()));
+    let Some(prepared) = prepared else {
+        return pdfium.load_pdf_from_byte_vec(bytes, password).map_err(|error| anyhow!("PDFium could not open the document: {error}"));
+    };
+    match pdfium.load_pdf_from_byte_vec(bytes.clone(), password) {
+        Ok(document) => Ok(document),
+        Err(error_as_typed) => pdfium.load_pdf_from_byte_vec(bytes, Some(&prepared)).map_err(|_| anyhow!("PDFium could not open the document: {error_as_typed}")),
+    }
 }
 
 /// Rendering choices for one page.

@@ -46,6 +46,8 @@ quick-xml = "0.41"
 oxidocs = { version = "=0.8.0", optional = true }
 # RSA key transport for certificate encryption (public_key.rs); ring cannot encrypt with RSA.
 rsa = "0.9.10"
+# SASLprep for AES-256 passwords handed to PDFium (engine::open_document); lopdf already uses it.
+stringprep = "0.1.5"
 
 [features]
 default = ["word-layout"]

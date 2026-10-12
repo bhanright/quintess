@@ -5,6 +5,8 @@
 !/vendor/README.md
 !/vendor/winit/
 !/vendor/egui-wgpu/
+!/vendor/lopdf/
+!/vendor/lopdf-upstream.md
 /scratch
 *.secrets*
 

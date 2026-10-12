@@ -22,12 +22,6 @@ const REBUILD_PADDING: usize = 1024;
 /// C.1); a file claiming higher object numbers is renumbered on opening.
 const LARGEST_OBJECT_NUMBER: u32 = 8_388_607;
 
-/// A trailer entry marking a document whose contents lopdf could not
-/// decrypt, so saving it would write them out scrambled. Bookkeeping like
-/// the remembered certificate dictionary; [`Pdf::to_bytes`] refuses such a
-/// document instead of writing it.
-const UNDECRYPTED_MARKER_KEY: &str = "QuintessUndecrypted";
-
 /// Loads with lopdf, trying the empty user password when none is given,
 /// which opens files that only restrict permissions.
 fn load_with_lopdf(bytes: &[u8], password: Option<&str>) -> Result<Document> {
@@ -131,8 +125,86 @@ fn page_tree_complete(doc: &Document) -> bool {
 /// counts no document could have.
 fn repair_structure(doc: Document) -> Document {
     let mut doc = point_root_at_catalog(doc);
+    repoint_references_with_stale_generations(&mut doc);
+    wrap_lone_page_in_page_tree(&mut doc);
     repair_page_counts(&mut doc);
     doc
+}
+
+/// Repoints references to an object number under a generation the file
+/// doesn't have at the one generation it does have. pdf.js's issue7496.pdf
+/// rewrites its first page as `5 0 obj` in later updates while the page tree
+/// still says `5 1 R`; PDFium ignores the generation and shows the page, but
+/// lopdf found nothing there, so the page was lost and saving wrote a
+/// reference to nothing. A number with several generations is left alone.
+fn repoint_references_with_stale_generations(doc: &mut Document) {
+    fn repoint(object: &mut Object, replacements: &HashMap<ObjectId, ObjectId>) {
+        match object {
+            Object::Reference(id) => {
+                if let Some(replacement) = replacements.get(id) {
+                    *id = *replacement;
+                }
+            }
+            Object::Array(items) => items.iter_mut().for_each(|item| repoint(item, replacements)),
+            Object::Dictionary(dictionary) => dictionary.iter_mut().for_each(|(_, value)| repoint(value, replacements)),
+            Object::Stream(stream) => stream.dict.iter_mut().for_each(|(_, value)| repoint(value, replacements)),
+            _ => {}
+        }
+    }
+    fn collect_missing(object: &Object, doc: &Document, missing: &mut HashSet<ObjectId>) {
+        match object {
+            Object::Reference(id) if !doc.objects.contains_key(id) => {
+                missing.insert(*id);
+            }
+            Object::Array(items) => items.iter().for_each(|item| collect_missing(item, doc, missing)),
+            Object::Dictionary(dictionary) => dictionary.iter().for_each(|(_, value)| collect_missing(value, doc, missing)),
+            Object::Stream(stream) => stream.dict.iter().for_each(|(_, value)| collect_missing(value, doc, missing)),
+            _ => {}
+        }
+    }
+    let mut missing = HashSet::new();
+    doc.objects.values().for_each(|object| collect_missing(object, doc, &mut missing));
+    doc.trailer.iter().for_each(|(_, value)| collect_missing(value, doc, &mut missing));
+    let replacements: HashMap<ObjectId, ObjectId> = missing
+        .into_iter()
+        .filter_map(|(number, generation)| {
+            let mut generations = doc.objects.range((number, 0)..=(number, u16::MAX)).map(|(id, _)| *id);
+            match (generations.next(), generations.next()) {
+                (Some(only), None) => Some(((number, generation), only)),
+                _ => None,
+            }
+        })
+        .collect();
+    if replacements.is_empty() {
+        return;
+    }
+    doc.objects.values_mut().for_each(|object| repoint(object, &replacements));
+    doc.trailer.iter_mut().for_each(|(_, value)| repoint(value, &replacements));
+}
+
+/// Gives a catalog whose `/Pages` names a page instead of a page tree
+/// (pdf.js's issue21436.pdf) a page tree holding that page. lopdf finds no
+/// pages in such a file, though PDFium and pdf.js show the one page, and
+/// every edit expects a tree to add to, move within and count.
+fn wrap_lone_page_in_page_tree(doc: &mut Document) {
+    let Some(catalog_id) = doc.trailer.get(b"Root").and_then(Object::as_reference).ok() else { return };
+    let Some(page_id) = doc.catalog().ok().and_then(|catalog| catalog.get(b"Pages").ok()).and_then(|pages| pages.as_reference().ok()) else { return };
+    let is_lone_page = doc.get_dictionary(page_id).is_ok_and(|node| node.has_type(b"Page") || (!node.has_type(b"Pages") && node.get(b"Kids").is_err() && node.get(b"Contents").is_ok()));
+    if !is_lone_page {
+        return;
+    }
+    let tree_id = doc.add_object(dictionary! {
+        "Type" => "Pages",
+        "Kids" => vec![Object::Reference(page_id)],
+        "Count" => 1,
+    });
+    if let Ok(page) = doc.get_dictionary_mut(page_id) {
+        page.set("Type", "Page");
+        page.set("Parent", tree_id);
+    }
+    if let Ok(catalog) = doc.get_dictionary_mut(catalog_id) {
+        catalog.set("Pages", tree_id);
+    }
 }
 
 /// Rewrites the `/Count` of page-tree nodes that claim more pages than the
@@ -194,19 +266,6 @@ fn point_root_at_catalog(mut doc: Document) -> Document {
         doc.trailer.set("Root", catalog_id);
     }
     doc
-}
-
-/// Whether the crypt filter a version 4 or 5 encrypted file names for its
-/// streams or strings is missing from what lopdf read. lopdf (0.45) reads
-/// `/CF` only when it is written inside the encryption dictionary, not when
-/// it is a reference to another object, as in pdf.js's issue7665.pdf; it
-/// then leaves the contents encrypted without saying so.
-fn crypt_filters_unreadable(state: &lopdf::EncryptionState) -> bool {
-    if state.version() < 4 {
-        return false;
-    }
-    let missing = |name: &[u8]| !name.is_empty() && name != b"Identity" && !state.crypt_filters().contains_key(name);
-    missing(state.default_stream_filter()) || missing(state.default_string_filter())
 }
 
 /// An open PDF document that can be edited and saved.
@@ -282,9 +341,6 @@ impl Pdf {
         if doc.max_id > LARGEST_OBJECT_NUMBER {
             doc.renumber_objects();
         }
-        if doc.encryption_state.as_ref().is_some_and(crypt_filters_unreadable) {
-            doc.trailer.set(UNDECRYPTED_MARKER_KEY, true);
-        }
         Ok(Self { doc })
     }
 
@@ -351,11 +407,6 @@ impl Pdf {
     }
 
     pub fn to_bytes(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
-        if self.doc.trailer.has(UNDECRYPTED_MARKER_KEY.as_bytes()) {
-            bail!(
-                "this file can't be saved: its encryption keeps the crypt filter settings in a separate object, which Quintess's editing engine can't read yet, so the contents couldn't be decrypted for editing (the pages can still be viewed and printed)"
-            );
-        }
         // The remembered certificate dictionary is bookkeeping, not part of the file.
         let remembered = self.doc.trailer.remove(crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes());
         let result = self.write_bytes(settings);

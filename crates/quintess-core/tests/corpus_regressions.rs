@@ -3,7 +3,6 @@
 //! copies, each reproduced with a small synthetic file where possible. The corpus itself is never committed; a test that
 //! needs a corpus file says so and is skipped when the corpus is absent.
 
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use lopdf::{Document, Object, StringFormat, dictionary};
@@ -54,7 +53,10 @@ fn a_cross_reference_table_pointing_to_the_wrong_places_is_rebuilt() {
         })
         .collect();
     let damaged = format!("{body}{damaged_table}").into_bytes();
-    assert!(Document::load_mem(&damaged).map_or(true, |doc| doc.get_pages().is_empty()), "the file should defeat lopdf's own reading, or this test proves nothing");
+    // lopdf 0.45.0 found nothing here and `Pdf::from_bytes` rebuilt the
+    // table. Quintess's copy of lopdf now finds each object by its header
+    // when the table's offset doesn't parse (the patch for damaged latest
+    // copies, tests/lopdf_patches.rs), so either way the page is there.
     let pdf = Pdf::from_bytes(&damaged, None).unwrap();
     assert_eq!(pdf.page_count(), 1);
     assert!(read_bookmarks(&pdf).unwrap().is_empty());
@@ -259,25 +261,6 @@ fn empty_and_inverted_page_boxes_render_at_a_size_pdfium_accepts() {
     assert_eq!(render_size(1.0e30, 100.0, 72.0), (i32::MAX, 100));
 }
 
-/// A file from the pdf.js corpus fetched by `quintess-robustness fetch`, if present.
-fn corpus_file(name: &str) -> Option<Vec<u8>> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("corpus");
-    let corpus = std::env::var_os("QUINTESS_CORPUS").map(PathBuf::from).unwrap_or(root);
-    [corpus.join("pdfjs").join("test").join("pdfs").join(name), corpus.join("pdfjs-linked").join(name)].into_iter().find_map(|path| std::fs::read(path).ok())
-}
-
-#[test]
-fn a_file_whose_contents_could_not_be_decrypted_is_refused_on_saving() {
-    // pdf.js's issue7665.pdf keeps its AES-256 crypt filter in a separate
-    // object, which lopdf 0.45 doesn't follow: it leaves the contents
-    // encrypted, and saving wrote a file no reader could open. Only the
-    // corpus file reproduces it (making one needs an encryptor that writes
-    // the filter that way).
-    let Some(bytes) = corpus_file("issue7665.pdf") else {
-        eprintln!("skipped: the pdf.js corpus is not fetched (quintess-robustness fetch)");
-        return;
-    };
-    let mut pdf = Pdf::from_bytes(&bytes, None).expect("it still opens, for viewing");
-    let error = pdf.to_bytes_keeping_encryption(&SaveSettings::default()).unwrap_err();
-    assert!(error.to_string().contains("can't be saved"), "{error}");
-}
+// pdf.js's issue7665.pdf, whose crypt filter is a separate object, used to
+// be refused on saving here; lopdf now follows the reference (see
+// crypt_filters_kept_in_separate_objects_are_followed in tests/lopdf_patches.rs).
