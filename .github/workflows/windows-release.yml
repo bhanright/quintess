@@ -149,6 +149,14 @@ jobs:
           & "$folder\quintess.com" create markdown sample.md -o sample.pdf
           & "$folder\quintess.com" info sample.pdf
           if ($LASTEXITCODE -ne 0) { throw "quintess info failed" }
+          # OCR with the installed models (a download would mean they weren't
+          # found), on a picture of the sample page.
+          & "$folder\quintess.com" render sample.pdf --dpi 200 -o pages
+          & "$folder\quintess.com" create images pages\sample-page-001.png -o scan.pdf
+          $ocr = & "$folder\quintess.com" ocr scan.pdf --text recognized.txt -o scan-ocr.pdf
+          $ocr
+          if ($LASTEXITCODE -ne 0 -or "$ocr" -match "weren't installed") { throw "OCR didn't use the installed models" }
+          if (-not (Select-String -Path recognized.txt -Pattern "sample page" -Quiet)) { Get-Content recognized.txt; throw "OCR didn't read the sample page" }
           "INSTALLED=$folder" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Screenshot

@@ -106,7 +106,7 @@ impl QuintessApp {
                     ui.horizontal(|ui| {
                         ui.label(theme::icon_text(ui.ctx(), icon::SEARCH, "⌕", 13.0).color(colors.text_faint));
                         ui.label(RichText::new("Search or run a command").color(colors.text_faint));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| theme::key_chip(ui, "Ctrl K"));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| theme::key_chip(ui, &super::commands::shortcut_label("Ctrl K")));
                     });
                 })
                 .response
@@ -391,7 +391,7 @@ impl QuintessApp {
                 let hints_width = 420.0;
                 ui.add_space(((ui.available_width() - hints_width) / 2.0).max(0.0));
                 for (keys, what) in [("Ctrl K", "commands"), ("Ctrl O", "open"), ("Ctrl Shift F", "search a folder")] {
-                    theme::key_chip(ui, keys);
+                    theme::key_chip(ui, &super::commands::shortcut_label(keys));
                     ui.label(RichText::new(what).size(12.0).color(colors.text_faint));
                     ui.add_space(8.0);
                 }

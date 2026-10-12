@@ -132,6 +132,13 @@ jobs:
           "$RUNNER_TEMP/bin/quintess" info printed.pdf
           "$RUNNER_TEMP/bin/quintess" printers || true
           "$RUNNER_TEMP/bin/quintess" converters
+          # OCR with the models bundled in Contents/Resources (a download
+          # would mean they weren't found), on a picture of the sample page.
+          "$RUNNER_TEMP/bin/quintess" render sample.pdf --dpi 200 -o pages
+          "$RUNNER_TEMP/bin/quintess" create images pages/sample-page-001.png -o scan.pdf
+          "$RUNNER_TEMP/bin/quintess" ocr scan.pdf --text recognized.txt -o scan-ocr.pdf | tee ocr.log
+          ! grep -q "weren't installed" ocr.log
+          grep -i "sample page" recognized.txt
       - name: Screenshot
         # The app's self-check draws the window once, saves a picture and
         # exits; perl's alarm stands in for `timeout`, which macOS lacks.

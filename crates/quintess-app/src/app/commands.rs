@@ -21,9 +21,9 @@ pub(super) struct Command {
 
 /// A shortcut as this system's people know it. Shortcuts are written with
 /// Ctrl, and egui's Command modifier is the Cmd key on a Mac, so there they
-/// read "Cmd+S".
+/// read "Cmd+S" (and the key chips "Cmd K").
 pub(super) fn shortcut_label(shortcut: &str) -> String {
-    if cfg!(target_os = "macos") { shortcut.replace("Ctrl+", "Cmd+") } else { shortcut.to_string() }
+    if cfg!(target_os = "macos") { shortcut.replace("Ctrl+", "Cmd+").replace("Ctrl ", "Cmd ") } else { shortcut.to_string() }
 }
 
 const fn command(menu: &'static str, label: &'static str, run: fn(&mut QuintessApp, &egui::Context)) -> Command {

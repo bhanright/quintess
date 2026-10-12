@@ -418,9 +418,66 @@ et.rs`): .pfx/.p12
   packages and screenshots the app under Xvfb. Not on Linux: the Windows
   certificate store (the Sign dialog hides it), Microsoft Office conversion
   (listed as "Windows only"), the printer Properties dialog, self-update.
-  Verified only by cross-building from Windows with zig (this PC has
-  virtualization off, so WSL could not run); the Linux tests, packages and
-  app have not run on Linux yet: the workflow's first run is that check.
+  Cross-built from Windows with zig at first (this PC has virtualization
+  off, so WSL could not run); the workflow has since passed on GitHub's
+  Ubuntu 22.04 runners (tests, both packages installed, screenshots).
+- macOS (2026-10-12): Apple silicon and Intel, one universal program
+  (`lipo`) in `Quintess.app` on `Quintess-<version>-macos.dmg`.
+  `system.rs`: settings and data both in `~/Library/Application
+  Support/Quintess`; `app_bundle_contents`, `resources_folder` (models,
+  dictionaries, licenses in `Contents/Resources`) and `libraries_folder`
+  (PDFium in `Contents/Frameworks`, opened by full path, no rpath);
+  `program_folder` follows links (the CLI may be linked into
+  `/usr/local/bin`); `open -R` reveals in the Finder. `system_fonts.rs`:
+  the Mac font folders, the Windows core fonts found by their Windows names
+  under the names macOS gives them (`MAC_NAMES_OF_WINDOWS_FONTS`; same
+  metrics, so editing needs no stand-ins), `face_with_style` for
+  collections, `is_readable_face` (every UI font is checked before egui
+  gets it); the UI uses San Francisco, Helvetica Neue (Medium for headings)
+  and SF Mono or Menlo, with the bundled icon font. `quintess-app/src/desktop.rs`
+  receives the Finder's open-documents and the Dock's quit Apple events
+  through `fmv-macos-events` (winit handles neither), points the app
+  menu's Quit (Cmd+Q) at `performClose:` so unsaved changes are asked
+  about, and adds an Edit menu for the native file dialogs; `-psn_`
+  arguments are ignored (`choose_mode`). Shortcut labels read Cmd
+  (`commands::shortcut_label`). Converters: LibreOffice, Chrome, Chromium
+  and Edge in `/Applications` or `~/Applications`; Office hidden (listed
+  "Windows only"). Scanning explains SANE from Homebrew (also tried by full
+  path). Printing is the CUPS path unchanged. Read aloud is tts's
+  AVFoundation backend. Dictionaries also from `~/Library/Spelling`.
+  Updates point to the release page (`updates::MANUAL_UPDATE_ADVICE`).
+  Packaging: `tools/package_macos.py`, `installer/macos/` (Info.plist with
+  the PDF document type, empty hardened-runtime entitlements, the CI
+  certificate import), `assets/macos/quintess.icns` from
+  `tools/make_icons.py` (tile at 824/1024 as Apple's grid wants). Ad-hoc
+  signed (no Apple Developer account); Developer ID signing and
+  notarization run when the GitHub secrets exist (see BUILDING). The
+  packaging is adapted from PdfCraft (MIT OR Apache-2.0, credited in each
+  file and in the notices). `.github/workflows/macos-release.yml`: tests on
+  macos-14 (387 pass, 9 ignored), the disk image, install and try on
+  macos-14 and macos-15-intel (command line through a link, bundled
+  dictionaries found, print to file, converters found, screenshots, and a
+  PDF opened with `open -a`, i.e. through the Apple event, rendered). Not
+  tried by hand on a Mac: Gatekeeper's first-open steps, Cmd+Q's question,
+  reading aloud, printing to a real printer, Retina rendering.
+- Windows on ARM64 (2026-10-12): `quintess.exe` and `quintess-console.exe`
+  for `aarch64-pc-windows-msvc`, built and tested natively on GitHub's
+  `windows-11-arm` (388 pass, 9 ignored, as on x64; ring needs clang, which
+  the image has); static C runtime for both Windows targets
+  (`.cargo/config.toml`). `ISCC /DArch=arm64 installer\quintess.iss` makes
+  `Quintess-<version>-arm64-setup.exe` (ArchitecturesAllowed=arm64, so it
+  refuses x64 PCs; same AppId and folder, so it replaces an x64 install in
+  place). The x64 installer is unchanged on x64 PCs; on an ARM PC it
+  suggests the ARM64 one (`InitializeSetup`, suppressible). The update
+  check picks the installer for the computer's own processor
+  (`updates::pick_installer`, `system::native_architecture` through
+  `IsWow64Process2`), so emulated x64 installs move to ARM64.
+  `.github/workflows/windows-release.yml` builds, tests, compiles, installs
+  silently, checks the 55 installed files against the script's layout
+  (`tools/check_windows_install.py`), runs the command line, screenshots
+  (runners have no GPU: OpenGL falls back to wgpu, as designed) and
+  uninstalls, for x64 and ARM64; on `v*` tags it attaches both installers.
+  Not tried by hand on an ARM laptop.
 
 ## Ideas for next
 
