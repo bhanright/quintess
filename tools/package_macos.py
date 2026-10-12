@@ -288,7 +288,7 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     program = universal_program(work)
     # PDFium must run on both processors too.
-    run("lipo", "-verify_arch", pdfium / "lib" / "libpdfium.dylib", "arm64", "x86_64")
+    run("lipo", pdfium / "lib" / "libpdfium.dylib", "-verify_arch", "arm64", "x86_64")
 
     app = work / "Quintess.app"
     assemble_bundle(app, version, program, pdfium, models)
