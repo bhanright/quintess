@@ -1,0 +1,177 @@
+# Builds the macOS disk image on GitHub's runners: the tests on Apple
+# silicon (macos-14), then one universal program (Apple silicon and Intel,
+# joined with lipo) in Quintess.app on Quintess-<version>-macos.dmg
+# (tools/package_macos.py), which is opened, installed and tried on Apple
+# silicon and again on an Intel Mac (macos-15-intel), with self-check
+# screenshots of the app on both. Runs by hand (Actions > macOS release >
+# Run workflow) and on version tags, where the disk image is attached to
+# the release (a draft release is created if none exists yet).
+#
+# Signing: without secrets the app is ad-hoc signed (see docs/USER_GUIDE.md,
+# "Installing on macOS"). Adding the APPLE_CERTIFICATE secrets signs it with
+# that Developer ID, and APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID notarize it.
+name: macOS release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    # Temporary, while the workflow is tried on its branch (workflow_dispatch
+    # works only once the file is on the default branch).
+    branches: [ci/platforms]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PDFIUM_RELEASE: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086
+
+jobs:
+  test:
+    name: Tests (Apple silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: PDFium
+        run: mkdir -p vendor/pdfium-mac && curl -sSfL "$PDFIUM_RELEASE/pdfium-mac-arm64.tgz" | tar -xz -C vendor/pdfium-mac
+      - name: Test
+        env:
+          QUINTESS_PDFIUM_DIR: ${{ github.workspace }}/vendor/pdfium-mac/lib
+        run: cargo test -j 4 --workspace
+
+  package:
+    name: Disk image
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: PDFium (universal)
+        run: |
+          mkdir -p vendor/pdfium-mac && curl -sSfL "$PDFIUM_RELEASE/pdfium-mac-univ.tgz" | tar -xz -C vendor/pdfium-mac
+          lipo -info vendor/pdfium-mac/lib/libpdfium.dylib
+      - name: OCR models
+        # Checked against their SHA-256 by package_macos.py.
+        run: |
+          mkdir -p vendor/ocrs-models
+          for model in text-detection text-recognition; do
+            curl -sSfL -o "vendor/ocrs-models/$model.onnx" "https://ocrs-models.s3-accelerate.amazonaws.com/$model.onnx"
+          done
+      - name: Signing certificate (only when the secrets exist)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: bash installer/macos/import-signing-certificate.sh
+      - name: Build and package
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: python3 tools/package_macos.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quintess-macos
+          path: |
+            installer/output/Quintess-*-macos.dmg
+            installer/output/Quintess-*-macos.dmg.sha256
+
+  try:
+    name: Install and try (${{ matrix.name }})
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple silicon
+            runner: macos-14
+            architecture: arm64
+          - name: Intel
+            runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: quintess-macos
+          path: dmg
+      - name: Install from the disk image
+        run: |
+          image=$(ls dmg/Quintess-*-macos.dmg)
+          (cd dmg && shasum -a 256 -c "$(basename "$image").sha256")
+          hdiutil attach -nobrowse -readonly -mountpoint /Volumes/Quintess "$image"
+          ls -la /Volumes/Quintess
+          ditto /Volumes/Quintess/Quintess.app /Applications/Quintess.app
+          hdiutil detach /Volumes/Quintess
+          codesign --verify --strict --deep --verbose=2 /Applications/Quintess.app
+          codesign -dv /Applications/Quintess.app 2>&1 | grep -E "Signature|Identifier|Format"
+          lipo -info /Applications/Quintess.app/Contents/MacOS/quintess
+          find /Applications/Quintess.app -maxdepth 3 | sort
+      - name: The command-line tool
+        run: |
+          quintess=/Applications/Quintess.app/Contents/MacOS/quintess
+          # The program runs natively on this processor.
+          test "$(uname -m)" = "${{ matrix.architecture }}"
+          $quintess --version
+          # Linked into a bin folder, as the guide suggests, it still finds its bundle.
+          mkdir -p "$RUNNER_TEMP/bin" && ln -sf "$quintess" "$RUNNER_TEMP/bin/quintess"
+          "$RUNNER_TEMP/bin/quintess" --version
+          printf '# Quintess on macOS (%s)\n\nA **sample** page with *styles*.\n\n- One\n- Two\n' "${{ matrix.name }}" > sample.md
+          "$RUNNER_TEMP/bin/quintess" create markdown sample.md -o sample.pdf
+          "$RUNNER_TEMP/bin/quintess" info sample.pdf
+          # The bundled dictionaries (en-GB and others) are found in Contents/Resources.
+          "$RUNNER_TEMP/bin/quintess" spell sample.pdf --languages | tee languages.txt
+          grep -q en-GB languages.txt
+          "$RUNNER_TEMP/bin/quintess" print sample.pdf --to-file printed.pdf
+          "$RUNNER_TEMP/bin/quintess" info printed.pdf
+          "$RUNNER_TEMP/bin/quintess" printers || true
+          "$RUNNER_TEMP/bin/quintess" converters
+      - name: Screenshot
+        # The app's self-check draws the window once, saves a picture and
+        # exits; perl's alarm stands in for `timeout`, which macOS lacks.
+        run: |
+          QUINTESS_SCREENSHOT="$PWD/screenshot-macos-${{ matrix.architecture }}.png" perl -e 'alarm shift; exec @ARGV' 180 /Applications/Quintess.app/Contents/MacOS/quintess sample.pdf
+          test -f "screenshot-macos-${{ matrix.architecture }}.png"
+          QUINTESS_SCREENSHOT="$PWD/screenshot-macos-${{ matrix.architecture }}-print-dialog.png" QUINTESS_SETUP=dialog=print perl -e 'alarm shift; exec @ARGV' 180 /Applications/Quintess.app/Contents/MacOS/quintess sample.pdf
+      - name: Open a PDF the way the Finder does
+        # `open -a` sends the app an "open documents" Apple event instead of
+        # passing the file as an argument (crates/quintess-app/src/desktop.rs).
+        continue-on-error: true
+        run: |
+          picture="$PWD/screenshot-macos-${{ matrix.architecture }}-opened-by-finder.png"
+          perl -e 'alarm shift; exec @ARGV' 180 open -W -n --env "QUINTESS_SCREENSHOT=$picture" -a /Applications/Quintess.app "$PWD/sample.pdf"
+          test -f "$picture"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-macos-${{ matrix.architecture }}
+          path: screenshot-*.png
+          if-no-files-found: ignore
+
+  release:
+    name: Attach to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, try]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: quintess-macos
+          path: dmg
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          files=$(ls dmg/Quintess-*-macos.dmg dmg/Quintess-*-macos.dmg.sha256)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $files --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --title "Quintess ${GITHUB_REF_NAME#v}" --notes "macOS disk image; see the README for installing." $files
+          fi

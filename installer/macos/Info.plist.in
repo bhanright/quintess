@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The app bundle's description, filled in by tools/package_macos.py, which
+  replaces @VERSION@ (the workspace version, e.g. 0.3.0) and @COMMIT@.
+
+  Adapted from PdfCraft's packaging/macos/Info.plist.in
+  (https://github.com/storytold/pdfcraft, commit 6d843a8e8b22e4442666eb9e12f506c40458af3d),
+  Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0.
+  Modified: Quintess's names, identifier, category and copyright.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>Quintess</string>
+  <key>CFBundleName</key>
+  <string>Quintess</string>
+  <!-- One program is the app and the command-line tool (Contents/MacOS/quintess). -->
+  <key>CFBundleExecutable</key>
+  <string>quintess</string>
+  <key>CFBundleIdentifier</key>
+  <string>cc.quintess.Quintess</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@VERSION@</string>
+  <key>QuintessBuildCommit</key>
+  <string>@COMMIT@</string>
+  <key>CFBundleIconFile</key>
+  <string>quintess</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+  <!-- Must match MACOS_DEPLOYMENT_TARGET in tools/package_macos.py. Big Sur
+       is the first macOS for Apple silicon. -->
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>NSRequiresAquaSystemAppearance</key>
+  <false/>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © 2026 William Hanright. MIT OR Apache-2.0.</string>
+
+  <!-- PDFs: Quintess is offered under Open With and can be made the default
+       PDF app, without taking over from Preview when installed
+       ("Alternate"). Declared by type identifier (what current macOS filters
+       Open With on), with the extension and MIME type for older systems.
+       The Finder hands files over as an Apple event, which
+       crates/quintess-app/src/desktop.rs receives. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>PDF Document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>com.adobe.pdf</string></array>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>pdf</string></array>
+      <key>CFBundleTypeMIMETypes</key>
+      <array><string>application/pdf</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>

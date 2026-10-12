@@ -2,10 +2,14 @@
 //! asks or has turned automatic checks on. The check asks GitHub's public
 //! API for the latest release; nothing about the person or their documents
 //! is sent. On Windows a newer release's installer can be downloaded and,
-//! when the release publishes a `.sha256` file beside it, verified. On Linux
-//! Quintess is installed from a package (.deb or the tarball's install.sh),
-//! so it never downloads or runs anything itself: it points to the release
-//! page, and the person updates the way they installed.
+//! when the release publishes a `.sha256` file beside it, verified: the
+//! ARM64 installer on a Windows PC with an ARM processor (also when the x64
+//! build is running there under emulation, which moves the person to the
+//! native build), the x64 one elsewhere. On Linux Quintess is installed
+//! from a package (.deb or the tarball's install.sh) and on macOS from a
+//! disk image, so it never downloads or runs anything itself there: it
+//! points to the release page, and the person updates the way they
+//! installed.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -62,17 +66,45 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     }
 }
 
-/// The end of the name of the installer this program can run, if any.
-pub const INSTALLER_SUFFIX: Option<&str> = if cfg!(windows) { Some("-setup.exe") } else { None };
+/// The processor family whose Windows installer this computer should run
+/// ("x64" or "arm64"), or `None` where Quintess never runs an installer
+/// (macOS and Linux).
+pub fn installer_architecture() -> Option<&'static str> {
+    cfg!(windows).then(crate::system::native_architecture)
+}
+
+/// The Windows installer for `architecture` among a release's files:
+/// `Quintess-<version>-arm64-setup.exe` for "arm64" and
+/// `Quintess-<version>-setup.exe` for "x64". A release from before the
+/// ARM64 build offers ARM64 computers the x64 installer, which Windows on
+/// ARM runs under emulation.
+fn pick_installer(assets: &[Asset], architecture: &str) -> Option<Asset> {
+    let named = |predicate: &dyn Fn(&str) -> bool| assets.iter().find(|asset| predicate(&asset.name.to_lowercase())).cloned();
+    let is_arm64 = |name: &str| name.ends_with("-arm64-setup.exe");
+    let is_x64 = |name: &str| name.ends_with("-setup.exe") && !is_arm64(name);
+    match architecture {
+        "arm64" => named(&is_arm64).or_else(|| named(&is_x64)),
+        _ => named(&is_x64),
+    }
+}
+
+/// How to update by hand where Quintess doesn't install its own updates.
+pub const MANUAL_UPDATE_ADVICE: Option<&str> = if cfg!(windows) {
+    None
+} else if cfg!(target_os = "macos") {
+    Some("Download the new .dmg from the release page and drag Quintess into Applications again, replacing the old copy.")
+} else {
+    Some("Download it from the release page: the .deb if you installed with apt or dpkg, the .tar.gz if you used install.sh.")
+};
 
 /// Reads GitHub's description of a release.
 pub fn parse_release(json: &str) -> Result<Release> {
-    parse_release_with_installer(json, INSTALLER_SUFFIX)
+    parse_release_with_installer(json, installer_architecture())
 }
 
-/// Reads a release, taking as the installer the asset whose name ends with
-/// `installer_suffix` (none when `None`).
-fn parse_release_with_installer(json: &str, installer_suffix: Option<&str>) -> Result<Release> {
+/// Reads a release, taking as the installer the Windows installer for
+/// `installer_architecture` (none when `None`).
+fn parse_release_with_installer(json: &str, installer_architecture: Option<&str>) -> Result<Release> {
     let value: serde_json::Value = serde_json::from_str(json).context("GitHub's answer could not be read")?;
     let text = |key: &str| value.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let tag = text("tag_name");
@@ -93,7 +125,7 @@ fn parse_release_with_installer(json: &str, installer_suffix: Option<&str>) -> R
                 .collect()
         })
         .unwrap_or_default();
-    let installer = installer_suffix.and_then(|suffix| assets.iter().find(|a| a.name.to_lowercase().ends_with(suffix)).cloned());
+    let installer = installer_architecture.and_then(|architecture| pick_installer(&assets, architecture));
     let checksum = installer.as_ref().and_then(|installer| assets.iter().find(|a| a.name.eq_ignore_ascii_case(&format!("{}.sha256", installer.name))).cloned());
     Ok(Release {
         version: tag.trim_start_matches(['v', 'V']).to_string(),
@@ -141,7 +173,7 @@ pub fn download_installer(release: &Release, folder: &Path, progress: &dyn Fn(u6
         if cfg!(windows) {
             bail!("this release has no Windows installer; download it from {}", release.page)
         }
-        bail!("update with the same kind of package you installed: download it from {}", release.page)
+        bail!("{} It is at {}", MANUAL_UPDATE_ADVICE.unwrap_or_default(), release.page)
     };
     // The name comes from GitHub; keep only what is safe in a file name.
     let name: String = installer.name.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect();
@@ -199,7 +231,7 @@ mod tests {
             "assets":[{"name":"Quintess-0.2.0-setup.exe","browser_download_url":"https://example.com/a.exe","size":1234},
                       {"name":"Quintess-0.2.0-setup.exe.sha256","browser_download_url":"https://example.com/a.sha256","size":64},
                       {"name":"notes.txt","browser_download_url":"https://example.com/n","size":5}]}"#;
-        let release = parse_release_with_installer(json, Some("-setup.exe")).unwrap();
+        let release = parse_release_with_installer(json, Some("x64")).unwrap();
         assert_eq!(release.version, "0.2.0");
         assert_eq!(release.installer.as_ref().map(|a| a.size), Some(1234));
         assert_eq!(release.checksum.as_ref().map(|a| a.name.as_str()), Some("Quintess-0.2.0-setup.exe.sha256"));
@@ -214,12 +246,29 @@ mod tests {
                       {"name":"quintess-0.2.0-linux-x86_64.tar.gz","browser_download_url":"https://example.com/q.tar.gz","size":98}]}"#;
         let release = parse_release(json).unwrap();
         if cfg!(windows) {
+            // This release has no ARM64 installer, so ARM64 computers get the x64 one too.
             assert_eq!(release.installer.map(|a| a.name).as_deref(), Some("Quintess-0.2.0-setup.exe"));
         } else {
-            // Linux never downloads a Windows installer, nor runs a package itself.
+            // macOS and Linux never download a Windows installer, nor run a package themselves.
             assert_eq!(release.installer, None);
             assert!(download_installer(&release, &std::env::temp_dir(), &|_, _| {}).is_err());
         }
         assert_eq!(parse_release_with_installer(json, None).unwrap().installer, None);
+    }
+
+    #[test]
+    fn each_processor_gets_its_own_windows_installer() {
+        let json = r#"{"tag_name":"v0.4.0","html_url":"https://github.com/bhanright/quintess/releases/tag/v0.4.0",
+            "assets":[{"name":"Quintess-0.4.0-arm64-setup.exe","browser_download_url":"https://example.com/arm.exe","size":2},
+                      {"name":"Quintess-0.4.0-arm64-setup.exe.sha256","browser_download_url":"https://example.com/arm.sha256","size":64},
+                      {"name":"Quintess-0.4.0-setup.exe","browser_download_url":"https://example.com/x64.exe","size":1},
+                      {"name":"Quintess-0.4.0-setup.exe.sha256","browser_download_url":"https://example.com/x64.sha256","size":64},
+                      {"name":"Quintess-0.4.0-macos.dmg","browser_download_url":"https://example.com/q.dmg","size":3}]}"#;
+        let arm64 = parse_release_with_installer(json, Some("arm64")).unwrap();
+        assert_eq!(arm64.installer.map(|a| a.name).as_deref(), Some("Quintess-0.4.0-arm64-setup.exe"));
+        assert_eq!(arm64.checksum.map(|a| a.name).as_deref(), Some("Quintess-0.4.0-arm64-setup.exe.sha256"));
+        let x64 = parse_release_with_installer(json, Some("x64")).unwrap();
+        assert_eq!(x64.installer.map(|a| a.name).as_deref(), Some("Quintess-0.4.0-setup.exe"));
+        assert_eq!(x64.checksum.map(|a| a.name).as_deref(), Some("Quintess-0.4.0-setup.exe.sha256"));
     }
 }

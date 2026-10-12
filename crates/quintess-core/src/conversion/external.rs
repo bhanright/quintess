@@ -53,6 +53,12 @@ impl SearchLocations {
             }
         } else {
             install_roots.push(PathBuf::from("/"));
+            // Mac apps can also be installed for one person, in ~/Applications.
+            if cfg!(target_os = "macos") {
+                if let Some(home) = std::env::var_os("HOME") {
+                    install_roots.push(PathBuf::from(home));
+                }
+            }
         }
         Self { program_folders, install_roots, check_registry: true }
     }
@@ -95,7 +101,8 @@ pub fn find_libreoffice(search: &SearchLocations) -> Option<FoundProgram> {
     let installed = if cfg!(windows) {
         search.installed(&[r"LibreOffice\program\soffice.exe"])
     } else {
-        search.installed(&["usr/bin/soffice", "usr/bin/libreoffice", "usr/lib/libreoffice/program/soffice", "usr/lib64/libreoffice/program/soffice", "usr/local/bin/soffice", "snap/bin/libreoffice"]).or_else(|| {
+        // The Mac app bundle's program first; on Linux it simply isn't there.
+        search.installed(&["Applications/LibreOffice.app/Contents/MacOS/soffice", "usr/bin/soffice", "usr/bin/libreoffice", "usr/lib/libreoffice/program/soffice", "usr/lib64/libreoffice/program/soffice", "usr/local/bin/soffice", "snap/bin/libreoffice"]).or_else(|| {
             // Packages from libreoffice.org install to /opt/libreofficeX.Y.
             search.install_roots.iter().filter_map(|root| std::fs::read_dir(root.join("opt")).ok()).flat_map(|entries| entries.flatten()).filter(|entry| entry.file_name().to_string_lossy().starts_with("libreoffice")).map(|entry| entry.path().join("program/soffice")).find(|path| path.is_file())
         })
@@ -180,14 +187,14 @@ fn quick_output(program: &Path, arguments: &[&str]) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// Microsoft Edge (Windows, or `microsoft-edge` on Linux).
+/// Microsoft Edge (Windows, the Mac app, or `microsoft-edge` on Linux).
 pub fn find_edge(search: &SearchLocations) -> Option<FoundProgram> {
     if cfg!(windows) {
         let path = search.installed(&[r"Microsoft\Edge\Application\msedge.exe"])?;
         let version = version_folder_beside(&path);
         return Some(FoundProgram { path, version });
     }
-    let path = search.on_path(&["microsoft-edge", "microsoft-edge-stable"])?;
+    let path = search.installed(&["Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]).or_else(|| search.on_path(&["microsoft-edge", "microsoft-edge-stable"]))?;
     let version = browser_version_from_output(&path);
     Some(FoundProgram { path, version })
 }
@@ -199,7 +206,8 @@ pub fn find_chromium(search: &SearchLocations) -> Option<FoundProgram> {
         let version = version_folder_beside(&path);
         return Some(FoundProgram { path, version });
     }
-    let path = search.on_path(&["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"])?;
+    let mac_apps = ["Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "Applications/Chromium.app/Contents/MacOS/Chromium"];
+    let path = search.installed(&mac_apps).or_else(|| search.on_path(&["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"]))?;
     let version = browser_version_from_output(&path);
     Some(FoundProgram { path, version })
 }

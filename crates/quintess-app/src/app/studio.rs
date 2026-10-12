@@ -128,7 +128,7 @@ impl QuintessApp {
                         }
                     }
                     Some(true) => {
-                        if theme::primary_button(ui, "Save").on_hover_text("Ctrl+S").clicked() {
+                        if theme::primary_button(ui, "Save").on_hover_text(super::commands::shortcut_label("Ctrl+S")).clicked() {
                             self.save(false);
                         }
                     }

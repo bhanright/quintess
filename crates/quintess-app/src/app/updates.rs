@@ -112,10 +112,11 @@ impl QuintessApp {
                         ui.label(RichText::new(release.notes.trim()).color(colors.text_muted));
                     });
                 }
-                if cfg!(not(windows)) {
-                    // Linux installs come from a package; Quintess doesn't replace itself.
+                // Mac and Linux installs come from a disk image or a package;
+                // Quintess doesn't replace itself there.
+                if let Some(advice) = updates::MANUAL_UPDATE_ADVICE {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Download it from the release page: the .deb if you installed with apt or dpkg, the .tar.gz if you used install.sh.").color(colors.text_muted));
+                    ui.label(RichText::new(advice).color(colors.text_muted));
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {

@@ -269,51 +269,99 @@ pub fn icon_family() -> FontFamily {
     FontFamily::Name("icons".into())
 }
 
-/// The icons used where Segoe Fluent Icons is missing (Linux, older
+/// The icons used where Segoe Fluent Icons is missing (macOS, Linux, older
 /// Windows): a subset of Material Icons with each glyph at the code point of
 /// the Segoe icon it stands in for (`tools/make_icon_font.py`), so drawing
 /// code is the same with either font. Apache-2.0; see the notices.
 const BUNDLED_ICON_FONT: &[u8] = include_bytes!("../../../assets/fonts/quintess-icons.otf");
 
-/// A font file for one role: the first of the Windows fonts, then on other
-/// systems the font fontconfig picks for `fontconfig_pattern` (the
-/// desktop's own choice), then the first of the common free fonts.
-fn font_file(windows_files: &[&str], fontconfig_pattern: &str, free_files: &[&str]) -> Option<std::path::PathBuf> {
+/// Where to look for one role's font, in order: Windows files, macOS faces
+/// (a file and the style of the face wanted in it, "" for the file's only
+/// face), the font fontconfig picks for a pattern (the Linux desktop's own
+/// choice), then common free fonts.
+struct FontChoices<'a> {
+    windows: &'a [&'a str],
+    mac: &'a [(&'a str, &'a str)],
+    fontconfig: &'a str,
+    free: &'a [&'a str],
+}
+
+/// The font file and face for one role, if any is installed.
+fn font_file(choices: FontChoices) -> Option<(std::path::PathBuf, u32)> {
     use quintess_core::system_fonts;
     // Developer switch: QUINTESS_IGNORE_SYSTEM_FONTS=1 shows the app as it
     // looks with none of these fonts (built-in text font, bundled icons).
     if std::env::var_os("QUINTESS_IGNORE_SYSTEM_FONTS").is_some() {
         return None;
     }
-    let desktop_choice = || if fontconfig_pattern.is_empty() { None } else { system_fonts::fontconfig_match(fontconfig_pattern) };
-    system_fonts::find_first(windows_files).or_else(desktop_choice).or_else(|| system_fonts::find_first(free_files))
+    let first_face = |path| (path, 0);
+    let mac_face = || {
+        choices.mac.iter().find_map(|(file, style)| {
+            let path = system_fonts::find(file)?;
+            let face = if style.is_empty() { 0 } else { system_fonts::face_with_style(&path, style)? };
+            Some((path, face))
+        })
+    };
+    let desktop_choice = || if choices.fontconfig.is_empty() { None } else { system_fonts::fontconfig_match(choices.fontconfig).map(first_face) };
+    system_fonts::find_first(choices.windows).map(first_face).or_else(mac_face).or_else(desktop_choice).or_else(|| system_fonts::find_first(choices.free).map(first_face))
 }
 
 /// Loads the fonts both looks use. Studio uses Windows 11's Segoe UI
 /// Variable for text, Bahnschrift for headings, Cascadia Mono for numbers
 /// and Segoe Fluent Icons for icons; each falls back to an older font. On
-/// Linux the desktop's own sans-serif and monospace fonts are used (through
-/// fontconfig, else common free fonts, else egui's built-in font), and the
-/// bundled icon font stands in for Segoe's.
+/// macOS it uses San Francisco (the system font) with Helvetica Neue for
+/// headings, which San Francisco's single file can't give in bold, and SF
+/// Mono or Menlo. On Linux the desktop's own sans-serif and monospace fonts
+/// are used (through fontconfig, else common free fonts, else egui's
+/// built-in font). Where Segoe's icons are missing (macOS, Linux) the
+/// bundled icon font stands in.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    let mut load = |name: &str, file: Option<std::path::PathBuf>| -> bool {
-        match file.and_then(|path| std::fs::read(path).ok()) {
-            Some(bytes) => {
-                fonts.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+    let mut load = |name: &str, file: Option<(std::path::PathBuf, u32)>| -> bool {
+        let Some((path, face)) = file else { return false };
+        match std::fs::read(path) {
+            // A font egui couldn't read would stop the app, so it is checked first.
+            Ok(bytes) if quintess_core::system_fonts::is_readable_face(&bytes, face) => {
+                let mut data = egui::FontData::from_owned(bytes);
+                data.index = face;
+                fonts.font_data.insert(name.to_owned(), std::sync::Arc::new(data));
                 true
             }
-            None => false,
+            _ => false,
         }
     };
-    let text = load("text", font_file(&["SegUIVar.ttf", "segoeui.ttf"], "sans-serif", &["Cantarell-VF.otf", "Cantarell-Regular.otf", "NotoSans-Regular.ttf", "DejaVuSans.ttf", "Ubuntu-R.ttf", "LiberationSans-Regular.ttf"]));
-    let semibold = load("semibold", font_file(&["seguisb.ttf", "segoeuib.ttf"], "sans-serif:bold", &["NotoSans-SemiBold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "Ubuntu-M.ttf", "LiberationSans-Bold.ttf"]));
-    let display = load("display", font_file(&["bahnschrift.ttf", "seguisb.ttf"], "sans-serif:bold", &["NotoSans-SemiBold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "Ubuntu-M.ttf", "LiberationSans-Bold.ttf"]));
-    let mono = load("mono", font_file(&["CascadiaMono.ttf", "consola.ttf"], "monospace", &["DejaVuSansMono.ttf", "NotoSansMono-Regular.ttf", "UbuntuMono-R.ttf", "LiberationMono-Regular.ttf"]));
-    let system_icons = load("icons", font_file(&["SegoeIcons.ttf", "segmdl2.ttf"], "", &[]));
+    let text = load(
+        "text",
+        font_file(FontChoices {
+            windows: &["SegUIVar.ttf", "segoeui.ttf"],
+            mac: &[("SFNS.ttf", ""), ("HelveticaNeue.ttc", "Regular")],
+            fontconfig: "sans-serif",
+            free: &["Cantarell-VF.otf", "Cantarell-Regular.otf", "NotoSans-Regular.ttf", "DejaVuSans.ttf", "Ubuntu-R.ttf", "LiberationSans-Regular.ttf"],
+        }),
+    );
+    let bold_free_fonts = &["NotoSans-SemiBold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "Ubuntu-M.ttf", "LiberationSans-Bold.ttf"];
+    let semibold = load(
+        "semibold",
+        font_file(FontChoices { windows: &["seguisb.ttf", "segoeuib.ttf"], mac: &[("HelveticaNeue.ttc", "Medium"), ("HelveticaNeue.ttc", "Bold")], fontconfig: "sans-serif:bold", free: bold_free_fonts }),
+    );
+    let display = load(
+        "display",
+        font_file(FontChoices { windows: &["bahnschrift.ttf", "seguisb.ttf"], mac: &[("HelveticaNeue.ttc", "Medium"), ("HelveticaNeue.ttc", "Bold")], fontconfig: "sans-serif:bold", free: bold_free_fonts }),
+    );
+    let mono = load(
+        "mono",
+        font_file(FontChoices {
+            windows: &["CascadiaMono.ttf", "consola.ttf"],
+            mac: &[("SFNSMono.ttf", ""), ("Menlo.ttc", "Regular")],
+            fontconfig: "monospace",
+            free: &["DejaVuSansMono.ttf", "NotoSansMono-Regular.ttf", "UbuntuMono-R.ttf", "LiberationMono-Regular.ttf"],
+        }),
+    );
+    let system_icons = load("icons", font_file(FontChoices { windows: &["SegoeIcons.ttf", "segmdl2.ttf"], mac: &[], fontconfig: "", free: &[] }));
     // Wide symbol coverage (arrows, check marks, math) behind the text font.
-    let symbol = load("symbol", font_file(&["seguisym.ttf"], "", &["NotoSansSymbols2-Regular.ttf", "DejaVuSans.ttf"]));
-    let emoji = load("emoji", font_file(&["seguiemj.ttf"], "", &[]));
+    let symbol = load("symbol", font_file(FontChoices { windows: &["seguisym.ttf"], mac: &[("Apple Symbols.ttf", "")], fontconfig: "", free: &["NotoSansSymbols2-Regular.ttf", "DejaVuSans.ttf"] }));
+    // Apple Color Emoji is a bitmap font egui can't draw, so macOS has none here.
+    let emoji = load("emoji", font_file(FontChoices { windows: &["seguiemj.ttf"], mac: &[], fontconfig: "", free: &[] }));
     if !system_icons {
         fonts.font_data.insert("icons".to_owned(), std::sync::Arc::new(egui::FontData::from_static(BUNDLED_ICON_FONT)));
     }

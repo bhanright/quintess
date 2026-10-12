@@ -110,9 +110,11 @@ fn fallback_files(style: FontStyle) -> Vec<(PathBuf, u32)> {
 /// The file names tried for a style, in order. The font matching the
 /// standard font's look comes first, so Latin text looks like its
 /// neighbors; broad fonts then cover Greek, Cyrillic and more, and script
-/// fonts the rest. Windows names come first; on Linux the metric-compatible
-/// Liberation fonts stand in for Arial, Times New Roman and Courier New
-/// (same widths, so edited lines keep their length), then DejaVu and Noto.
+/// fonts the rest. Windows names come first (macOS has Arial, Times New
+/// Roman and Courier New too, found by these names through
+/// `system_fonts::find`); on Linux the metric-compatible Liberation fonts
+/// stand in for them (same widths, so edited lines keep their length), then
+/// DejaVu and Noto.
 fn fallback_file_names(style: FontStyle) -> Vec<&'static str> {
     let (windows_matching, free_matching) = match (style.family, style.weight) {
         (FontFamily::Sans, FontWeight::Regular) => ("arial.ttf", "LiberationSans-Regular.ttf"),
@@ -152,7 +154,16 @@ fn fallback_file_names(style: FontStyle) -> Vec<&'static str> {
         "NotoSansCJK-Regular.ttc",
         "NotoSansCJKsc-Regular.otf",
         "DroidSansFallbackFull.ttf",
+        // macOS: broad coverage, then symbols, Chinese and Japanese, Korean,
+        // Indic scripts, Arabic, Hebrew and Thai.
         "Arial Unicode.ttf",
+        "Apple Symbols.ttf",
+        "Hiragino Sans GB.ttc",
+        "AppleSDGothicNeo.ttc",
+        "Kohinoor.ttc",
+        "GeezaPro.ttc",
+        "ArialHB.ttc",
+        "Thonburi.ttc",
     ]);
     names
 }

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the hardened runtime, used only when Quintess is signed
+  with a Developer ID (tools/package_macos.py; ad-hoc builds don't use the
+  hardened runtime). Deliberately empty: Quintess needs no JIT, loads only
+  PDFium, which is signed with the same identity inside the bundle, and is
+  not sandboxed (it opens files by path, from the command line and by drag
+  and drop). Add an exception only with a reason in a comment.
+
+  Adapted from PdfCraft's packaging/macos/entitlements.plist
+  (https://github.com/storytold/pdfcraft, commit 6d843a8e8b22e4442666eb9e12f506c40458af3d),
+  Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors, MIT OR Apache-2.0.
+  Modified: the explanation.
+-->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>

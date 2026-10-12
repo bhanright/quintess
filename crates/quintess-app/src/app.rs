@@ -85,6 +85,8 @@ pub struct QuintessApp {
     /// The status line as the frame began, to tell whether this frame's
     /// edit wrote its own message (see `announce_signature_changes`).
     status_at_frame_start: String,
+    /// Files and quit requests from the desktop (the Mac's Finder and Dock).
+    desktop: crate::desktop::DesktopInbox,
 }
 
 /// A developer aid: with `QUINTESS_SCREENSHOT=<file.png>` the app sets itself
@@ -115,7 +117,8 @@ struct SelfCheck {
 }
 
 impl QuintessApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>, desktop: crate::desktop::DesktopInbox) -> Self {
+        desktop.connect(&cc.egui_ctx);
         crate::theme::install_fonts(&cc.egui_ctx);
         let settings = quintess_core::settings::Settings::load();
         let (look, dark) = (crate::theme::Look::from_name(&settings.look), settings.dark_interface);
@@ -157,6 +160,7 @@ impl QuintessApp {
             watch: None,
             close_confirmed: false,
             status_at_frame_start: String::new(),
+            desktop,
         };
         app.tool_settings.author = app.settings.author.clone();
         app.configure_spelling();
@@ -2710,7 +2714,14 @@ impl eframe::App for QuintessApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
         }
 
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        let mut dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        // Files opened from the Mac's Finder are handled like dropped ones.
+        for request in self.desktop.take() {
+            match request {
+                crate::desktop::DesktopRequest::Open(paths) => dropped.extend(paths),
+                crate::desktop::DesktopRequest::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            }
+        }
         for path in dropped {
             let is_image = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff"].contains(&e.to_ascii_lowercase().as_str()));
             if is_image {

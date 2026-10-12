@@ -7,6 +7,7 @@
 
 mod app;
 mod crash;
+mod desktop;
 mod dialogs;
 mod jobs;
 mod render;
@@ -50,14 +51,19 @@ fn run_window(files: Vec<PathBuf>) -> eframe::Result {
     let choice = std::env::var("QUINTESS_RENDERER").unwrap_or(preference);
     let first_choice = if choice == "wgpu" { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow };
     let options = |renderer| eframe::NativeOptions { renderer, viewport: viewport.clone(), ..Default::default() };
+    // Before the window opens, so a document the Mac's Finder launched the
+    // app with is caught (see desktop.rs).
+    let desktop_events = desktop::DesktopEvents::install();
     let result = eframe::run_native("Quintess", options(first_choice), Box::new({
         let files = files.clone();
-        move |cc| Ok(Box::new(app::QuintessApp::new(cc, files)))
+        let inbox = desktop_events.inbox();
+        move |cc| Ok(Box::new(app::QuintessApp::new(cc, files, inbox)))
     }));
     match result {
         Err(error) if first_choice == eframe::Renderer::Glow => {
             eprintln!("OpenGL couldn't start ({error}); using wgpu instead");
-            eframe::run_native("Quintess", options(eframe::Renderer::Wgpu), Box::new(move |cc| Ok(Box::new(app::QuintessApp::new(cc, files)))))
+            let inbox = desktop_events.inbox();
+            eframe::run_native("Quintess", options(eframe::Renderer::Wgpu), Box::new(move |cc| Ok(Box::new(app::QuintessApp::new(cc, files, inbox)))))
         }
         other => other,
     }

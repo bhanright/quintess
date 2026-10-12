@@ -800,7 +800,7 @@ impl ScriptSession {
                 default_value: &field.default_value,
             })
             .collect();
-        let data = serde_json::json!({ "fields": fields, "pageCount": form.page_count, "platform": if cfg!(windows) { "WIN" } else { "UNIX" } });
+        let data = serde_json::json!({ "fields": fields, "pageCount": form.page_count, "platform": if cfg!(windows) { "WIN" } else if cfg!(target_os = "macos") { "MAC" } else { "UNIX" } });
         session.evaluate(&format!("__quintess.load({data});")).map_err(|failure| format!("the form's fields did not load: {failure}"))?;
         session.evaluate("__quintess.loadingDocumentScripts = true;").map_err(|failure| failure.to_string())?;
         for script in &form.document_scripts {

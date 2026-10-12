@@ -4,11 +4,12 @@ PDFium and the OCR models. Run it before each release:
 
     python tools/third_party_notices.py
 
-It reads `cargo metadata` for Windows and for Linux, follows only the
-dependencies that end up in the programs (not test-only or build-only ones)
-and copies each crate's own LICENSE / COPYING / NOTICE files. One file
-covers both systems; crates built for only one are marked. Identical texts
-are printed once and referred to afterwards.
+It reads `cargo metadata` for Windows (x64 and ARM64), macOS (Apple
+silicon and Intel) and Linux, follows only the dependencies that end up in
+the programs (not test-only or build-only ones) and copies each crate's own
+LICENSE / COPYING / NOTICE files. One file covers every system; crates built
+for only some are marked. Identical texts are printed once and referred to
+afterwards.
 """
 
 import hashlib
@@ -21,7 +22,45 @@ OUTPUT = ROOT / "licenses" / "THIRD-PARTY-NOTICES.txt"
 # The packages whose programs ship: quintess-cli builds `quintess` (which
 # includes quintess-app) and quintess-console the Windows launcher, quintess.com.
 PROGRAMS = ["quintess-cli", "quintess-console"]
-PLATFORMS = {"x86_64-pc-windows-msvc": "Windows", "x86_64-unknown-linux-gnu": "Linux"}
+PLATFORMS = {
+    "x86_64-pc-windows-msvc": "Windows",
+    "aarch64-pc-windows-msvc": "Windows",
+    "aarch64-apple-darwin": "macOS",
+    "x86_64-apple-darwin": "macOS",
+    "x86_64-unknown-linux-gnu": "Linux",
+}
+SYSTEMS = ["Windows", "macOS", "Linux"]
+
+# Quintess's macOS packaging and Finder integration are adapted from
+# PdfCraft (see installer/macos and crates/quintess-app/src/desktop.rs),
+# whose MIT license asks for this notice.
+PDFCRAFT_NOTICE = """PdfCraft (https://github.com/storytold/pdfcraft, commit 6d843a8e8b22e4442666eb9e12f506c40458af3d):
+parts of the macOS packaging (installer/macos/Info.plist.in, entitlements.plist,
+import-signing-certificate.sh, tools/package_macos.py) and the approach to the
+Finder's Apple events (crates/quintess-app/src/desktop.rs) are adapted from it,
+modified. Licensed MIT OR Apache-2.0; its MIT license:
+
+MIT License
+
+Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE."""
 LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
 
 
@@ -57,9 +96,12 @@ def main():
             ["cargo", "metadata", "--format-version", "1", "--filter-platform", target],
             cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout)
         for package in shipped_packages(metadata):
-            found.setdefault(package["id"], (package, []))[1].append(system)
+            systems = found.setdefault(package["id"], (package, []))[1]
+            if system not in systems:
+                systems.append(system)
     packages = sorted((package for package, _ in found.values()), key=lambda p: (p["name"].lower(), p["version"]))
-    only_on = {pid: systems[0] for pid, (_, systems) in found.items() if len(systems) == 1}
+    # "Windows only", "macOS and Linux only" for crates not built everywhere.
+    only_on = {pid: " and ".join(system for system in SYSTEMS if system in systems) for pid, (_, systems) in found.items() if len(systems) < len(SYSTEMS)}
     lines = [
         "Third-party software in Quintess",
         "==============================",
@@ -107,6 +149,7 @@ def main():
             else:
                 printed[digest] = f"{package['name']} ({name})"
                 lines += [f"{name}:", "", text, ""]
+    lines += ["", "=" * 78, "PdfCraft (adapted packaging code)", "=" * 78, "", PDFCRAFT_NOTICE]
     icons = ROOT / "assets" / "fonts" / "quintess-icons.LICENSE.txt"
     lines += ["", "=" * 78, "Material Icons (the app's fallback icons)", "=" * 78, "", icons.read_text(encoding="utf-8").strip()]
     # The Windows and Linux builds of PDFium come from the same release of

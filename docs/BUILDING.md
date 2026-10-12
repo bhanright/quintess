@@ -14,8 +14,9 @@ both the desktop app and the command-line tool:
   launcher `quintess-console.exe`, installed as `quintess.com` (see
   "Windows console" below).
 
-It builds on Windows 10 and 11 (x64) and on 64-bit Linux (see "Linux"
-below).
+It builds on Windows 10 and 11 (x64, and ARM64: see "Windows on ARM"), on
+macOS 11 and later (Apple silicon and Intel: see "macOS") and on 64-bit
+Linux (see "Linux").
 
 ## What you need
 
@@ -84,6 +85,112 @@ same folder.
    `(Get-FileHash installer\output\Quintess-<version>-setup.exe).Hash.ToLower() + "  Quintess-<version>-setup.exe"`
    into `Quintess-<version>-setup.exe.sha256`.
 6. Publish both files on a GitHub release tagged `v<version>`.
+
+`.github/workflows/windows-release.yml` does all of this on GitHub's
+runners for x64 and ARM64 (Actions > Windows release > Run workflow, and on
+every `v*` tag, where it attaches both installers and their `.sha256`
+files to the release). It also installs each installer silently, checks
+the installed files against the layout above
+(`tools/check_windows_install.py`), runs the command line and takes a
+self-check screenshot. The notices file and the version in
+`installer/quintess.iss` are taken from the repository, so update both
+before tagging.
+
+## Windows on ARM
+
+The same sources build for Windows on ARM (`aarch64-pc-windows-msvc`).
+Every dependency builds for it: ring needs `clang` on the PATH for its ARM
+assembly (the LLVM installer, or `winget install LLVM.LLVM`), and the rest
+(Boa, the windows crate, WinRT speech through `tts`, rten's NEON code for
+OCR, spellbook) need nothing extra. PDFium comes from the same
+pdfium-binaries release: `pdfium-win-arm64.tgz`, unpacked into
+`vendor/pdfium-win-arm64`.
+
+On an ARM64 PC (or GitHub's `windows-11-arm` runner) with the ARM64 Rust
+toolchain:
+
+```
+cargo build --release -j 6 --target aarch64-pc-windows-msvc
+set QUINTESS_PDFIUM_DIR=%CD%\vendor\pdfium-win-arm64\bin
+cargo test -j 6 --workspace --target aarch64-pc-windows-msvc
+ISCC /DArch=arm64 installer\quintess.iss
+```
+
+The installer is `installer\output\Quintess-<version>-arm64-setup.exe`. It
+can also be cross-built on an x64 PC (`rustup target add
+aarch64-pc-windows-msvc`, the Visual Studio "ARM64 build tools" component
+and clang), but not tested there. `.cargo/config.toml` links the C runtime
+statically for both Windows targets.
+
+The ARM64 installer allows only ARM64 PCs (`ArchitecturesAllowed=arm64`):
+its program can't run on an x64 one. It shares the x64 installer's AppId
+and folder, so it upgrades an x64 installation in place. The x64 installer
+still installs on ARM64 PCs, which run it under emulation, but first
+suggests the ARM64 one; and the update check (`updates::pick_installer`)
+offers ARM64 PCs the ARM64 installer even from the x64 build
+(`system::native_architecture` sees through the emulation).
+
+## macOS
+
+The workspace builds on macOS 11 (Big Sur) and later, with Xcode's
+command-line tools (`xcode-select --install`) and Rust from rustup. Unpack
+PDFium **chromium/8086** from pdfium-binaries into `vendor/pdfium-mac`:
+`pdfium-mac-arm64.tgz` (or `pdfium-mac-x64.tgz` on an Intel Mac) for
+development, `pdfium-mac-univ.tgz` (both processors) for a release. Then:
+
+```
+QUINTESS_PDFIUM_DIR=$PWD/vendor/pdfium-mac/lib cargo test -j 6 --workspace
+```
+
+The release is one universal program in an app bundle on a disk image. With
+both targets installed (`rustup target add aarch64-apple-darwin
+x86_64-apple-darwin`), the OCR models in `vendor/ocrs-models`, the
+universal PDFium and the notices regenerated:
+
+```
+python3 tools/package_macos.py
+```
+
+builds both targets, joins them with `lipo`, assembles `Quintess.app`
+(`Contents/MacOS/quintess`, `Contents/Frameworks/libpdfium.dylib`,
+`Contents/Resources` with the icon, `dictionaries`, `models` and
+`licenses`, and `Contents/Info.plist` from `installer/macos/Info.plist.in`,
+which declares PDFs so the Finder's Open With lists Quintess), signs it and
+writes `installer/output/Quintess-<version>-macos.dmg` with a `.sha256`.
+`quintess_core::system` finds the bundle's parts (`resources_folder`,
+`libraries_folder`); PDFium is opened by its full path, so the program
+needs no rpath. The icon, `assets/macos/quintess.icns`, comes from
+`tools/make_icons.py`.
+
+Signing: without an Apple Developer ID the bundle is ad-hoc signed
+(`codesign -s -`), which Apple silicon requires of every program but
+Gatekeeper doesn't trust, so people open it the first time as the user
+guide's "Installing on macOS" explains. To sign for real, add the GitHub
+secrets `APPLE_CERTIFICATE` (a base64 Developer ID Application .p12),
+`APPLE_CERTIFICATE_PASSWORD` and optionally `KEYCHAIN_PASSWORD`;
+`installer/macos/import-signing-certificate.sh` then imports it and
+`package_macos.py` signs with the hardened runtime
+(`installer/macos/entitlements.plist`). Adding `APPLE_ID`, `APPLE_PASSWORD`
+(an app-specific password) and `APPLE_TEAM_ID` also notarizes and staples
+the app and the disk image. Locally, set `MACOS_SIGNING_IDENTITY` (and the
+notarization variables) before running the script.
+
+`.github/workflows/macos-release.yml` runs the tests on Apple silicon,
+packages the disk image, installs it on an Apple silicon and an Intel
+runner, runs the command line, takes self-check screenshots (including one
+of a PDF opened with `open -a`, the way the Finder opens files) and, on
+`v*` tags, attaches the disk image to the release.
+
+What differs on macOS: the Finder sends files to open as Apple events,
+received in `crates/quintess-app/src/desktop.rs`, which also points the
+application menu's Quit at the window's close button so unsaved changes are
+asked about; settings and data are in `~/Library/Application
+Support/Quintess`; the Windows core fonts that macOS also ships are found
+by their Windows file names (`system_fonts::find`); the UI uses San
+Francisco and Helvetica Neue; printing uses CUPS as on Linux; scanning
+needs SANE from Homebrew; the certificate store, Microsoft Office
+conversion and self-update are Windows only. The packaging is adapted from
+PdfCraft (MIT OR Apache-2.0; credited in each file and in the notices).
 
 ## Linux
 

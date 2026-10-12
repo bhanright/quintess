@@ -19,6 +19,13 @@ pub(super) struct Command {
     pub run: fn(&mut QuintessApp, &egui::Context),
 }
 
+/// A shortcut as this system's people know it. Shortcuts are written with
+/// Ctrl, and egui's Command modifier is the Cmd key on a Mac, so there they
+/// read "Cmd+S".
+pub(super) fn shortcut_label(shortcut: &str) -> String {
+    if cfg!(target_os = "macos") { shortcut.replace("Ctrl+", "Cmd+") } else { shortcut.to_string() }
+}
+
 const fn command(menu: &'static str, label: &'static str, run: fn(&mut QuintessApp, &egui::Context)) -> Command {
     Command { menu, label, shortcut: "", hint: "", needs_document: true, run }
 }
@@ -361,7 +368,7 @@ impl QuintessApp {
     fn draw_commands(&mut self, ui: &mut egui::Ui, wanted: impl Fn(&Command) -> bool) {
         let has_document = !self.tabs.is_empty();
         for command in COMMANDS.iter().filter(|c| wanted(c)) {
-            let text = if command.shortcut.is_empty() { command.label.to_string() } else { format!("{}  {}", command.label, command.shortcut) };
+            let text = if command.shortcut.is_empty() { command.label.to_string() } else { format!("{}  {}", command.label, shortcut_label(command.shortcut)) };
             let mut response = ui.add_enabled(has_document || !command.needs_document, egui::Button::new(text));
             if !command.hint.is_empty() {
                 response = response.on_hover_text(command.hint);
@@ -452,7 +459,7 @@ impl QuintessApp {
                             let label = ui.selectable_label(selected, &entry.label);
                             ui.weak(&entry.place);
                             if !entry.shortcut.is_empty() {
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.weak(entry.shortcut));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.weak(shortcut_label(entry.shortcut)));
                             }
                             label
                         });

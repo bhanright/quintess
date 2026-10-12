@@ -31,9 +31,10 @@ const RECOGNITION_MODEL_URL: &str = "https://ocrs-models.s3-accelerate.amazonaws
 const DETECTION_MODEL_SHA256: &str = "a917b23dbd9524b465df7e922641b3ff2981623df4ded5a0234004ef2fee7cfe";
 const RECOGNITION_MODEL_SHA256: &str = "86c145c2edb96c8caed5b1ebb8f44d706408922211451c309c625157dd6061c5";
 
-/// The `models` folder installed beside the program.
+/// The `models` folder installed with the program (beside it, or in the
+/// macOS app bundle's Resources).
 fn installed_models_folder() -> Option<PathBuf> {
-    crate::system::program_folder().map(|folder| folder.join("models"))
+    crate::system::resources_folder().map(|folder| folder.join("models"))
 }
 
 /// Where downloaded models are kept.

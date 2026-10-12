@@ -1,8 +1,9 @@
 //! View ▸ Read out loud: the document read aloud with the computer's own
-//! voices (Windows' built-in speech, or speech-dispatcher on Linux, through
-//! the `tts` crate), a paragraph at a time. The paragraph being read is
-//! outlined and its page is turned to; a small bar offers pause, stop,
-//! speed and voice. The shortcuts match Acrobat's.
+//! voices (Windows' built-in speech, AVFoundation's on macOS, or
+//! speech-dispatcher on Linux, through the `tts` crate), a paragraph at a
+//! time. The paragraph being read is outlined and its page is turned to; a
+//! small bar offers pause, stop, speed and voice. The shortcuts match
+//! Acrobat's.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -103,7 +104,7 @@ impl QuintessApp {
                     let voice_index = current.and_then(|id| voices.iter().position(|voice| voice.id() == id));
                     ReadAloud { speaker, tab_id, queue, current: None, paused: false, started_at: Instant::now(), heard_speaking: false, voices, voice_index, speed: 1.0 }
                 }
-                Err(error) => return self.error(format!("Reading aloud needs the computer's speech voices, which couldn't be started: {error}{}", if cfg!(windows) { "" } else { " (install the speech-dispatcher package and a voice such as espeak-ng)" })),
+                Err(error) => return self.error(format!("Reading aloud needs the computer's speech voices, which couldn't be started: {error}{}", if cfg!(any(windows, target_os = "macos")) { "" } else { " (install the speech-dispatcher package and a voice such as espeak-ng)" })),
             },
         };
         self.read_aloud = Some(reader);

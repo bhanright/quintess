@@ -2,7 +2,8 @@
 //!
 //! PDFium is loaded once per process from `pdfium.dll` (or the platform's
 //! equivalent). It is looked for, in order: the folder named by the
-//! `QUINTESS_PDFIUM_DIR` environment variable, the executable's folder and its
+//! `QUINTESS_PDFIUM_DIR` environment variable, the app bundle's
+//! `Contents/Frameworks` on macOS, the executable's folder and its
 //! `pdfium` subfolder, a `vendor/pdfium/bin` folder above the executable or
 //! the working directory, the repository's own `vendor/pdfium/bin`, and
 //! finally the system library path.
@@ -50,12 +51,14 @@ fn candidate_folders() -> Vec<PathBuf> {
         folders.push(PathBuf::from(folder));
     }
     let mut roots = Vec::new();
-    if let Ok(executable) = std::env::current_exe() {
-        if let Some(folder) = executable.parent() {
-            folders.push(folder.to_path_buf());
-            folders.push(folder.join("pdfium"));
-            roots.push(folder.to_path_buf());
-        }
+    // Contents/Frameworks in a macOS app bundle, else the program's folder.
+    if let Some(folder) = crate::system::libraries_folder() {
+        folders.push(folder);
+    }
+    if let Some(folder) = crate::system::program_folder() {
+        folders.push(folder.clone());
+        folders.push(folder.join("pdfium"));
+        roots.push(folder);
     }
     // The working folder and its parents are searched only in development
     // builds: an installed program must not load a DLL planted beside a document.
@@ -72,10 +75,15 @@ fn candidate_folders() -> Vec<PathBuf> {
             cursor = folder.parent();
         }
     }
-    // The repository's own copy, for development builds whose output lives elsewhere.
+    // The repository's own copy, for development builds whose output lives
+    // elsewhere. pdfium-binaries keeps the Windows DLL in `bin` and the Mac
+    // and Linux libraries in `lib`.
     if cfg!(debug_assertions) {
-        folders.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("vendor").join("pdfium").join("bin"));
+        let vendor = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("vendor").join("pdfium");
+        folders.push(vendor.join("bin"));
+        folders.push(vendor.join("lib"));
     }
+    folders.dedup();
     folders
 }
 

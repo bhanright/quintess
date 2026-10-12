@@ -106,6 +106,11 @@ pub const COMMAND_NAMES: &[&str] = &[
 /// Chooses between the app and the command-line tool from the arguments
 /// after the program's name.
 pub fn choose_mode(arguments: &[OsString]) -> Mode {
+    // macOS may start an app from the Finder with a process serial number
+    // ("-psn_0_12345"). It is not an option for the command-line tool, and
+    // the app doesn't need it.
+    let arguments: Vec<OsString> = arguments.iter().filter(|argument| !argument.to_str().is_some_and(|text| text.starts_with("-psn_"))).cloned().collect();
+    let arguments = arguments.as_slice();
     let Some(first) = arguments.first() else {
         return Mode::App(Vec::new());
     };
@@ -262,5 +267,11 @@ mod tests {
         assert_eq!(mode(&["--", "merge"]), files(&["merge"]));
         assert_eq!(mode(&["--", "--help", "b.pdf"]), files(&["--help", "b.pdf"]));
         assert_eq!(mode(&["./merge"]), files(&["./merge"]));
+    }
+
+    #[test]
+    fn the_finder_process_number_starts_the_app() {
+        assert_eq!(mode(&["-psn_0_1234567"]), files(&[]));
+        assert_eq!(mode(&["-psn_0_1234567", "report.pdf"]), files(&["report.pdf"]));
     }
 }

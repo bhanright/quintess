@@ -1,9 +1,10 @@
 //! Spell checking with Hunspell dictionaries, through `spellbook` (pure
-//! Rust, so it works the same on Windows and Linux). English dictionaries
-//! for the US, UK, Canada and Australia ship with the program (US English is
-//! built in); any other Hunspell dictionary (`xx_YY.aff` + `xx_YY.dic`) is
-//! picked up from the `dictionaries` folder beside the program or in the
-//! settings folder, and on Linux from the system's `/usr/share/hunspell`.
+//! Rust, so it works the same on Windows, macOS and Linux). English
+//! dictionaries for the US, UK, Canada and Australia ship with the program
+//! (US English is built in); any other Hunspell dictionary (`xx_YY.aff` +
+//! `xx_YY.dic`) is picked up from the installed `dictionaries` folder or the
+//! one in the settings folder, on Linux from the system's
+//! `/usr/share/hunspell`, and on macOS from `~/Library/Spelling`.
 //! Words added to the dictionary are kept in `personal-dictionary.txt` in
 //! the settings folder.
 //!
@@ -48,7 +49,7 @@ const BUILT_IN_DIC: &str = include_str!("../../../assets/dictionaries/en-US.dic"
 /// Folders searched for Hunspell dictionaries, most specific first.
 fn dictionary_folders() -> Vec<PathBuf> {
     let mut folders = Vec::new();
-    if let Some(folder) = crate::system::program_folder().map(|folder| folder.join("dictionaries")) {
+    if let Some(folder) = crate::system::resources_folder().map(|folder| folder.join("dictionaries")) {
         folders.push(folder);
     }
     folders.push(crate::settings::settings_folder().join("dictionaries"));
@@ -58,6 +59,14 @@ fn dictionary_folders() -> Vec<PathBuf> {
     }
     if cfg!(target_os = "linux") {
         folders.extend(["/usr/share/hunspell", "/usr/share/myspell", "/usr/share/myspell/dicts"].map(PathBuf::from));
+    }
+    // macOS's own spell checker also reads Hunspell dictionaries put in a
+    // Spelling folder, so ones added there serve Quintess as well.
+    if cfg!(target_os = "macos") {
+        if let Some(home) = std::env::var_os("HOME") {
+            folders.push(PathBuf::from(home).join("Library/Spelling"));
+        }
+        folders.push(PathBuf::from("/Library/Spelling"));
     }
     folders
 }
