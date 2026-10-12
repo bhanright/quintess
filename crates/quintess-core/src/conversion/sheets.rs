@@ -28,7 +28,15 @@ pub struct TableExport {
 
 /// Every visible sheet of a workbook, one after another.
 pub fn read_workbook(path: &Path) -> Result<TableExport> {
-    let mut workbook = calamine::open_workbook_auto(path).with_context(|| format!("{} is not a workbook Quintess can read", path.display()))?;
+    let not_readable = || format!("{} is not a workbook Quintess can read", path.display());
+    let extension = path.extension().map(|extension| extension.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    // Templates (.xltx, .xltm) are workbooks inside, but calamine picks the
+    // reader by extension and doesn't know theirs.
+    let mut workbook = if matches!(extension.as_str(), "xltx" | "xltm") {
+        calamine::Sheets::Xlsx(calamine::open_workbook::<calamine::Xlsx<_>, _>(path).with_context(not_readable)?)
+    } else {
+        calamine::open_workbook_auto(path).with_context(not_readable)?
+    };
     let hidden: Vec<String> = workbook.sheets_metadata().iter().filter(|sheet| sheet.visible != SheetVisible::Visible).map(|sheet| sheet.name.clone()).collect();
     let mut sheets = Vec::new();
     for name in workbook.sheet_names() {

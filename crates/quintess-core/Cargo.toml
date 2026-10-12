@@ -44,17 +44,25 @@ boa_engine = { version = "0.22.0", default-features = false, features = ["annex-
 quick-xml = "0.41"
 # Word layout for the built-in .docx conversion (MPL-2.0; pinned because its API is still 0.x).
 oxidocs = { version = "=0.8.0", optional = true }
+# GridCraft's spreadsheet engine for the built-in formatted spreadsheet printing
+# (MIT OR Apache-2.0). It isn't published on crates.io, so it comes from the
+# repository, pinned to the commit of the v0.6.1 release tag.
+gridcraft-engine = { git = "https://github.com/storytold/gridcraft", rev = "fc45b7f6d8ab79ef20f74e3c8347a2fd731e6af5", optional = true }
 # RSA key transport for certificate encryption (public_key.rs); ring cannot encrypt with RSA.
 rsa = "0.9.10"
 # SASLprep for AES-256 passwords handed to PDFium (engine::open_document); lopdf already uses it.
 stringprep = "0.1.5"
 
 [features]
-default = ["word-layout"]
+default = ["word-layout", "spreadsheet-print"]
 # The built-in Word (.docx) converter. It adds about 15 MB to the program
 # (Word font metrics are compiled in); without it, .docx files need
 # LibreOffice or Microsoft Office.
 word-layout = ["dep:oxidocs"]
+# The built-in formatted spreadsheet printing (.xlsx, .xlsm, .xltx, .xltm and
+# .xls) through GridCraft's engine; without it, spreadsheets are printed as a
+# table of their values.
+spreadsheet-print = ["dep:gridcraft-engine"]
 
 [dev-dependencies]
 image = "0.25"

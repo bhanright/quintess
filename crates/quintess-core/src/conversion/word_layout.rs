@@ -46,15 +46,12 @@ pub struct WordConversion {
 pub fn convert(bytes: &[u8], cancellation: &Cancellation) -> Result<WordConversion> {
     // Oxi is young (0.x); a document it cannot handle must not take the
     // whole program down, so its work runs behind a panic guard.
-    let layout = std::panic::catch_unwind(|| -> Result<_> {
+    let layout = super::run_engine_guarded(|| -> Result<_> {
         let document = oxidocs::open(bytes).map_err(|error| anyhow!("the document could not be read: {error}"))?;
         let engine = LayoutEngine::for_document(&document);
         Ok(engine.layout(&document))
     })
-    .map_err(|panic| {
-        let message = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|text| text.to_string())).unwrap_or_default();
-        anyhow!("the Word layout engine stopped on this document ({message}); try LibreOffice or Microsoft Office instead")
-    })??;
+    .map_err(|message| anyhow!("the Word layout engine stopped on this document ({message}); try LibreOffice or Microsoft Office instead"))??;
     cancellation.check()?;
     if layout.pages.is_empty() {
         anyhow::bail!("the Word layout engine produced no pages for this document");

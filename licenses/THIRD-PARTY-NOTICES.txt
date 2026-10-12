@@ -15,6 +15,9 @@ Spelling dictionaries: English (SCOWL, by Kevin Atkinson and others, BSD-style),
   (Brazil, LGPL-3.0/MPL-2.0) and Italian (GPL-3.0), from wooorm/dictionaries;
   their license texts are in licenses/dictionaries. They are separate data files,
   used unmodified.
+GridCraft (the gridcraft-* crates), the built-in formatted spreadsheet printing: by the
+  ArtCraft Team and the GridCraft contributors, MIT OR Apache-2.0, from
+  https://github.com/storytold/gridcraft; its notice and MIT license are below.
 Oxi (oxidocs, oxidocs-core, oxidocs-common), the built-in Word layout engine: MPL-2.0
   (https://mozilla.org/MPL/2.0/); its source is at https://github.com/Ryujiyasu/oxi.
 Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):
@@ -26,7 +29,7 @@ Code adapted from PdfCraft (https://github.com/storytold/pdfcraft), Copyright (c
   (crates/quintess-core/src/recovery.rs) and syncing a file to disk before it replaces
   another (write_file_safely); MIT license text below.
 
-Rust crates (654):
+Rust crates (665):
 
   ab_glyph 0.2.32  -  Apache-2.0  (Linux only)
   ab_glyph_rasterizer 0.1.10  -  Apache-2.0  (Linux only)
@@ -255,6 +258,16 @@ Rust crates (654):
   glutin_glx_sys 0.6.1  -  Apache-2.0  (Linux only)
   glutin_wgl_sys 0.6.1  -  Apache-2.0  (Windows only)
   gpu-allocator 0.28.0  -  MIT OR Apache-2.0
+  gridcraft-calc 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-chart 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-core 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-engine 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-formula 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-functions 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-model 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-numfmt 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-pdf 0.6.1  -  MIT OR Apache-2.0
+  gridcraft-xlsx 0.6.1  -  MIT OR Apache-2.0
   guillotiere 0.7.0  -  MIT/Apache-2.0
   half 2.7.1  -  MIT OR Apache-2.0
   harfrust 0.12.0  -  MIT
@@ -672,6 +685,7 @@ Rust crates (654):
   zerovec 0.11.8  -  Unicode-3.0
   zerovec-derive 0.11.6  -  Unicode-3.0
   zip 2.4.2  -  MIT
+  zip 3.0.0  -  MIT
   zip 8.6.0  -  MIT
   zlib-rs 0.6.8  -  Zlib
   zmij 1.0.23  -  MIT
@@ -9959,6 +9973,56 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+
+------------------------------------------------------------------------------
+gridcraft-calc 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-chart 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-core 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-engine 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-formula 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-functions 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-model 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-numfmt 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-pdf 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
+
+------------------------------------------------------------------------------
+gridcraft-xlsx 0.6.1 (MIT OR Apache-2.0)
+------------------------------------------------------------------------------
+Its notice and license are GridCraft's, in the GridCraft section at the end.
 
 ------------------------------------------------------------------------------
 guillotiere 0.7.0 (MIT/Apache-2.0)
@@ -23586,6 +23650,11 @@ licences; see files named LICENSE.*.txt for details.
 
 
 ------------------------------------------------------------------------------
+zip 3.0.0 (MIT)
+------------------------------------------------------------------------------
+LICENSE: the same text as zip (LICENSE) above.
+
+------------------------------------------------------------------------------
 zip 8.6.0 (MIT)
 ------------------------------------------------------------------------------
 LICENSE: the same text as spin (LICENSE) above.
@@ -23906,6 +23975,53 @@ LICENSE: the same text as zbus (LICENSE) above.
 zvariant_utils 4.2.0 (MIT)
 ------------------------------------------------------------------------------
 LICENSE: the same text as adler2 (LICENSE-MIT) above.
+
+==============================================================================
+GridCraft (the built-in formatted spreadsheet printing)
+==============================================================================
+
+NOTICE:
+
+GridCraft
+Copyright (c) 2026 ArtCraft Team and the GridCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+The ArtCraft name, wordmark and logos in docs/brand/ are trademarks of the ArtCraft Team. They are
+not open source and are not covered by the license above; their terms are in
+docs/brand/LICENSE-brand.txt.
+
+Third-party material
+
+This product bundles third-party material under its own licenses, listed below. The per-file
+list (author, source, license) is in ATTRIBUTION.md.
+
+None: every bundled asset is original to GridCraft. Builds made with craft-fonts
+(CRAFT_FONTS_DIR) embed the fonts listed in ATTRIBUTION.md under the SIL Open Font License 1.1.
+
+LICENSE-MIT:
+
+MIT License
+
+Copyright (c) 2026 ArtCraft Team and the GridCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ==============================================================================
 PdfCraft (adapted packaging code)

@@ -114,30 +114,127 @@ fn built_in_word_conversion_draws_bold_runs_in_bold() {
     assert!(characters[index].bold, "\"Bold findings\" is drawn in a bold face ({})", characters[index].font_name);
 }
 
-#[test]
-fn spreadsheets_become_tables() {
-    use rust_xlsxwriter::Workbook;
-    let mut workbook = Workbook::new();
-    let sheet = workbook.add_worksheet().set_name("Budget").unwrap();
-    for (column, heading) in ["Item", "Quantity", "Unit price", "Total"].iter().enumerate() {
-        sheet.write(0, column as u16, *heading).unwrap();
+/// One cell of a hand-written OpenDocument spreadsheet.
+enum OdsCell<'a> {
+    Text(&'a str),
+    Number(f64),
+}
+
+/// Writes a minimal OpenDocument spreadsheet (.ods): the mimetype, the
+/// manifest and the sheets' cells, which is all a reader needs.
+fn write_ods(path: &Path, sheets: &[(&str, Vec<Vec<OdsCell>>)]) {
+    use std::io::Write;
+    let mut content = String::from(r#"<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2"><office:body><office:spreadsheet>"#);
+    for (name, rows) in sheets {
+        content.push_str(&format!(r#"<table:table table:name="{name}">"#));
+        for row in rows {
+            content.push_str("<table:table-row>");
+            for cell in row {
+                content.push_str(&match cell {
+                    OdsCell::Text(text) => format!(r#"<table:table-cell office:value-type="string"><text:p>{text}</text:p></table:table-cell>"#),
+                    OdsCell::Number(number) => format!(r#"<table:table-cell office:value-type="float" office:value="{number}"><text:p>{number}</text:p></table:table-cell>"#),
+                });
+            }
+            content.push_str("</table:table-row>");
+        }
+        content.push_str("</table:table>");
     }
-    for (row, (item, quantity, price)) in [("Rope", 3, 12.5), ("Lantern", 2, 30.0), ("Tent", 1, 240.0)].iter().enumerate() {
+    content.push_str("</office:spreadsheet></office:body></office:document-content>");
+    let manifest = r#"<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>"#;
+    let mut archive = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    // The mimetype comes first and uncompressed, as the format requires.
+    let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    archive.start_file("mimetype", stored).unwrap();
+    archive.write_all(b"application/vnd.oasis.opendocument.spreadsheet").unwrap();
+    let compressed = zip::write::SimpleFileOptions::default();
+    archive.start_file("META-INF/manifest.xml", compressed).unwrap();
+    archive.write_all(manifest.as_bytes()).unwrap();
+    archive.start_file("content.xml", compressed).unwrap();
+    archive.write_all(content.as_bytes()).unwrap();
+    archive.finish().unwrap();
+}
+
+#[test]
+#[cfg(feature = "spreadsheet-print")]
+fn excel_workbooks_print_with_their_formatting() {
+    use rust_xlsxwriter::{Format, Workbook};
+    let mut workbook = Workbook::new();
+    let heading = Format::new().set_bold();
+    let money = Format::new().set_num_format("$#,##0.00");
+    let sheet = workbook.add_worksheet().set_name("Budget").unwrap();
+    for (column, title) in ["Item", "Quantity", "Unit price", "Total"].iter().enumerate() {
+        sheet.write_with_format(0, column as u16, *title, &heading).unwrap();
+    }
+    for (row, (item, quantity, price)) in [("Rope", 3.0, 12.5), ("Lantern", 2.0, 7.5)].iter().enumerate() {
         let row = row as u32 + 1;
         sheet.write(row, 0, *item).unwrap();
         sheet.write(row, 1, *quantity).unwrap();
-        sheet.write(row, 2, *price).unwrap();
-        sheet.write(row, 3, *quantity as f64 * price).unwrap();
+        sheet.write_with_format(row, 2, *price, &money).unwrap();
+        // rust_xlsxwriter saves formulas without a result, so the totals
+        // show only if the printer recalculates them.
+        sheet.write_formula_with_format(row, 3, format!("=B{0}*C{0}", row + 1).as_str(), &money).unwrap();
     }
-    let second = workbook.add_worksheet().set_name("Notes").unwrap();
-    second.write(0, 0, "Bring spare batteries").unwrap();
-    let path = folder("xlsx").join("budget.xlsx");
+    workbook.add_worksheet().set_name("Notes").unwrap().write(0, 0, "Bring spare batteries").unwrap();
+    let hidden = workbook.add_worksheet().set_name("Private").unwrap();
+    hidden.write(0, 0, "Not for printing").unwrap();
+    hidden.set_hidden(true);
+    let path = folder("xlsx").join("formatted budget.xlsx");
+    workbook.save(&path).unwrap();
+
+    let result = conversion::convert_file(&path, &built_in(), &Cancellation::new()).unwrap();
+    assert_eq!(result.provider, Provider::BuiltIn);
+    assert_eq!(result.engine, "GridCraft");
+    assert_eq!(result.engine_version.as_deref(), Some("0.6.1"));
+    assert_eq!(result.fidelity, Fidelity::FormattedPrint);
+    assert_eq!(result.summary(), "GridCraft 0.6.1 (Printed with formatting)");
+    assert!(result.warnings.iter().any(|warning| warning.contains("Hidden sheets were left out: Private")), "{:?}", result.warnings);
+    std::fs::write(folder("xlsx").join("formatted budget.pdf"), &result.pdf).unwrap();
+    let text = pdf_text(&result.pdf);
+    // Number formats are applied and the formulas are worked out.
+    assert_in_order(&text, &["Item", "Quantity", "Unit price", "Total", "Rope", "3", "$12.50", "$37.50", "Lantern", "2", "$7.50", "$15.00", "Bring spare batteries"]);
+    assert!(!text.contains("Not for printing"), "the hidden sheet is left out");
+}
+
+#[test]
+#[cfg(feature = "spreadsheet-print")]
+fn workbooks_with_letters_outside_win_ansi_become_tables_and_say_why() {
+    use rust_xlsxwriter::Workbook;
+    let mut workbook = Workbook::new();
+    let sheet = workbook.add_worksheet().set_name("Inventory").unwrap();
+    sheet.write(0, 0, "Item").unwrap();
+    sheet.write(0, 1, "Count").unwrap();
+    sheet.write(1, 0, "Привет мир").unwrap();
+    sheet.write(1, 1, 4).unwrap();
+    sheet.write(2, 0, "Καλημέρα").unwrap();
+    sheet.write(2, 1, 9).unwrap();
+    let path = folder("xlsx").join("greetings.xlsx");
     workbook.save(&path).unwrap();
 
     let result = conversion::convert_file(&path, &built_in(), &Cancellation::new()).unwrap();
     assert_eq!(result.fidelity, Fidelity::TableExport);
+    assert_eq!(result.engine, "Quintess");
+    assert_eq!(result.warnings.first().map(String::as_str), Some("Printed as a table of values: the workbook has characters the formatted printer can't show."), "{:?}", result.warnings);
+    // The table export embeds fonts that have these letters.
+    assert_in_order(&pdf_text(&result.pdf), &["Item", "Count", "Привет мир", "4", "Καλημέρα", "9"]);
+}
+
+#[test]
+fn opendocument_spreadsheets_become_tables() {
+    let mut budget = vec![["Item", "Quantity", "Unit price", "Total"].iter().map(|title| OdsCell::Text(title)).collect::<Vec<_>>()];
+    for (item, quantity, price) in [("Rope", 3.0, 12.5), ("Lantern", 2.0, 30.0), ("Tent", 1.0, 240.0)] {
+        budget.push(vec![OdsCell::Text(item), OdsCell::Number(quantity), OdsCell::Number(price), OdsCell::Number(quantity * price)]);
+    }
+    let path = folder("ods").join("budget.ods");
+    write_ods(&path, &[("Budget", budget), ("Notes", vec![vec![OdsCell::Text("Bring spare batteries")]])]);
+
+    let result = conversion::convert_file(&path, &built_in(), &Cancellation::new()).unwrap();
+    assert_eq!(result.fidelity, Fidelity::TableExport);
+    assert_eq!(result.engine, "Quintess");
+    if cfg!(feature = "spreadsheet-print") {
+        assert_eq!(result.warnings.first().map(String::as_str), Some("Printed as a table of values: the formatted printer reads OpenDocument and binary (.xlsb) workbooks only as data."), "{:?}", result.warnings);
+    }
     assert!(result.warnings.iter().any(|warning| warning.contains("Formulas")), "the omissions are listed: {:?}", result.warnings);
-    std::fs::write(folder("xlsx").join("budget.pdf"), &result.pdf).unwrap();
+    std::fs::write(folder("ods").join("budget.pdf"), &result.pdf).unwrap();
     let text = pdf_text(&result.pdf);
     assert_in_order(&text, &["Budget", "Item", "Quantity", "Unit price", "Total", "Rope", "3", "12.5", "37.5", "Lantern", "2", "30", "60", "Tent", "1", "240", "240", "Notes", "Bring spare batteries"]);
     // The table is drawn: cell borders are rectangles in the content.

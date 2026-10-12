@@ -62,6 +62,12 @@ pub fn renderer_started() {
 pub fn install_handler() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A conversion engine's panic is caught and reported as a failed
+        // conversion; the app carries on, so this is no crash.
+        if quintess_core::conversion::panic_is_guarded() {
+            default_hook(info);
+            return;
+        }
         CRASHED.store(true, Ordering::SeqCst);
         default_hook(info);
         if RENDERER_STARTING.load(Ordering::SeqCst) {

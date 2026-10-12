@@ -61,6 +61,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE."""
+# GridCraft's spreadsheet engine is compiled in (feature `spreadsheet-print`)
+# from its repository, pinned by commit. Its crates carry no license files of
+# their own: the license and notice are at the repository's root, two folders
+# above each crate's manifest, and are printed once in their own section.
+GRIDCRAFT_CRATE_PREFIX = "gridcraft-"
+GRIDCRAFT_LICENSE_FILES = ["NOTICE", "LICENSE-MIT"]
 LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
 
 
@@ -139,6 +145,9 @@ def main():
         "  (Brazil, LGPL-3.0/MPL-2.0) and Italian (GPL-3.0), from wooorm/dictionaries;",
         "  their license texts are in licenses/dictionaries. They are separate data files,",
         "  used unmodified.",
+        "GridCraft (the gridcraft-* crates), the built-in formatted spreadsheet printing: by the",
+        "  ArtCraft Team and the GridCraft contributors, MIT OR Apache-2.0, from",
+        "  https://github.com/storytold/gridcraft; its notice and MIT license are below.",
         "Oxi (oxidocs, oxidocs-core, oxidocs-common), the built-in Word layout engine: MPL-2.0",
         "  (https://mozilla.org/MPL/2.0/); its source is at https://github.com/Ryujiyasu/oxi.",
         "Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):",
@@ -171,7 +180,9 @@ def main():
                 lines.append(QUINTESS_CHANGES_NOTE)
             lines.append("")
         texts = license_texts(folder)
-        if not texts:
+        if not texts and package["name"].startswith(GRIDCRAFT_CRATE_PREFIX):
+            lines.append("Its notice and license are GridCraft's, in the GridCraft section at the end.")
+        elif not texts:
             lines.append(f"No license file is included in the crate; its declared license is {package.get('license')}.")
         for name, text in texts:
             digest = hashlib.sha256(text.encode()).hexdigest()
@@ -180,6 +191,11 @@ def main():
             else:
                 printed[digest] = f"{package['name']} ({name})"
                 lines += [f"{name}:", "", text, ""]
+    gridcraft_roots = sorted({Path(package["manifest_path"]).parents[2] for package in packages if package["name"].startswith(GRIDCRAFT_CRATE_PREFIX)})
+    for root in gridcraft_roots:
+        lines += ["", "=" * 78, "GridCraft (the built-in formatted spreadsheet printing)", "=" * 78]
+        for name in GRIDCRAFT_LICENSE_FILES:
+            lines += ["", f"{name}:", "", (root / name).read_text(encoding="utf-8").strip()]
     lines += ["", "=" * 78, "PdfCraft (adapted packaging code)", "=" * 78, "", PDFCRAFT_NOTICE]
     icons = ROOT / "assets" / "fonts" / "quintess-icons.LICENSE.txt"
     lines += ["", "=" * 78, "Material Icons (the app's fallback icons)", "=" * 78, "", icons.read_text(encoding="utf-8").strip()]

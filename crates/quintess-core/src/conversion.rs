@@ -6,8 +6,11 @@
 //! - **Built-in** converters are always available and never use the network.
 //!   Word documents are laid out page by page by Oxi's Word layout engine
 //!   ("built-in layout", approximate). OpenDocument text, simple HTML,
-//!   Markdown and plain text become a reflowed "simplified document";
-//!   spreadsheets and CSV files become a "table export" of their values.
+//!   Markdown and plain text become a reflowed "simplified document".
+//!   Excel workbooks are printed with their formatting by GridCraft's
+//!   engine, compiled in ("printed with formatting"); OpenDocument and
+//!   binary workbooks, CSV files, and workbooks that engine can't print
+//!   become a "table export" of their values.
 //! - **LibreOffice**, the **Craft** programs (WordCraft for word processing,
 //!   GridCraft for spreadsheets, DeckCraft for presentations, PhotoCraft for
 //!   photos and design files), **Microsoft Office** (Windows, only with
@@ -24,9 +27,13 @@ mod flow;
 mod html;
 mod odt;
 mod sheets;
+#[cfg(feature = "spreadsheet-print")]
+mod spreadsheet_print;
 #[cfg(feature = "word-layout")]
 mod word_layout;
 
+use std::cell::Cell;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -121,7 +128,7 @@ pub enum InputFormat {
     LegacyWord,
     /// .odt
     OpenDocumentText,
-    /// .xlsx, .xlsm, .xlsb, .xls, .ods
+    /// .xlsx, .xlsm, .xltx, .xltm, .xlsb, .xls, .ods
     Spreadsheet,
     /// .csv, .tsv
     Csv,
@@ -145,7 +152,7 @@ pub enum InputFormat {
 impl InputFormat {
     /// Every file extension `from_path` recognizes, for file pickers.
     pub const EXTENSIONS: &'static [&'static str] = &[
-        "docx", "docm", "dotx", "doc", "rtf", "odt", "xlsx", "xlsm", "xlsb", "xls", "ods", "csv", "tsv", "pptx", "potx", "ppsx", "ppt", "odp", "html", "htm", "xhtml", "txt", "text", "log", "md", "markdown", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "psd", "psb", "dng", "cr2", "cr3", "nef", "nrw", "arw", "rw2", "orf", "pef", "raf", "svg", "exr", "hdr", "pdn", "ora", "tga", "qoi", "ico", "afphoto",
+        "docx", "docm", "dotx", "doc", "rtf", "odt", "xlsx", "xlsm", "xltx", "xltm", "xlsb", "xls", "ods", "csv", "tsv", "pptx", "potx", "ppsx", "ppt", "odp", "html", "htm", "xhtml", "txt", "text", "log", "md", "markdown", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "psd", "psb", "dng", "cr2", "cr3", "nef", "nrw", "arw", "rw2", "orf", "pef", "raf", "svg", "exr", "hdr", "pdn", "ora", "tga", "qoi", "ico", "afphoto",
     ];
 
     pub fn from_path(path: &Path) -> Option<Self> {
@@ -154,7 +161,7 @@ impl InputFormat {
             "docx" | "docm" | "dotx" => InputFormat::WordDocument,
             "doc" | "rtf" => InputFormat::LegacyWord,
             "odt" => InputFormat::OpenDocumentText,
-            "xlsx" | "xlsm" | "xlsb" | "xls" | "ods" => InputFormat::Spreadsheet,
+            "xlsx" | "xlsm" | "xltx" | "xltm" | "xlsb" | "xls" | "ods" => InputFormat::Spreadsheet,
             "csv" | "tsv" => InputFormat::Csv,
             "pptx" | "potx" | "ppsx" => InputFormat::Presentation,
             "ppt" | "odp" => InputFormat::OtherPresentation,
@@ -201,6 +208,23 @@ impl InputFormat {
     }
 }
 
+/// Whether the built-in converter tries to print this file with its
+/// formatting (an Excel workbook, with the `spreadsheet-print` feature).
+/// It still falls back to a table export when the engine can't print the
+/// workbook, and the result says so.
+pub fn built_in_prints_with_formatting(path: &Path) -> bool {
+    #[cfg(feature = "spreadsheet-print")]
+    {
+        let extension = path.extension().map(|extension| extension.to_string_lossy().into_owned()).unwrap_or_default();
+        spreadsheet_print::formats_extension(&extension)
+    }
+    #[cfg(not(feature = "spreadsheet-print"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
 /// How close to the original a result is. Never "exact": even an office
 /// suite substitutes fonts it lacks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,6 +233,10 @@ pub enum Fidelity {
     SimplifiedDocument,
     /// Cell values as tables, without the workbook's formatting.
     TableExport,
+    /// A spreadsheet printed the way its Print command would print it, with
+    /// number formats, fonts, fills, borders and page setup, by the built-in
+    /// engine; the fonts are standard ones, not the workbook's own.
+    FormattedPrint,
     /// Pages laid out like Word lays them out, by the built-in engine;
     /// fonts that aren't installed are replaced.
     BuiltInLayout,
@@ -223,6 +251,7 @@ impl Fidelity {
         match self {
             Fidelity::SimplifiedDocument => "Simplified document",
             Fidelity::TableExport => "Table export",
+            Fidelity::FormattedPrint => "Printed with formatting",
             Fidelity::BuiltInLayout => "Built-in layout (approximate)",
             Fidelity::PicturePages => "Pictures on pages",
             Fidelity::HigherFidelity => "Higher fidelity",
@@ -253,18 +282,16 @@ pub fn available_providers() -> Vec<ProviderInfo> {
 /// Every provider, looking only in `search` (tests pass
 /// [`SearchLocations::nowhere`] to check a computer with nothing installed).
 pub fn available_providers_in(search: &SearchLocations) -> Vec<ProviderInfo> {
-    let built_in_formats = if cfg!(feature = "word-layout") {
-        "Word (.docx) with built-in layout; OpenDocument text, simple HTML, Markdown and text as simplified documents; spreadsheets and CSV as table exports; pictures"
-    } else {
-        "OpenDocument text, simple HTML, Markdown and text as simplified documents; spreadsheets and CSV as table exports; pictures"
-    };
+    let word = if cfg!(feature = "word-layout") { "Word (.docx) with built-in layout; " } else { "" };
+    let spreadsheets = if cfg!(feature = "spreadsheet-print") { "Excel workbooks printed with their formatting; other spreadsheets and CSV as table exports" } else { "spreadsheets and CSV as table exports" };
+    let built_in_formats = format!("{word}OpenDocument text, simple HTML, Markdown and text as simplified documents; {spreadsheets}; pictures");
     let mut providers = vec![ProviderInfo {
         provider: Provider::BuiltIn,
         available: true,
         engine: "Quintess".to_string(),
         version: Some(env!("CARGO_PKG_VERSION").to_string()),
         location: None,
-        note: built_in_formats.to_string(),
+        note: built_in_formats,
     }];
     let libreoffice = external::find_libreoffice(search);
     providers.push(ProviderInfo {
@@ -540,7 +567,27 @@ fn convert_built_in(input: &Path, format: InputFormat, options: &ConversionOptio
             made_by_quintess(pdf, Fidelity::SimplifiedDocument, document.warnings)
         }
         InputFormat::Spreadsheet | InputFormat::Csv => {
-            let export = if format == InputFormat::Csv { sheets::read_csv(&read()?, &input.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default())? } else { sheets::read_workbook(input)? };
+            let file_name = input.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            // Why a workbook is printed as a table rather than with its
+            // formatting, said first among the warnings. CSV files have no
+            // formatting to lose, so they need no reason.
+            #[cfg_attr(not(feature = "spreadsheet-print"), allow(unused_mut))]
+            let mut fallback_reason: Option<String> = None;
+            #[cfg(feature = "spreadsheet-print")]
+            if format == InputFormat::Spreadsheet {
+                let extension = input.extension().map(|extension| extension.to_string_lossy().into_owned()).unwrap_or_default();
+                if spreadsheet_print::formats_extension(&extension) {
+                    match spreadsheet_print::print(&read()?, &file_name, cancellation)? {
+                        spreadsheet_print::SpreadsheetPrint::Printed { pdf, warnings } => {
+                            return Ok(BuiltInConversion { pdf, engine: spreadsheet_print::ENGINE_NAME.to_string(), engine_version: Some(spreadsheet_print::ENGINE_VERSION.to_string()), fidelity: Fidelity::FormattedPrint, warnings });
+                        }
+                        spreadsheet_print::SpreadsheetPrint::Declined { reason } => fallback_reason = Some(reason),
+                    }
+                } else {
+                    fallback_reason = Some("the formatted printer reads OpenDocument and binary (.xlsb) workbooks only as data".to_string());
+                }
+            }
+            let export = if format == InputFormat::Csv { sheets::read_csv(&read()?, &file_name)? } else { sheets::read_workbook(input)? };
             cancellation.check()?;
             let mut page = options.page.clone();
             if export.wide && page.page_size.0 < page.page_size.1 {
@@ -549,7 +596,11 @@ fn convert_built_in(input: &Path, format: InputFormat, options: &ConversionOptio
                 page.margin = page.margin.min(36.0);
             }
             let pdf = flow::typeset(&export.document, &page, cancellation)?;
-            made_by_quintess(pdf, Fidelity::TableExport, export.document.warnings)
+            let mut warnings = export.document.warnings;
+            if let Some(reason) = fallback_reason {
+                warnings.insert(0, format!("Printed as a table of values: {reason}."));
+            }
+            made_by_quintess(pdf, Fidelity::TableExport, warnings)
         }
         InputFormat::PlainText => {
             let text = String::from_utf8_lossy(&read()?).into_owned();
@@ -565,6 +616,33 @@ fn convert_built_in(input: &Path, format: InputFormat, options: &ConversionOptio
     }
 }
 
+thread_local! {
+    /// How many engine guards this thread is inside (see [`run_engine_guarded`]).
+    static ENGINE_GUARD_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Runs a young third-party engine (Oxi's Word layout, GridCraft's
+/// spreadsheet engine) behind a panic guard: a document it can't handle
+/// gives back the panic's message instead of taking the program down.
+/// Unused only in builds without either engine's feature.
+#[cfg_attr(not(any(feature = "word-layout", feature = "spreadsheet-print")), allow(dead_code))]
+pub(crate) fn run_engine_guarded<T>(work: impl FnOnce() -> T) -> std::result::Result<T, String> {
+    ENGINE_GUARD_DEPTH.with(|depth| depth.set(depth.get() + 1));
+    // Whatever the engine was in the middle of is thrown away with the
+    // panic, so nothing half-changed is seen afterwards.
+    let outcome = std::panic::catch_unwind(AssertUnwindSafe(work));
+    ENGINE_GUARD_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    outcome.map_err(|panic| panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|text| text.to_string())).unwrap_or_default())
+}
+
+/// Whether this thread is running an engine behind a panic guard, so a
+/// panic now will be caught and reported as a failed conversion. The app's
+/// crash handler checks this: such a panic is not a crash, and must not
+/// save recovery copies or tell the person the program has to close.
+pub fn panic_is_guarded() -> bool {
+    ENGINE_GUARD_DEPTH.with(|depth| depth.get() > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,6 +651,9 @@ mod tests {
     fn recognizes_formats_by_extension() {
         assert_eq!(InputFormat::from_path(Path::new("a.DOCX")), Some(InputFormat::WordDocument));
         assert_eq!(InputFormat::from_path(Path::new("b.ods")), Some(InputFormat::Spreadsheet));
+        for template in ["t.xltx", "t.XLTM"] {
+            assert_eq!(InputFormat::from_path(Path::new(template)), Some(InputFormat::Spreadsheet), "{template}");
+        }
         assert_eq!(InputFormat::from_path(Path::new("c.htm")), Some(InputFormat::Html));
         assert_eq!(InputFormat::from_path(Path::new("d.xyz")), None);
     }
@@ -582,7 +663,7 @@ mod tests {
         for extension in InputFormat::EXTENSIONS {
             assert!(InputFormat::from_path(Path::new(&format!("file.{extension}"))).is_some(), "{extension} is listed but not recognized");
         }
-        for extension in ["docm", "dotx", "xlsm", "xhtml", "markdown", "log", "png", "webp"] {
+        for extension in ["docm", "dotx", "xlsm", "xltx", "xltm", "xhtml", "markdown", "log", "png", "webp"] {
             assert!(InputFormat::EXTENSIONS.contains(&extension), "{extension} is recognized but not offered");
         }
     }

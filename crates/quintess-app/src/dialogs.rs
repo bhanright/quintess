@@ -2783,6 +2783,10 @@ impl ConvertDialog {
             let quality = match info.provider {
                 Provider::BuiltIn => match self.format() {
                     Some(quintess_core::conversion::InputFormat::WordDocument) => "built-in layout, approximate",
+                    // Excel workbooks are printed with their formatting
+                    // (falling back to a table when the engine can't);
+                    // OpenDocument, .xlsb and CSV files become tables.
+                    Some(quintess_core::conversion::InputFormat::Spreadsheet) if self.file.as_deref().is_some_and(quintess_core::conversion::built_in_prints_with_formatting) => "printed with formatting",
                     Some(quintess_core::conversion::InputFormat::Spreadsheet | quintess_core::conversion::InputFormat::Csv) => "table export of the values",
                     _ => "simplified document",
                 },

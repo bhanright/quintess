@@ -345,8 +345,17 @@ et.rs`): .pfx/.p12
   (`viewer::filtered_keystroke`), keeping, reshaping or refusing it.
 - Document conversion (`conversion.rs`, `conversion/`): one provider interface;
   built-in .docx via Oxi (oxidocs =0.8.0, MPL-2.0, feature `word-layout`,
-  +15 MB), .odt/HTML subset/Markdown/text as simplified documents, spreadsheets
-  and CSV as tables (`flow.rs`); LibreOffice (private profile, macros off,
+  +15 MB), .odt/HTML subset/Markdown/text as simplified documents; built-in
+  .xlsx/.xlsm/.xltx/.xltm/.xls printed with formatting by GridCraft's engine
+  (`conversion/spreadsheet_print.rs`, feature `spreadsheet-print`, default
+  on; `gridcraft-engine` from git, `rev` pinned to the v0.6.1 tag's commit,
+  MIT OR Apache-2.0, no networking crates; its PDF writer uses unembedded
+  standard fonts, so workbooks whose printed text is outside WinAnsi, and
+  engine errors or panics, fall back to the table export with the reason
+  as the first warning); .ods, .xlsb and CSV as tables (`sheets.rs`,
+  `flow.rs`). Engines run through `conversion::run_engine_guarded`
+  (catch_unwind), and the app's crash handler ignores panics inside it
+  (`conversion::panic_is_guarded`); LibreOffice (private profile, macros off,
   proxy-blocked network), Office via PowerShell+COM (only with explicit
   permission; stops only the copy it started), Edge/Chrome headless (throwaway
   profile, network blocked for files). Temporary folder, timeout, cancellation;
