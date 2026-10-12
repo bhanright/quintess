@@ -74,6 +74,33 @@
   // Each download link and details block is marked with its package kind
   // (windows, deb or tarball); the page carries working links for 0.2.0 if
   // this request fails.
+  // The hero's button offers the package for the visitor's system.
+  const primary = $("[data-primary-download]");
+  if (primary) {
+    const choices = {
+      windows: ["Download for Windows", "Windows 10/11 · x86_64 · installs for your user account"],
+      windows_arm64: ["Download for Windows on ARM", "Windows 11 on ARM · native ARM64"],
+      macos: ["Download for Mac", "macOS 11 or later · Apple silicon and Intel"],
+      appimage: ["Download for Linux", "AppImage · most distributions · runs without installing"],
+    };
+    const choose = (key) => {
+      if (!choices[key]) return;
+      primary.dataset.asset = key;
+      primary.querySelector("[data-download]").dataset.download = key;
+      $("[data-primary-label]", primary).textContent = choices[key][0];
+      $("[data-primary-note]", primary).textContent = choices[key][1];
+      const other = document.querySelector(`.dl-others [data-asset="${key}"]`);
+      if (other) primary.querySelector("a").href = other.href;
+    };
+    const agent = navigator.userAgent;
+    if (/Macintosh|Mac OS X/.test(agent) && !/iPhone|iPad/.test(agent)) choose("macos");
+    else if (/Linux/.test(agent) && !/Android/.test(agent)) choose("appimage");
+    // Chromium browsers can say whether Windows runs on ARM.
+    else if (/Windows/.test(agent) && navigator.userAgentData?.getHighEntropyValues) {
+      navigator.userAgentData.getHighEntropyValues(["architecture"]).then((values) => { if (values.architecture === "arm") choose("windows_arm64"); }).catch(() => {});
+    }
+  }
+
   fetch("/api/release").then((response) => (response.ok ? response.json() : null)).then((release) => {
     if (!release || !release.assets) return;
     $$("[data-version]").forEach((element) => (element.textContent = release.version));

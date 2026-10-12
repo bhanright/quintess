@@ -66,9 +66,9 @@ def social_preview(icon: Image.Image) -> Image.Image:
     tile = icon.resize((150, 150), Image.LANCZOS)
     image.paste(tile, (110, 110), tile)
     draw.text((290, 128), "quintess", font=font(700, 112, 64), fill=TEXT)
-    draw.text((292, 210), "free · open source · windows + linux", font=mono(24), fill=MUTED)
+    draw.text((292, 210), "free · open source · windows · mac · linux", font=mono(24), fill=MUTED)
     # The largest headline whose longer line fits inside the crop marks.
-    lines = ("A free PDF editor", "for Windows and Linux.")
+    lines = ("A free PDF editor for", "Windows, Mac and Linux.")
     size = 84
     headline = font(800, 125, size)
     while size > 40 and max(draw.textlength(line, font=headline) for line in lines) > width - 108 - 120:

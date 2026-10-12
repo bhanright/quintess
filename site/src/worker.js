@@ -141,12 +141,16 @@ async function latestRelease(context) {
   const answer = await fetchGitHub("/releases/latest");
   if (!answer.ok) return Response.json({ error: "no release yet" }, { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
   const release = await answer.json();
-  // The three packages of a release, each with the checksum published beside it.
+  // Every package of a release, each with the checksum published beside it.
   const files = release.assets || [];
   const pick = (matches) => files.find((asset) => matches(asset.name.toLowerCase()));
   const packages = {
-    windows: pick((name) => name.endsWith("-setup.exe")),
+    windows: pick((name) => name.endsWith("-setup.exe") && !name.includes("arm64")),
+    windows_arm64: pick((name) => name.endsWith("-arm64-setup.exe")),
+    macos: pick((name) => name.endsWith(".dmg")),
     deb: pick((name) => name.endsWith(".deb")),
+    appimage: pick((name) => name.endsWith(".appimage")),
+    flatpak: pick((name) => name.endsWith(".flatpak")),
     tarball: pick((name) => name.endsWith(".tar.gz")),
   };
   const describe = async (asset) => {
@@ -161,12 +165,14 @@ async function latestRelease(context) {
     }
     return { name: asset.name, url: asset.browser_download_url, size: asset.size, downloads: asset.download_count, sha256 };
   };
-  const [windows, deb, tarball] = await Promise.all([describe(packages.windows), describe(packages.deb), describe(packages.tarball)]);
+  const described = await Promise.all(Object.values(packages).map(describe));
+  const assets = Object.fromEntries(Object.keys(packages).map((key, index) => [key, described[index]]));
+  const windows = assets.windows;
   const body = {
     version: String(release.tag_name || "").replace(/^v/i, ""),
     published: release.published_at,
     page: release.html_url,
-    assets: { windows, deb, tarball },
+    assets,
     // The Windows installer on its own, as before, for anything that still reads these.
     installer: windows ? { name: windows.name, url: windows.url, size: windows.size, downloads: windows.downloads } : null,
     sha256: windows ? windows.sha256 : null,
@@ -210,14 +216,14 @@ async function stats(request, env, context) {
     query("SELECT SUM(kind = 'view') AS views, COUNT(DISTINCT CASE WHEN kind = 'view' THEN visitor || day END) AS visitors, SUM(kind = 'download') AS downloads, SUM(kind = 'github') AS github FROM hits WHERE day >= date('now', ?)"),
   ]);
 
-  // GitHub's own count of package downloads (.exe, .deb, .tar.gz), for every release.
+  // GitHub's own count of package downloads, for every release.
   let releases = [];
   try {
     const answer = await fetchGitHub("/releases?per_page=20");
     if (answer.ok) {
       releases = (await answer.json()).map((release) => ({
         tag: release.tag_name,
-        downloads: (release.assets || []).filter((asset) => /\.(exe|deb|tar\.gz)$/i.test(asset.name)).reduce((sum, asset) => sum + asset.download_count, 0),
+        downloads: (release.assets || []).filter((asset) => /\.(exe|dmg|deb|appimage|flatpak|tar\.gz)$/i.test(asset.name)).reduce((sum, asset) => sum + asset.download_count, 0),
       }));
     }
   } catch {}
