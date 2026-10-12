@@ -39,6 +39,10 @@ pub enum AppRequest {
     SaveAndClose { tab_ids: Vec<u64>, quitting: bool },
     /// Close these documents (by tab id) without saving, or quit when `quitting`.
     CloseDiscarding { tab_ids: Vec<u64>, quitting: bool },
+    /// Open a recovery copy as a new unsaved document.
+    OpenRecovered(Box<quintess_core::recovery::RecoveryEntry>),
+    /// Delete a recovery copy, by its key.
+    DeleteRecovered(String),
     /// Reduce the file size; `step` is recorded once it succeeds.
     StartOptimize { settings: quintess_core::optimize::OptimizeSettings, step: Step },
     StartBatch { action: PathBuf, inputs: Vec<PathBuf>, options: quintess_core::batch::RunOptions },
@@ -176,6 +180,9 @@ pub enum Dialog {
     /// Closing a document, or quitting, with changes not saved. Tabs are
     /// named by id, since closing others moves their positions.
     UnsavedChanges { tab_ids: Vec<u64>, titles: Vec<String>, quitting: bool },
+    /// Recovery copies left by a session that ended unexpectedly, offered
+    /// when Quintess starts (see `app/autosave.rs`).
+    Recovery { entries: Vec<quintess_core::recovery::RecoveryEntry> },
     About,
     Preferences(quintess_core::settings::Settings),
     Optimize { preset: usize, dpi: f32, quality: u8, grayscale: bool, remove_metadata: bool },
@@ -381,6 +388,7 @@ impl Dialog {
             Dialog::PermissionsPassword { .. } => "Permissions password required",
             Dialog::ComparePassword { .. } => "Password required",
             Dialog::UnsavedChanges { .. } => "Unsaved changes",
+            Dialog::Recovery { .. } => "Recover unsaved documents",
             Dialog::About => "About Quintess",
             Dialog::Preferences(_) => "Preferences",
             Dialog::Optimize { .. } => "Reduce file size",
@@ -926,6 +934,16 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     });
                     ui.add(egui::Slider::new(&mut settings.page_memory_megabytes, 128..=8192).logarithmic(true).suffix(" MB").text("for page pictures"));
                 });
+                ui.end_row();
+                ui.label("Saving");
+                ui.checkbox(&mut settings.save_incrementally, "Save changes as an incremental update (keeps the original bytes)").on_hover_text("Saving adds only what changed after the file's existing bytes. Edits that remove content, such as redaction, always write the whole file again so nothing removed is kept.");
+                ui.end_row();
+                ui.label("Autosave");
+                ui.horizontal(|ui| {
+                    for (seconds, label) in crate::app::AUTOSAVE_CHOICES {
+                        ui.selectable_value(&mut settings.autosave_seconds, seconds, label);
+                    }
+                }).response.on_hover_text("How long after your last change a recovery copy of an unsaved document is kept, for after a crash or power cut");
                 ui.end_row();
                 ui.label("Graphics");
                 ui.horizontal(|ui| {
@@ -1543,6 +1561,48 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     outcome.keep_open = false;
                 }
                 if ui.button("Cancel").clicked() {
+                    outcome.keep_open = false;
+                }
+            });
+            return Ok(());
+        }
+        Dialog::Recovery { entries } => {
+            ui.label("Quintess didn't close normally last time. These documents had changes that weren't saved, and copies of them were kept:");
+            ui.add_space(6.0);
+            let mut handled = None;
+            egui::Grid::new("recovery copies").num_columns(4).spacing([16.0, 8.0]).striped(true).show(ui, |ui| {
+                ui.label(RichText::new("Document").strong());
+                ui.label(RichText::new("Saved before in").strong());
+                ui.label(RichText::new("Copy from").strong());
+                ui.end_row();
+                for (index, entry) in entries.iter().enumerate() {
+                    let name = if entry.protected { format!("{} (protected)", entry.title) } else { entry.title.clone() };
+                    ui.label(name);
+                    let location = entry.original_path.as_ref().and_then(|path| path.parent()).map(|folder| folder.display().to_string()).unwrap_or_else(|| "never saved".into());
+                    ui.label(location).on_hover_text(entry.original_path.as_ref().map(|path| path.display().to_string()).unwrap_or_default());
+                    ui.label(entry.written_at_label());
+                    ui.horizontal(|ui| {
+                        if crate::theme::primary_button(ui, "Open").on_hover_text("Opens it as a new document with unsaved changes; Save asks where to keep it").clicked() {
+                            outcome.requests.push(AppRequest::OpenRecovered(Box::new(entry.clone())));
+                            handled = Some(index);
+                        }
+                        if ui.button("Delete").on_hover_text("Deletes this copy for good").clicked() {
+                            outcome.requests.push(AppRequest::DeleteRecovered(entry.key.clone()));
+                            handled = Some(index);
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+            if let Some(index) = handled {
+                entries.remove(index);
+                if entries.is_empty() {
+                    outcome.keep_open = false;
+                }
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Decide later").on_hover_text("Keeps the copies; Quintess asks again when it next starts").clicked() {
                     outcome.keep_open = false;
                 }
             });

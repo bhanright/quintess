@@ -1072,6 +1072,25 @@ pub(crate) fn save_edit(pdf: &mut Pdf, input: &Input, output: &Output, edit: Edi
     } else if signed {
         eprintln!("note: content was removed for good, so the whole file was rewritten; its digital signatures no longer verify");
     }
+    // An ordinary change written back over the input is appended as an
+    // update, as the app saves (see quintess_core::saving): the file's
+    // existing bytes stay as they were. Writing to another file (-o),
+    // --compact and removal edits write the whole file.
+    let over_the_input = output.output.as_ref().is_none_or(|path| path == &input.input);
+    let certificate_protected = quintess_core::public_key::is_certificate_encrypted(&original);
+    let same_protection = quintess_core::security::inspect_security(&original).encrypted == pdf.original_encryption().is_some();
+    if edit == Edit::Changes && !signed && over_the_input && !output.compact && !original.is_empty() && !certificate_protected && same_protection && quintess_core::settings::Settings::load().save_incrementally {
+        let mut plain = Pdf { doc: pdf.doc.clone() };
+        plain.forget_encryption();
+        let edited = plain.to_bytes(&SaveSettings::default())?;
+        if let Ok(updated) = quintess_core::saving::append_update(&original, &edited, input.password.as_deref()) {
+            if !quintess_core::saving::GrowthLimit::default().exceeded_by(&updated) {
+                write_file_safely(&target, &updated)?;
+                println!("wrote {} (changes added as an update; the original bytes are kept)", target.display());
+                return Ok(target);
+            }
+        }
+    }
     let bytes = pdf.to_bytes_keeping_encryption(&SaveSettings { use_object_streams: output.compact, ..Default::default() })?;
     write_file_safely(&target, &bytes)?;
     println!("wrote {}", target.display());

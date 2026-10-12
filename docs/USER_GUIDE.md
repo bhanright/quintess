@@ -58,16 +58,34 @@ On apt systems the first ones are installed with Quintess unless you turned off 
 
 Edits change the open document only. Nothing is written to disk until you save.
 
-- **File ▸ Save** (Ctrl+S) writes over the file you opened.
-- **File ▸ Save as…** (Ctrl+Shift+S) writes a new file. The tab then shows the new file, and the original stays as it was.
-- **File ▸ Save compressed copy…** writes a separate, losslessly compressed copy. The open document doesn't change.
+- **File ▸ Save** (Ctrl+S) saves your changes to the file you opened.
+- **File ▸ Save as ▸ Save as…** (Ctrl+Shift+S) writes a new file. The tab then shows the new file, and the original stays as it was.
+- **File ▸ Save as ▸ Save a clean copy…** writes the whole document as one new file, without the earlier versions described below. Choose the document's own file name to clean up that file itself; choose another name for a separate copy (the tab stays with its own file). Writing a signed document this way invalidates its signatures, and Quintess asks first.
+- **File ▸ Save as ▸ Save compressed copy…** writes a separate, losslessly compressed copy. The open document doesn't change.
 - **File ▸ Export as** and **File ▸ Export** write other formats (Word, Excel, text, pictures and more). They don't change the open document.
 
-Quintess saves through a temporary file that replaces the old one at the end, which reduces the risk of a broken file if the save is interrupted.
+**Save keeps the original bytes.** Saving to the file you opened adds only what changed, as an *incremental update* after the file's existing bytes, which stay exactly as they were. Other readers open the result normally, and each save adds one more version inside the file. Quintess writes the whole file again instead when that is the right thing to do:
+
+- after an edit that removes content: redaction, deleting pages, removing blank pages, removing comments, metadata, attachments or portfolio files, deleting a layer with its content, flattening comments or form fields, clearing a form, and **Reduce file size**. An update would leave what you removed readable in the earlier version, so the file is written again without any earlier version;
+- when protection is added, changed or removed, and for files protected for certificates. Password-protected files keep their protection: the update is encrypted with the file's own password and key;
+- for **Save as…** to a new file: the original stays untouched on disk, and the copy, which is often made to send to someone, carries no hidden earlier versions;
+- when the updates have made the file much bigger than it started (more than half again, and at least 1 MB): it is written again in one piece, and the status line says so;
+- when the preference **Save changes as an incremental update (keeps the original bytes)** is off (**Edit ▸ Preferences**; on by default);
+- if an update can't be made or doesn't read back correctly, which the status line explains.
+
+Edits that only change or cover text, such as editing a paragraph, find and replace, or deleting a picture, are saved as updates, so the earlier version inside the file still holds the old text or picture. To hide something for good, use redaction; to drop the earlier versions, use **Save a clean copy…**.
+
+Every save goes through a temporary file that is written to disk in full and then replaces the old one, so an interrupted save leaves either the old file or the new one, never a broken mixture.
 
 **Keep a copy of the original** before work that removes content for good: redaction, flattening, replacing tags, **Smallest** compression and recorded actions run on many files. The safest habit is **Save as…** under a new name before you start.
 
-Closing a tab with unsaved changes asks first: **Save**, **Close without saving** or **Cancel**. Quitting Quintess (File ▸ Quit or the window's close button) asks once for all the documents with unsaved changes, listing them, with **Save all**, **Close without saving** and **Cancel**. If a save is canceled or fails, nothing is closed.
+Closing a tab with unsaved changes asks first: **Save**, **Close without saving** or **Cancel**. Quitting Quintess (File ▸ Quit or the window's close button) asks once for all the documents with unsaved changes, listing them, with **Save all**, **Close without saving** and **Cancel**. If a save is canceled or fails, nothing is closed, and the documents' recovery copies stay (see "If Quintess crashes").
+
+## Autosave
+
+While a document has unsaved changes, Quintess keeps a recovery copy of it, written a short while after your last change: 1 minute by default, or 30 seconds, 2 or 5 minutes, or never (**Edit ▸ Preferences ▸ Autosave**). Autosave doesn't save your file; it keeps a copy to fall back on after a crash, a power cut or a forced shutdown. The copy is written in the background and never holds up your work. Saving the document, or closing it with **Close without saving**, deletes its copy, and quitting normally leaves none behind.
+
+A password-protected document's copy is protected with the same password, and a document protected for certificates gets a copy for the same certificates: Quintess never writes the unprotected contents to disk. Documents over 200 MB get a copy at most every 5 minutes, and documents over 2 GB get none (the status line says so).
 
 ## Studio and Classic
 
@@ -505,7 +523,7 @@ Tick **Add a trusted timestamp** to have a timestamp server vouch for when you s
 
 ## Editing after signing
 
-Quintess tries to save later edits as an update after the signed version, which keeps the signature valid, and readers show that the document changed after signing. Edits that remove content (redaction, deleting pages, removing comments, metadata or attachments, reducing file size) rewrite the whole file instead and invalidate the signature. After every edit of a signed document, whether from a menu, a dialog or a task in the background, the status line says whether the signatures stayed valid. A second signature is added after the first, and both stay valid. An encrypted signed file is also rewritten when saved. Sign last, after all other changes.
+Quintess tries to save later edits as an update after the signed version, which keeps the signature valid, and readers show that the document changed after signing. Edits that remove content (redaction, deleting pages, removing comments, metadata or attachments, flattening, clearing a form, reducing file size) rewrite the whole file instead and invalidate the signature. After every edit of a signed document, whether from a menu, a dialog or a task in the background, the status line says whether the signatures stayed valid. A second signature is added after the first, and both stay valid. An encrypted signed file is also rewritten when saved. Sign last, after all other changes.
 
 ## Checking signatures
 
@@ -753,7 +771,17 @@ Commands that write many files, `batch` and `form merge`, never replace a file s
 
 ## If Quintess crashes
 
-If Quintess hits an internal error it can't recover from, it tries to save your unsaved documents to the `Recovered` folder in its data folder, writes the details to `crash.log` there, and tells you before closing. This doesn't help after a power failure or if Quintess is ended by force, so save often.
+If Quintess hits an internal error it can't recover from, it saves your unsaved documents to the `Recovered` folder in its data folder (where autosave keeps its copies too), writes the details to `crash.log` there, and tells you before closing. A password-protected document is kept as of its last autosave, still protected, since its unprotected contents are never written out.
+
+After a power cut, a forced shutdown or anything else that ends Quintess without its usual goodbye, the latest autosaved copies are still there.
+
+The next time Quintess starts, it lists the documents it kept, with their names, where they were saved before and when the copy was made:
+
+- **Open** opens the copy as a new document with unsaved changes, named "*name* (recovered)". **Save** then asks where to keep it, starting at its old location, so you can choose whether to replace the old file. A protected copy asks for its password or certificate first.
+- **Delete** deletes the copy for good.
+- **Decide later** keeps the copies; Quintess asks again when it next starts.
+
+Copies made while another Quintess window is still open belong to that window and aren't listed.
 
 ## If something looks wrong
 

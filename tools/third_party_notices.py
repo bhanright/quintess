@@ -23,6 +23,29 @@ OUTPUT = ROOT / "licenses" / "THIRD-PARTY-NOTICES.txt"
 PROGRAMS = ["quintess-cli", "quintess-console"]
 PLATFORMS = {"x86_64-pc-windows-msvc": "Windows", "x86_64-unknown-linux-gnu": "Linux"}
 LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
+# PdfCraft's MIT license, for the code adapted from it (it is not a crate
+# dependency, so cargo metadata doesn't find it).
+PDFCRAFT_LICENSE = """MIT License
+
+Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE."""
 
 
 def shipped_packages(metadata):
@@ -83,6 +106,9 @@ def main():
         "Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):",
         "  a subset of Material Icons (Outlined) by Google, Apache-2.0, from",
         "  https://github.com/google/material-design-icons; text in its section below.",
+        "Code adapted from PdfCraft (https://github.com/storytold/pdfcraft, MIT OR Apache-2.0):",
+        "  the recovery folder (crates/quintess-core/src/recovery.rs) and syncing a file to",
+        "  disk before it replaces another (write_file_safely); MIT license text below.",
         "",
         f"Rust crates ({len(packages)}):",
         "",
@@ -107,6 +133,7 @@ def main():
             else:
                 printed[digest] = f"{package['name']} ({name})"
                 lines += [f"{name}:", "", text, ""]
+    lines += ["", "=" * 78, "PdfCraft (adapted code, see above)", "=" * 78, "", PDFCRAFT_LICENSE]
     icons = ROOT / "assets" / "fonts" / "quintess-icons.LICENSE.txt"
     lines += ["", "=" * 78, "Material Icons (the app's fallback icons)", "=" * 78, "", icons.read_text(encoding="utf-8").strip()]
     # The Windows and Linux builds of PDFium come from the same release of

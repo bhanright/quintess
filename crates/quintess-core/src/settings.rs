@@ -49,6 +49,12 @@ pub struct Settings {
     /// The timestamp server to use, and whether to add a timestamp.
     pub timestamp_server: String,
     pub add_timestamp: bool,
+    /// Save changes to a file as an incremental update appended after its
+    /// existing bytes (which stay untouched), rather than writing it anew.
+    pub save_incrementally: bool,
+    /// Seconds of no further changes after which a recovery copy of a
+    /// document with unsaved changes is written; 0 turns autosave off.
+    pub autosave_seconds: u32,
 }
 
 /// The page a file was left at, and its zoom (`None` when it was fitted to
@@ -86,6 +92,8 @@ impl Default for Settings {
             signing_source: "identity".into(),
             timestamp_server: "http://timestamp.digicert.com".into(),
             add_timestamp: false,
+            save_incrementally: true,
+            autosave_seconds: 60,
         }
     }
 }

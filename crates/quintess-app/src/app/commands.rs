@@ -50,8 +50,9 @@ pub(super) const COMMANDS: &[Command] = &[
     command("File ▸ Create", "From a web page…", |app, _| app.dialogs.push(Dialog::Convert(Box::new(dialogs::ConvertDialog::new(true, None))))).always().hint("Print a web page to PDF with Edge or Chrome"),
     command("File ▸ Create", "Combine files…", |app, _| app.combine_files()).always(),
     command("File", "Save", |app, _| app.save(false)).shortcut("Ctrl+S"),
-    command("File", "Save as…", |app, _| app.save(true)).shortcut("Ctrl+Shift+S"),
-    command("File", "Save compressed copy…", |app, _| app.save_compressed()),
+    command("File ▸ Save as", "Save as…", |app, _| app.save(true)).shortcut("Ctrl+Shift+S"),
+    command("File ▸ Save as", "Save a clean copy…", |app, _| app.save_clean_copy()).hint("The whole file written anew, without the earlier versions that saving changes as updates keeps"),
+    command("File ▸ Save as", "Save compressed copy…", |app, _| app.save_compressed()),
     command("File", "Reduce file size…", |app, _| app.dialogs.push(Dialog::Optimize { preset: 1, dpi: 150.0, quality: 80, grayscale: false, remove_metadata: false })),
     command("File ▸ Export as", "Word document (.docx)…", |app, ctx| app.start_export(ctx, "docx")),
     command("File ▸ Export as", "Markdown (.md)…", |app, ctx| app.start_export(ctx, "md")),
@@ -125,7 +126,7 @@ pub(super) const COMMANDS: &[Command] = &[
     .shortcut("F11")
     .always(),
     command("View", "Command palette", |app, _| app.open_palette()).shortcut("Ctrl+K").always(),
-    command("Tools ▸ Comment", "Flatten comments and form fields into the page", |app, _| app.edit_recording("Flatten comments", Step::Flatten { forms_only: false }, |pdf| forms::flatten(pdf, false).map(|_| ()))),
+    command("Tools ▸ Comment", "Flatten comments and form fields into the page", |app, _| app.edit_removing_recording("Flatten comments", Step::Flatten { forms_only: false }, |pdf| forms::flatten(pdf, false).map(|_| ()))),
     command("Tools ▸ Comment", "Remove all comments", |app, _| app.edit_removing_recording("Remove comments", Step::RemoveComments, |pdf| remove_annotations(pdf, &[]).map(|_| ()))),
     command("Tools ▸ Comment", "Copy comment summary", |app, ctx| {
         if let Some(pdf) = app.tabs.get(app.active).map(|t| t.load_pdf()) {
@@ -162,16 +163,21 @@ pub(super) const COMMANDS: &[Command] = &[
     command("Tools ▸ Pages", "Several pages per sheet…", |app, _| app.dialogs.push(Dialog::NUp { columns: 2, rows: 1, sheet: "letter".into(), frames: false })),
     command("Tools ▸ Pages", "Page labels…", |app, _| app.dialogs.push(Dialog::PageLabels { first_page: 1, style: "roman".into(), prefix: String::new(), start: 1 })),
     command("Tools ▸ Pages", "Reverse order", |app, _| app.edit_recording("Reverse pages", Step::Reverse, pages::reverse_pages)),
-    command("Tools ▸ Pages", "Remove blank pages", |app, _| app.edit_recording("Remove blank pages", Step::RemoveBlankPages, |pdf| pages::remove_blank_pages(pdf).map(|_| ()))),
+    command("Tools ▸ Pages", "Remove blank pages", |app, _| app.edit_removing_recording("Remove blank pages", Step::RemoveBlankPages, |pdf| pages::remove_blank_pages(pdf).map(|_| ()))),
     command("Tools ▸ Forms", "Detect fields automatically", |app, _| app.detect_fields()),
     command("Tools ▸ Forms", "Import data…", |app, _| app.import_form_data()),
     command("Tools ▸ Forms", "Fill from spreadsheet…", |app, _| app.open_form_merge()).hint("One filled copy of this form for every row of a spreadsheet"),
-    command("Tools ▸ Forms", "Clear all fields", |app, _| app.edit("Clear form", |pdf| {
-        forms::reset_form(pdf)?;
-        // Totals and other calculated fields follow the cleared values.
-        quintess_core::form_scripts::recalculate(pdf).map(|_| ())
-    })),
-    command("Tools ▸ Forms", "Flatten fields into the page", |app, _| app.edit_recording("Flatten form", Step::Flatten { forms_only: true }, |pdf| forms::flatten(pdf, true).map(|_| ()))),
+    // Clearing a form usually means taking someone's answers out of it, so
+    // it counts as removing content: the next save keeps no earlier version
+    // with the answers in it.
+    command("Tools ▸ Forms", "Clear all fields", |app, _| {
+        app.edit_removing("Clear form", |pdf| {
+            forms::reset_form(pdf)?;
+            // Totals and other calculated fields follow the cleared values.
+            quintess_core::form_scripts::recalculate(pdf).map(|_| ())
+        });
+    }),
+    command("Tools ▸ Forms", "Flatten fields into the page", |app, _| app.edit_removing_recording("Flatten form", Step::Flatten { forms_only: true }, |pdf| forms::flatten(pdf, true).map(|_| ()))),
     command("Tools ▸ Redact", "Find and redact…", |app, _| app.dialogs.push(Dialog::redact())),
     command("Tools ▸ Redact", "Check for leftover text…", |app, _| app.dialogs.push(Dialog::CheckForText { texts: String::new() })).hint("Search every part of the file for words that should be gone"),
     command("Tools ▸ Protect", "Protect with password…", |app, _| app.dialogs.push(Dialog::protect())),
@@ -539,7 +545,7 @@ impl QuintessApp {
 /// palette, so the test below catches it.
 #[cfg(test)]
 const MENU_GROUPS: &[&str] = &[
-    "File", "File ▸ Create", "File ▸ Export as", "Edit", "View", "View ▸ Read out loud", "Help",
+    "File", "File ▸ Create", "File ▸ Save as", "File ▸ Export as", "Edit", "View", "View ▸ Read out loud", "Help",
     "Tools", "Tools ▸ Comment", "Tools ▸ Stamp and number", "Tools ▸ Pages", "Tools ▸ Forms", "Tools ▸ Redact",
     "Tools ▸ Protect", "Tools ▸ Sign", "Tools ▸ Accessibility", "Tools ▸ Standards", "Tools ▸ Print production",
 ];

@@ -543,9 +543,20 @@ pub fn page_numbers_by_id(pdf: &Pdf) -> BTreeMap<ObjectId, u32> {
 /// file beside it, which then replaces it, so a crash or power cut midway
 /// leaves either the old file or the new one, never half of each.
 pub fn write_file_safely(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
     let partial = path.with_file_name(format!(".{name}.partial"));
-    std::fs::write(&partial, bytes).with_context(|| format!("could not write {}", partial.display()))?;
+    let written = std::fs::File::create(&partial).and_then(|mut file| {
+        file.write_all(bytes)?;
+        // On disk before the rename, so a power cut right after it can't
+        // leave the new name pointing at bytes still in a cache (the idea
+        // is PdfCraft's `write_atomically`).
+        file.sync_all()
+    });
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&partial);
+        return Err(error).with_context(|| format!("could not write {}", partial.display()));
+    }
     std::fs::rename(&partial, path).with_context(|| {
         let _ = std::fs::remove_file(&partial);
         format!("could not replace {}", path.display())
