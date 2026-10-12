@@ -381,12 +381,14 @@ fn exports_word_pages_that_keep_the_layout() {
 
     let body = zip_text(&bytes, "word/document.xml");
     // The text is Word text, in its color, size and weight, fixed to the page.
-    for expected in ["WHITE ON RED", "<w:color w:val=\"FFFFFF\"/>", "<w:sz w:val=\"48\"/>", "<w:b/>", "Figures are in thousands of dollars.", "Quarterly results", "w:hAnchor=\"page\""] {
+    for expected in ["WHITE ON RED", "<w:color w:val=\"FFFFFF\"/>", "<w:sz w:val=\"48\"/>", "<w:b/>", "Figures are in thousands of dollars.", "Quarterly results", "<wps:txbx>", "relativeFrom=\"page\""] {
         assert!(body.contains(expected), "document.xml lacks {expected}");
     }
-    // 90 points from the left is 1800 twips.
-    assert!(body.contains("w:x=\"1800\""), "the banner text starts where it stood");
-    // Turned text can't sit in a Word frame, so it stays in the picture.
+    // 90 points from the left is 1143000 EMUs; the text box sits there,
+    // fixed to the page.
+    assert!(body.contains("<wp:posOffset>1143000</wp:posOffset>"), "the banner text starts where it stood");
+    assert!(!body.contains("w:framePr"), "text frames are placed only by Word");
+    // Turned text stays in the picture.
     assert!(!body.contains("Turned aside"));
     // One section per page, each US Letter with no margins.
     assert_eq!(body.matches("<w:pgSz w:w=\"12240\" w:h=\"15840\"/>").count(), 2);
@@ -427,5 +429,35 @@ fn exports_web_pages_that_keep_the_layout() {
     // is 14.7059% from the left.
     for expected in ["WHITE &amp; RED", "color: #ffffff;", "font-weight: bold;", "left: 14.7059%", "Quarterly results"] {
         assert!(html.contains(expected), "the web page lacks {expected}");
+    }
+}
+
+/// The exported Word document places its text the same way in a word
+/// processor other than Word: converted back to PDF by the built-in
+/// converter (WordCraft's engine), the banner text lands where it stood.
+#[cfg(feature = "word-processing")]
+#[test]
+fn exported_word_pages_keep_their_layout_in_other_word_processors() {
+    let mut banner = String::from("1 0 0 rg 72 680 300 60 re f
+");
+    banner += "1 1 1 rg BT /F2 24 Tf 90 700 Td (WHITE ON RED) Tj ET
+";
+    banner += &text(72.0, 600.0, false, 10.0, "Figures are in thousands of dollars.");
+    let document = open(pdf_with_pages(&[banner]));
+    let bytes = quintess_core::word_export::document_to_docx_with_layout(&document, &quintess_core::word_export::WordLayoutSettings { background_dpi: 72.0 }).unwrap();
+    let path = folder().join("layout-round-trip.docx");
+    std::fs::write(&path, &bytes).unwrap();
+    let options = quintess_core::conversion::ConversionOptions::default();
+    let result = quintess_core::conversion::convert_file(&path, &options, &quintess_core::conversion::Cancellation::new()).unwrap();
+    assert_eq!(result.engine, "WordCraft");
+    let converted = open(result.pdf);
+    assert_eq!(converted.pages().len(), 1, "the page stays one page");
+    let page = engine::page_text(&converted, 0).unwrap();
+    let (text, offsets) = page.as_string();
+    for (expected, left, baseline) in [("WHITE ON RED", 90.0, 700.0), ("Figures are in thousands", 72.0, 600.0)] {
+        let start = text.find(expected).unwrap_or_else(|| panic!("{expected} is missing from {text:?}"));
+        let first = &page.chars[offsets[text[..start].chars().count()]];
+        assert!((first.rect[0] - left).abs() < 4.0, "{expected} starts at x {}, not {left}", first.rect[0]);
+        assert!((first.rect[1] - baseline).abs() < 6.0, "{expected} sits at y {}, not near {baseline}", first.rect[1]);
     }
 }

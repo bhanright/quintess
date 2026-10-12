@@ -106,28 +106,70 @@ fn run_xml(run: &TextRun) -> String {
     format!("<w:r><w:rPr>{properties}</w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r>", escape(&run.text))
 }
 
-/// A paragraph in a frame fixed to the page. Its width is left to Word, so
-/// a line never wraps, even when a stand-in font sets it wider.
-fn frame_xml(frame: &TextFrame) -> String {
+/// A text box holding one line, fixed to the page where the line stood.
+/// Text boxes anchored to the page are understood by Word, LibreOffice and
+/// WordCraft alike; the older text frames (`w:framePr`) were placed by Word
+/// but left in the flow of text by other word processors. The box never
+/// wraps, so a wider stand-in font can't push words onto a second line.
+/// `shape_id` must be unique in the document and `stacking` orders the
+/// boxes above the background.
+fn text_box_run_xml(frame: &TextFrame, shape_id: usize, stacking: usize) -> String {
     let line_height = frame.largest_font_size * LINE_HEIGHT_IN_FONT_SIZES;
     let top = frame.baseline_from_top - frame.largest_font_size * BASELINE_DROP_IN_FONT_SIZES;
+    // Word and LibreOffice let the line run past the box (it doesn't wrap),
+    // but WordCraft wraps at the box's edge and hides what falls below, so
+    // the box must hold the whole line: its measured width in the font the
+    // reader will see, with room for a wider stand-in font, or a generous
+    // estimate when the font can't be measured. The box has no border, so
+    // the extra room doesn't show.
+    let width_points: f32 = frame
+        .runs
+        .iter()
+        .map(|run| {
+            let characters = run.text.chars().count() as f32;
+            match crate::font_measure::text_width(&run.style, &run.text) {
+                Some(width) => (width + run.letter_spacing_points * characters) * 1.25,
+                None => run.style.size_points * 0.8 * characters,
+            }
+        })
+        .sum::<f32>()
+        + frame.largest_font_size;
+    let emu = |points: f32| (points * EMU_PER_POINT).round() as i64;
+    let (left, top, width, height) = (emu(frame.left), emu(top), emu(width_points).max(1), emu(line_height).max(1));
     let runs: String = frame.runs.iter().map(run_xml).collect();
     format!(
-        "<w:p><w:pPr><w:framePr w:wrap=\"none\" w:hAnchor=\"page\" w:vAnchor=\"page\" w:x=\"{}\" w:y=\"{}\"/><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"{}\" w:lineRule=\"exact\"/></w:pPr>{runs}</w:p>",
-        twips(frame.left),
-        twips(top),
-        twips(line_height).max(1),
+        concat!(
+            "<w:r><mc:AlternateContent><mc:Choice Requires=\"wps\"><w:drawing>",
+            "<wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"{stacking}\" behindDoc=\"0\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\">",
+            "<wp:simplePos x=\"0\" y=\"0\"/>",
+            "<wp:positionH relativeFrom=\"page\"><wp:posOffset>{left}</wp:posOffset></wp:positionH>",
+            "<wp:positionV relativeFrom=\"page\"><wp:posOffset>{top}</wp:posOffset></wp:positionV>",
+            "<wp:extent cx=\"{width}\" cy=\"{height}\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/><wp:wrapNone/>",
+            "<wp:docPr id=\"{id}\" name=\"Text {id}\"/><wp:cNvGraphicFramePr/>",
+            "<a:graphic><a:graphicData uri=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\"><wps:wsp>",
+            "<wps:cNvSpPr txBox=\"1\"/>",
+            "<wps:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{width}\" cy=\"{height}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>",
+            "<wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"{line}\" w:lineRule=\"exact\"/></w:pPr>{runs}</w:p></w:txbxContent></wps:txbx>",
+            "<wps:bodyPr rot=\"0\" vert=\"horz\" wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" anchor=\"t\" anchorCtr=\"0\"><a:noAutofit/></wps:bodyPr>",
+            "</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent></w:r>",
+        ),
+        stacking = stacking,
+        left = left,
+        top = top,
+        width = width,
+        height = height,
+        id = shape_id,
+        line = twips(line_height).max(1),
+        runs = runs,
     )
 }
 
 /// The page's background picture, behind the text and filling the page.
-/// It sits in a paragraph one twentieth of a point high, which takes no
-/// room from the page.
-fn background_xml(page: &WordPage, relationship_id: &str, picture_id: usize) -> String {
+fn background_run_xml(page: &WordPage, relationship_id: &str, picture_id: usize) -> String {
     let (width, height) = ((page.width_points * EMU_PER_POINT).round() as i64, (page.height_points * EMU_PER_POINT).round() as i64);
     format!(
         concat!(
-            "<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"1\" w:lineRule=\"exact\"/><w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr><w:r><w:rPr><w:sz w:val=\"2\"/></w:rPr><w:drawing>",
+            "<w:r><w:rPr><w:sz w:val=\"2\"/></w:rPr><w:drawing>",
             "<wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"0\" behindDoc=\"1\" locked=\"1\" layoutInCell=\"1\" allowOverlap=\"1\">",
             "<wp:simplePos x=\"0\" y=\"0\"/>",
             "<wp:positionH relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionH>",
@@ -139,7 +181,7 @@ fn background_xml(page: &WordPage, relationship_id: &str, picture_id: usize) -> 
             "<pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"Page {id} background\"/><pic:cNvPicPr/></pic:nvPicPr>",
             "<pic:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>",
             "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{width}\" cy=\"{height}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>",
-            "</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>",
+            "</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>",
         ),
         width = width,
         height = height,
@@ -160,11 +202,21 @@ fn section_xml(page: &WordPage) -> String {
 
 fn document_xml(pages: &[WordPage]) -> String {
     let mut body = String::new();
+    // Shape ids are unique in the document; the backgrounds take 1 to the
+    // page count, so the text boxes start after them.
+    let mut next_shape_id = pages.len() + 1;
     for (index, page) in pages.iter().enumerate() {
-        body.push_str(&background_xml(page, &format!("rId{}", index + 10), index + 1));
-        for frame in &page.frames {
-            body.push_str(&frame_xml(frame));
+        // One paragraph, one twentieth of a point high so it takes no room,
+        // holds everything on the page: all of it is placed relative to the
+        // page, so it stays on this page whatever the word processor does
+        // with the flow of text.
+        body.push_str("<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"1\" w:lineRule=\"exact\"/><w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr>");
+        body.push_str(&background_run_xml(page, &format!("rId{}", index + 10), index + 1));
+        for (stacking, frame) in page.frames.iter().enumerate() {
+            body.push_str(&text_box_run_xml(frame, next_shape_id, stacking + 1));
+            next_shape_id += 1;
         }
+        body.push_str("</w:p>");
         // Each page is a section of its own, so pages keep their own sizes.
         // A section ends at a paragraph carrying its properties; the last
         // section's go at the end of the body.
@@ -180,7 +232,9 @@ fn document_xml(pages: &[WordPage]) -> String {
             "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" ",
             "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" ",
             "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" ",
-            "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">",
+            "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\" ",
+            "xmlns:wps=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\" ",
+            "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\">",
             "<w:body>{body}{last_section}</w:body></w:document>",
         ),
         body = body,
