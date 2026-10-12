@@ -18,7 +18,7 @@
 <meta property="og:image" content="https://quintess.cc/assets/img/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/site.css?v=7fed46d052">
+<link rel="stylesheet" href="/assets/site.css?v=ad6d479b20">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"TechArticle","headline":"Quintess user guide","about":{"@id":"https://quintess.cc/#app"},"author":{"@type":"Person","name":"William Hanright"},"url":"https://quintess.cc/guide/"}
 </script>
@@ -76,7 +76,7 @@
     <p class="kicker"><span class="dot"></span>the same guide as F1 in the program</p>
     <h1 class="display-2">Quintess user guide</h1>
 <section class="doc-topic" id="welcome-to-quintess"><h2><a href="#welcome-to-quintess">Welcome to Quintess</a></h2>
-<p>Quintess reads, edits, signs, redacts and automates PDF documents on Windows and Linux. It runs on your computer, needs no account, and works offline. The few features that use the internet are listed under <b>Privacy and updates</b>.</p>
+<p>Quintess reads, edits, signs, redacts and automates PDF documents on Windows, macOS and Linux. It runs on your computer, needs no account, and works offline. The few features that use the internet are listed under <b>Privacy and updates</b>.</p>
 <p>This guide explains Quintess&#x27;s tools and common workflows. Use the list of topics to jump around, or filter it with the search box. In the program, press <b>F1</b> to open this guide.</p>
 <h3 id="welcome-to-quintess-finding-a-command">Finding a command</h3>
 <p>Press <b>Ctrl+K</b> and type what you want, such as &quot;rotate&quot;, &quot;watermark&quot; or &quot;redact&quot;. The command palette finds menu commands, tools, recent files and page numbers.</p>
@@ -90,10 +90,44 @@
 <section class="doc-topic" id="installing"><h2><a href="#installing">Installing</a></h2>
 <h3 id="installing-on-windows">Installing on Windows</h3>
 <p>Download the installer (<code>Quintess-&lt;version&gt;-setup.exe</code>) from the releases page at github.com/bhanright/quintess/releases and run it. It installs for your user account only, with no administrator rights needed, offers Quintess for opening PDFs without changing your default, and puts the <code>quintess</code> command on your PATH so it can be typed in a terminal. The installer isn&#x27;t code-signed yet, so Windows may show a SmartScreen warning. Remove Quintess from Windows Settings ▸ Apps.</p>
+<p><b>PCs with an ARM processor</b> (such as Snapdragon laptops running Windows 11) have their own installer, <code>Quintess-&lt;version&gt;-arm64-setup.exe</code>, which installs the version made for that processor; it runs faster and uses less battery than the x64 version, which Windows on ARM can also run (under emulation). The ARM64 installer refuses to install on an x64 PC, where its program couldn&#x27;t run. If you start the x64 installer on an ARM PC, it suggests the ARM64 one and lets you carry on anyway; installing the ARM64 version later replaces the x64 one in place, keeping your settings. The update check (<b>Help ▸ Check for updates</b>) downloads the ARM64 installer on an ARM PC, even from the x64 version. Settings ▸ System ▸ About ▸ <b>System type</b> says which processor a PC has (&quot;ARM-based processor&quot; or &quot;x64-based processor&quot;). The ARM64 version is built and tested on GitHub&#x27;s Windows 11 ARM computers but hasn&#x27;t yet been tried by hand on a laptop.</p>
+<h3 id="installing-on-macos">Installing on macOS</h3>
+<p>Quintess runs on macOS 11 (Big Sur) and later, on Macs with Apple silicon (M1 and later) and on Intel Macs: one download, <code>Quintess-&lt;version&gt;-macos.dmg</code>, holds a program for both. Download it from the releases page at github.com/bhanright/quintess/releases, open it, and drag <b>Quintess</b> onto <b>Applications</b>. A <code>.sha256</code> file beside the download checks it: <code>shasum -a 256 -c Quintess-&lt;version&gt;-macos.dmg.sha256</code> in Terminal.</p>
+<p><b>Opening it the first time</b>: Quintess is free and isn&#x27;t signed with an Apple Developer ID (which costs a yearly fee) or checked by Apple, so macOS refuses to open it the first time, saying it can&#x27;t check it for malicious software. This happens once:</p>
+<ul>
+<li>macOS 15 (Sequoia) and later: open Quintess (it is refused; click <b>Done</b>), then open System Settings ▸ <b>Privacy &amp; Security</b>, scroll down to <b>Security</b>, click <b>Open Anyway</b> beside the message about Quintess, and confirm with your password.</li>
+<li>macOS 14 (Sonoma) and earlier: in Applications, Control-click (or right-click) Quintess, choose <b>Open</b>, then click <b>Open</b> in the message.</li>
+<li>If macOS says Quintess &quot;is damaged and can&#x27;t be opened&quot;, it is the download&#x27;s quarantine mark rather than damage. In Terminal, run <code>xattr -dr com.apple.quarantine /Applications/Quintess.app</code>, then open it.</li>
+</ul>
+<p>After that it opens normally. The disk image has a <b>Read me first</b> file with these steps.</p>
+<p><b>Opening PDFs</b>: Quintess is listed under <b>Open With</b> when you Control-click a PDF in the Finder. To make it the default, select a PDF, choose File ▸ Get Info, pick Quintess under <b>Open with</b>, and click <b>Change All</b>. You can also drop PDFs on Quintess in the Dock.</p>
+<p><b>The command line</b>: the app is also the command-line tool, at <code>/Applications/Quintess.app/Contents/MacOS/quintess</code> (<code>… quintess --help</code> lists the commands). To type just <code>quintess</code> in Terminal, link it once: <code>sudo ln -sf /Applications/Quintess.app/Contents/MacOS/quintess /usr/local/bin/quintess</code> (create <code>/usr/local/bin</code> first with <code>sudo mkdir -p /usr/local/bin</code> if your Mac lacks it).</p>
+<p><b>Shortcuts</b>: the shortcuts written with Ctrl in this guide use the Command (⌘) key on a Mac: ⌘O opens, ⌘S saves, ⌘K opens the command palette. <b>Quit Quintess</b> (⌘Q) asks about unsaved changes like closing the window does.</p>
+<p><b>What differs from Windows</b>:</p>
+<ul>
+<li>Signing from a certificate store isn&#x27;t available (Windows only); sign with a .pfx or .p12 file.</li>
+<li>Microsoft Office can&#x27;t be used to convert documents (Windows only); install LibreOffice (in Applications) for Office documents and presentations, and Chrome or Edge for web pages.</li>
+<li>Scanning needs SANE, which macOS doesn&#x27;t include: install it with Homebrew (<code>brew install sane-backends</code>), or scan with the Image Capture app and make a PDF from the pictures (File ▸ Create ▸ From images…).</li>
+<li>Printing goes through the Mac&#x27;s own print system (CUPS). There is no Properties button; choose the <b>Paper</b> size in the Print dialog.</li>
+<li>Reading aloud uses the Mac&#x27;s voices; add more in System Settings ▸ Accessibility ▸ Spoken Content ▸ System voice ▸ Manage Voices.</li>
+<li>Quintess doesn&#x27;t update itself: <b>Help ▸ Check for updates</b> opens the release page; download the new disk image and drag Quintess into Applications again, replacing the old one.</li>
+<li>Settings and data are in <code>~/Library/Application Support/Quintess</code>.</li>
+</ul>
+<p>The Mac version is built and tested on GitHub&#x27;s Mac computers (Apple silicon and Intel), where its tests pass and the app opens and draws documents, but it hasn&#x27;t yet been tried by hand on a Mac. Please report what doesn&#x27;t work at github.com/bhanright/quintess/issues.</p>
 <h3 id="installing-on-linux">Installing on Linux</h3>
-<p>Quintess runs on 64-bit Linux with glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and newer. Download one of the two packages from the releases page at github.com/bhanright/quintess/releases.</p>
+<p>Quintess runs on 64-bit Linux with glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and newer. Download one of the four packages from the releases page at github.com/bhanright/quintess/releases: the .deb for apt systems, the tarball for any distribution, the AppImage to run without installing, or the Flatpak to run in a sandbox.</p>
 <p><b>Debian, Ubuntu, Mint and other apt systems</b>: download <code>quintess_&lt;version&gt;_amd64.deb</code>, then in a terminal in that folder run <code>sudo apt install ./quintess_&lt;version&gt;_amd64.deb</code>. apt installs the libraries it needs. Quintess appears in your applications menu and under <b>Open with</b> for PDF files; the command is <code>quintess</code> (on its own or with files it opens the app, and followed by a command it is the command-line tool). Remove it with <code>sudo apt remove quintess</code>.</p>
 <p><b>Any other distribution</b>: download <code>quintess-&lt;version&gt;-linux-x86_64.tar.gz</code>, unpack it with <code>tar -xzf quintess-&lt;version&gt;-linux-x86_64.tar.gz</code>, go into the <code>quintess-&lt;version&gt;-linux-x86_64</code> folder and run <code>./install.sh</code>. This installs for you only, into <code>~/.local</code> (the program in <code>~/.local/lib/quintess</code>, the <code>quintess</code> command in <code>~/.local/bin</code>, a menu entry and icons). <code>sudo ./install.sh --system</code> installs for everyone into <code>/opt/quintess</code> instead, with the command in <code>/usr/local/bin</code>. Remove it with <code>~/.local/lib/quintess/uninstall.sh</code> (or <code>sudo /opt/quintess/uninstall.sh</code>). The tarball needs <code>libspeechd2</code> (Fedora: <code>speech-dispatcher-libs</code>), which most desktops already have; <code>install.sh</code> names any missing library.</p>
+<p><b>AppImage, nothing to install</b>: download <code>Quintess-&lt;version&gt;-x86_64.AppImage</code>, make it executable (<code>chmod +x Quintess-&lt;version&gt;-x86_64.AppImage</code>, or Properties ▸ Allow executing in your file manager) and run it. Followed by a command it is the command-line tool, as <code>quintess</code> is (<code>./Quintess-&lt;version&gt;-x86_64.AppImage --help</code>). The AppImage mounts itself with FUSE, which most desktops have (<code>libfuse2</code> or <code>fuse3</code>); where it&#x27;s missing, the AppImage says so, and <code>./Quintess-&lt;version&gt;-x86_64.AppImage --appimage-extract-and-run</code> runs it without. It doesn&#x27;t add itself to the applications menu or to <b>Open with</b>; tools such as Gear Lever or AppImageLauncher do that. The optional programs below work with it as with the other packages. To remove it, delete the file.</p>
+<p><b>Flatpak, in a sandbox</b>: Flatpak must be installed, with the Flathub remote added (<code>flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo</code>; most distributions&#x27; software stores have done this already). Download <code>Quintess-&lt;version&gt;-x86_64.flatpak</code>, then run <code>flatpak install --user Quintess-&lt;version&gt;-x86_64.flatpak</code>, which also fetches the freedesktop runtime from Flathub the first time. Quintess appears in your applications menu; from a terminal, <code>flatpak run cc.quintess.Quintess</code> starts it, and with a command after it, it is the command-line tool. Remove it with <code>flatpak uninstall --user cc.quintess.Quintess</code>. Printing and reading aloud are included, so the optional programs below aren&#x27;t needed for those.</p>
+<p><b>What the Flatpak sandbox changes</b>:</p>
+<ul>
+<li>Files: Quintess can open and save any file you choose in its Open and Save dialogs or drop on its window. Without a dialog, it reaches only your Documents and Downloads folders: files named on the command line, recent files, <b>Search a folder</b>, a watched folder, and commands that write new files beside the original (such as splitting a document) work there. To let it reach your whole home folder, run <code>flatpak override --user --filesystem=home cc.quintess.Quintess</code>.</li>
+<li>Printing goes to the printers set up on your computer, through CUPS.</li>
+<li>Reading aloud needs <code>speech-dispatcher</code> installed on your computer, as outside the sandbox; Quintess can&#x27;t start it from inside, so if nothing is read, start it with <code>speech-dispatcher -d</code> (most desktops start it when a program first asks).</li>
+<li>Not available in the Flatpak: scanning (SANE isn&#x27;t in the sandbox) and converting with LibreOffice or Chrome (Office documents, web pages), which are other programs the sandbox can&#x27;t start. Quintess&#x27;s built-in conversions work, and the AppImage, the .deb or the tarball do all of these.</li>
+<li>Spelling dictionaries installed with the system (<code>/usr/share/hunspell</code>) aren&#x27;t visible; the bundled ones are, and <b>Add a language…</b> in the spelling settings downloads others.</li>
+</ul>
 <p>Each download has a <code>.sha256</code> file beside it; <code>sha256sum -c quintess_&lt;version&gt;_amd64.deb.sha256</code> checks the download.</p>
 <p><b>Optional programs</b>, each for one feature:</p>
 <ul>
@@ -105,7 +139,7 @@
 <li>File dialogs on desktops without a portal: <code>zenity</code>.</li>
 <li>Editing text in documents whose fonts aren&#x27;t embedded: <code>fonts-liberation</code>, which match Arial, Times New Roman and Courier New in width.</li>
 </ul>
-<p>On apt systems the first ones are installed with Quintess unless you turned off recommended packages.</p>
+<p>On apt systems the first ones are installed with Quintess unless you turned off recommended packages. The AppImage includes what reading aloud needs on Quintess&#x27;s side, but the voices still come from <code>speech-dispatcher</code> on your computer.</p>
 <p><b>What differs from Windows</b>: there is no certificate store to sign from (use a .pfx or .p12 file), Microsoft Office can&#x27;t convert documents (LibreOffice can), printing has no printer Properties dialog (choose the paper size in the Print dialog), and Quintess doesn&#x27;t update itself.</p>
 </section>
 <section class="doc-topic" id="getting-started"><h2><a href="#getting-started">Getting started</a></h2>
@@ -120,14 +154,36 @@
 <h3 id="getting-started-saving-and-keeping-an-original">Saving and keeping an original</h3>
 <p>Edits change the open document only. Nothing is written to disk until you save.</p>
 <ul>
-<li><b>File ▸ Save</b> (Ctrl+S) writes over the file you opened.</li>
-<li><b>File ▸ Save as…</b> (Ctrl+Shift+S) writes a new file. The tab then shows the new file, and the original stays as it was.</li>
-<li><b>File ▸ Save compressed copy…</b> writes a separate, losslessly compressed copy. The open document doesn&#x27;t change.</li>
+<li><b>File ▸ Save</b> (Ctrl+S) saves your changes to the file you opened.</li>
+<li><b>File ▸ Save as ▸ Save as…</b> (Ctrl+Shift+S) writes a new file. The tab then shows the new file, and the original stays as it was.</li>
+<li><b>File ▸ Save as ▸ Save a clean copy…</b> writes the whole document as one new file, without the earlier versions described below. Choose the document&#x27;s own file name to clean up that file itself; choose another name for a separate copy (the tab stays with its own file). Writing a signed document this way invalidates its signatures, and Quintess asks first.</li>
+<li><b>File ▸ Save as ▸ Save compressed copy…</b> writes a separate, losslessly compressed copy. The open document doesn&#x27;t change.</li>
 <li><b>File ▸ Export as</b> and <b>File ▸ Export</b> write other formats (Word, Excel, text, pictures and more). They don&#x27;t change the open document.</li>
 </ul>
-<p>Quintess saves through a temporary file that replaces the old one at the end, which reduces the risk of a broken file if the save is interrupted.</p>
+<p><b>Save keeps the original bytes.</b> Saving to the file you opened adds only what changed, as an *incremental update* after the file&#x27;s existing bytes, which stay exactly as they were. Other readers open the result normally, and each save adds one more version inside the file. Quintess writes the whole file again instead when that is the right thing to do:</p>
+<ul>
+<li>after an edit that removes content: redaction, deleting pages, removing blank pages, removing comments, metadata, attachments or portfolio files, deleting a layer with its content, flattening comments or form fields, clearing a form, and <b>Reduce file size</b>. An update would leave what you removed readable in the earlier version, so the file is written again without any earlier version;</li>
+<li>when protection is added, changed or removed, and for files protected for certificates. Password-protected files keep their protection: the update is encrypted with the file&#x27;s own password and key;</li>
+<li>for <b>Save as…</b> to a new file: the original stays untouched on disk, and the copy, which is often made to send to someone, carries no hidden earlier versions;</li>
+<li>when the updates have made the file much bigger than it started (more than half again, and at least 1 MB): it is written again in one piece, and the status line says so;</li>
+<li>when the preference <b>Save changes as an incremental update (keeps the original bytes)</b> is off (<b>Edit ▸ Preferences</b>; on by default);</li>
+<li>if an update can&#x27;t be made or doesn&#x27;t read back correctly, which the status line explains.</li>
+</ul>
+<p>Edits that only change or cover text, such as editing a paragraph, find and replace, or deleting a picture, are saved as updates, so the earlier version inside the file still holds the old text or picture. To hide something for good, use redaction; to drop the earlier versions, use <b>Save a clean copy…</b>.</p>
+<p>Every save goes through a temporary file that is written to disk in full and then replaces the old one, so an interrupted save leaves either the old file or the new one, never a broken mixture.</p>
 <p><b>Keep a copy of the original</b> before work that removes content for good: redaction, flattening, replacing tags, <b>Smallest</b> compression and recorded actions run on many files. The safest habit is <b>Save as…</b> under a new name before you start.</p>
-<p>Closing a tab with unsaved changes asks first: <b>Save</b>, <b>Close without saving</b> or <b>Cancel</b>. Quitting Quintess (File ▸ Quit or the window&#x27;s close button) asks once for all the documents with unsaved changes, listing them, with <b>Save all</b>, <b>Close without saving</b> and <b>Cancel</b>. If a save is canceled or fails, nothing is closed.</p>
+<p>Closing a tab with unsaved changes asks first: <b>Save</b>, <b>Close without saving</b> or <b>Cancel</b>. Quitting Quintess (File ▸ Quit or the window&#x27;s close button) asks once for all the documents with unsaved changes, listing them, with <b>Save all</b>, <b>Close without saving</b> and <b>Cancel</b>. If a save is canceled or fails, nothing is closed, and the documents&#x27; recovery copies stay (see &quot;If Quintess crashes&quot;).</p>
+<h3 id="getting-started-autosave">Autosave</h3>
+<p>While a document has unsaved changes, Quintess keeps a recovery copy of it, written a short while after your last change: 1 minute by default, or 30 seconds, 2 or 5 minutes, or never (<b>Edit ▸ Preferences ▸ Autosave</b>). Autosave doesn&#x27;t save your file; it keeps a copy to fall back on after a crash, a power cut or a forced shutdown. The copy is written in the background and never holds up your work. Saving the document, or closing it with <b>Close without saving</b>, deletes its copy, and quitting normally leaves none behind.</p>
+<p>A password-protected document&#x27;s copy is protected with the same password, and a document protected for certificates gets a copy for the same certificates: Quintess never writes the unprotected contents to disk. Documents over 200 MB get a copy at most every 5 minutes, and documents over 2 GB get none (the status line says so).</p>
+<h3 id="getting-started-damaged-files-reading-only-and-repairing">Damaged files: reading only, and repairing</h3>
+<p>Quintess shows pages with one engine (PDFium) and edits them with another. Some damaged files can be shown but not edited: the editing engine can&#x27;t read them, or reads them wrongly (finding fewer pages than there are). Such a file still opens, <b>for reading only</b>, with a bar above the page that says so.</p>
+<ul>
+<li><b>What works:</b> every page, zoom, split view and the page organizer for looking, thumbnails, selecting and copying text, searching (and <b>Search a folder</b>), reading aloud, printing, going to pages, bookmarks and links the file has, <b>File ▸ Properties…</b> (without changes), <b>File ▸ Export as</b> (Word, Markdown, web page, Excel, CSV, PowerPoint), <b>File ▸ Export ▸ Text, Pages as images, Embedded images</b>, QR codes, comparing and the object inspector.</li>
+<li><b>What doesn&#x27;t:</b> anything that changes the document (text, pictures, comments, forms, pages, stamps, protection, signing, redaction, OCR, Save) and the tools that read comments, form fields, attached files, layers or tags. Those commands and tools stay in their places, grayed out; hovering over one says why. <b>File ▸ Save as ▸ Save as…</b> still works and writes an exact copy of the file.</li>
+<li><b>Details</b> in the bar shows what the editing engine reported about the file.</li>
+<li><b>Try repairing</b> asks PDFium to write the document out again as it understands it, and opens that copy in a new, unsaved tab where everything works. Check the copy against the original: anything PDFium couldn&#x27;t read is missing from it. If the editing engine still can&#x27;t read PDFium&#x27;s copy (for example when the damage is in the file&#x27;s password protection, which PDFium keeps as it is), Quintess says so and the original stays open for reading. The same repair is <b>File ▸ Repair by rewriting with PDFium</b> for any document, and <code>quintess repair file.pdf</code> on the command line.</li>
+</ul>
 <h3 id="getting-started-studio-and-classic">Studio and Classic</h3>
 <p>Quintess has two looks. <b>Studio</b> (the default) has a slim header with the menus and a command field, and a floating dock of tools at the bottom of the page. <b>Classic</b> has a traditional menu bar and toolbar. Switch in <b>Edit ▸ Preferences…</b> under <b>Look</b>, with <b>View ▸ Studio look</b>, or with <b>Studio or classic look</b> in the command palette. Both looks have dark and light modes (<b>View ▸ Dark interface</b>). The View menu shows these and the other display toggles (split view, organizing pages, the sidebar, night reading) as checkboxes.</p>
 <p>In Studio, the dock holds the common tools. <b>More tools</b> (the ⋯ button) holds the rest, and <b>Organize pages</b> is at its right end.</p>
@@ -174,7 +230,7 @@
 <ul>
 <li><b>Read this page</b> (Ctrl+Shift+V) or <b>Read to the end</b> (Ctrl+Shift+B). The paragraph being read is outlined, and pages turn as reading moves on.</li>
 <li>The bar at the bottom has <b>Pause</b> and <b>Resume</b> (Ctrl+Shift+C), <b>Skip</b> to the next paragraph, <b>Stop</b> (Ctrl+Shift+E), a speed slider and a voice list. <b>Resume</b> starts the current paragraph again from its beginning. While paused, <b>Skip</b>, a new speed or a new voice wait for <b>Resume</b>.</li>
-<li>On Windows, more voices can be added in Windows Settings ▸ Time &amp; language ▸ Speech. On Linux, reading aloud needs the <code>speech-dispatcher</code> package, and its voices come from the speech engines installed for it (such as <code>espeak-ng</code>).</li>
+<li>On Windows, more voices can be added in Windows Settings ▸ Time &amp; language ▸ Speech. On Linux, reading aloud needs the <code>speech-dispatcher</code> package, and its voices come from the speech engines installed for it (such as <code>espeak-ng</code>). On a Mac, voices are added in System Settings ▸ Accessibility ▸ Spoken Content.</li>
 <li>Scanned pages have no text to read until <b>Tools ▸ Recognize text (OCR)</b> adds it.</li>
 </ul>
 <h3 id="reading-and-searching-qr-codes">QR codes</h3>
@@ -203,11 +259,11 @@
 <li><b>Microsoft Office</b> (on Windows only) opens the document invisibly in Word, Excel or PowerPoint. You must tick <b>Let Quintess open this document in Microsoft Office to convert it</b> each time. Quintess turns macros off and opens a read-only copy, but it doesn&#x27;t block Office from the network.</li>
 <li><b>Microsoft Edge</b> or <b>Chrome or Chromium</b> print web pages. Local web pages are printed with the network blocked, so pictures, fonts and styles from the web are missing.</li>
 </ul>
-<p>On Linux, install LibreOffice for Office documents and presentations, and Chromium or Chrome for web pages.</p>
+<p>On Linux, install LibreOffice for Office documents and presentations, and Chromium or Chrome for web pages. On a Mac, LibreOffice, Chrome and Edge are found in Applications (or in your own Applications folder).</p>
 <p>External converters are stopped after two minutes. When conversion finishes, the status bar names the converter and lists what it left out. If neither Edge nor Chrome is installed, <b>From a web page…</b> says so.</p>
 <p><b>From a web page…</b> prints a page from the internet with Edge, Chrome or Chromium. Enter an address starting with http:// or https://. This loads the page over the network.</p>
 <h3 id="creating-pdfs-scanning">Scanning</h3>
-<p><b>From a scanner…</b> lists the scanners on your computer: on Windows through Windows&#x27; own scanner support (WIA), on Linux through SANE (the <code>sane-utils</code> package and your scanner&#x27;s driver). Choose the <b>Resolution</b> (300 dpi suits OCR and printing), <b>Color</b>, <b>Gray</b> or <b>Black and white</b>, and whether to <b>Take every sheet in the document feeder</b>. <b>Make the text searchable (OCR)</b> recognizes the text as soon as the pages arrive.</p>
+<p><b>From a scanner…</b> lists the scanners on your computer: on Windows through Windows&#x27; own scanner support (WIA), on Linux and macOS through SANE (on Linux the <code>sane-utils</code> package and your scanner&#x27;s driver; on a Mac, SANE from Homebrew, <code>brew install sane-backends</code>, since the Mac&#x27;s own Image Capture can&#x27;t be used by other programs). Choose the <b>Resolution</b> (300 dpi suits OCR and printing), <b>Color</b>, <b>Gray</b> or <b>Black and white</b>, and whether to <b>Take every sheet in the document feeder</b>. <b>Make the text searchable (OCR)</b> recognizes the text as soon as the pages arrive.</p>
 <h3 id="creating-pdfs-combining-pdfs">Combining PDFs</h3>
 <p><b>Combine files…</b> asks for the PDFs in the order you want them and merges them into one document, with a bookmark for the start of each file.</p>
 </section>
@@ -247,7 +303,7 @@
 <h3 id="editing-text-the-edit-preview">The edit preview</h3>
 <p>While you type, Quintess shows the result on the page: where the paragraph will end, which text below will move and where it lands, anything it would overlap, and the footer zone. The bar says how far text moves, whether the paragraph shrinks, and which font stands in for an original one. Click <b>Result</b> to see the finished page before applying, especially after adding a lot of text.</p>
 <h3 id="editing-text-fonts">Fonts</h3>
-<p>Quintess reuses the document&#x27;s own font when the document already shows every letter you typed in that font, so edits match the text around them. Otherwise it embeds the original font again if it can, and if not, a similar font stands in (on Windows, Arial, Times New Roman or Courier New; on Linux, Liberation fonts if installed). The edit preview names any stand-in.</p>
+<p>Quintess reuses the document&#x27;s own font when the document already shows every letter you typed in that font, so edits match the text around them. Otherwise it embeds the original font again if it can, and if not, a similar font stands in (on Windows, Arial, Times New Roman or Courier New; on a Mac the same fonts, which macOS includes; on Linux, Liberation fonts if installed). The edit preview names any stand-in.</p>
 <h3 id="editing-text-moving-adding-and-deleting-text">Moving, adding and deleting text</h3>
 <ul>
 <li>With the <b>Edit text</b> tool, drag a paragraph to move it. It keeps its look.</li>
@@ -276,7 +332,7 @@
 <ul>
 <li>In <b>Edit ▸ Preferences…</b>, <b>Spelling</b> turns checking while typing on or off and picks the dictionary. &quot;System language&quot; follows your computer&#x27;s setting.</li>
 <li><b>Add a language…</b> (beside the dictionary choice) downloads one of about 50 languages from the open-source wooorm/dictionaries collection, or installs any Hunspell dictionary you have (pick its <code>.dic</code> file; the <code>.aff</code> file must be beside it). Added languages can be removed there too.</li>
-<li>Dictionaries can also be copied by hand into the <code>dictionaries</code> folder in Quintess&#x27;s settings folder (see <b>Preferences and troubleshooting</b>). On Linux, dictionaries installed with the system (<code>/usr/share/hunspell</code>) are found automatically.</li>
+<li>Dictionaries can also be copied by hand into the <code>dictionaries</code> folder in Quintess&#x27;s settings folder (see <b>Preferences and troubleshooting</b>). On Linux, dictionaries installed with the system (<code>/usr/share/hunspell</code>) are found automatically. On a Mac, Hunspell dictionaries in <code>~/Library/Spelling</code> (which macOS&#x27;s own spell checker also reads) are found too.</li>
 <li>Words you add are kept in <code>personal-dictionary.txt</code> in the settings folder, one per line; you can edit it.</li>
 <li>Words with digits, ALL-CAPS abbreviations, web and email addresses and file names are not checked.</li>
 </ul>
@@ -472,13 +528,13 @@
 <p>Choose <b>Tools ▸ Sign ▸ Sign here (draw a box)</b>, or the <b>Sign here</b> tool, and drag a box where the signature should appear. Then choose what to sign with:</p>
 <ul>
 <li><b>A certificate file (.pfx or .p12) from a certificate authority</b>, with its password. The password is used for this signature only and never saved.</li>
-<li><b>A certificate installed in Windows (including smart cards)</b>: on Windows, when you have certificates with private keys. Windows may ask for your PIN. On Linux, sign with a certificate file.</li>
+<li><b>A certificate installed in Windows (including smart cards)</b>: on Windows, when you have certificates with private keys. Windows may ask for your PIN. On macOS and Linux, sign with a certificate file.</li>
 <li><b>My own Quintess identity</b>. <b>Tools ▸ Sign ▸ Create signing identity…</b> makes one (an RSA key, which can also receive files encrypted for its certificate) and saves it as a file. Keep that file private: it holds your private key and isn&#x27;t password-protected. Other programs show such signatures as not verified, since no authority vouches for them.</li>
 </ul>
 <p>Add a <b>Reason</b> and an optional <b>Location</b>. The signature shows your name from the certificate, the date, the reason and the location.</p>
 <p>Tick <b>Add a trusted timestamp</b> to have a timestamp server vouch for when you signed, so the signature can be shown to be on time even after your certificate expires. Only a fingerprint of the signature is sent. The server&#x27;s address is shown and can be changed.</p>
 <h3 id="digital-signatures-editing-after-signing">Editing after signing</h3>
-<p>Quintess tries to save later edits as an update after the signed version, which keeps the signature valid, and readers show that the document changed after signing. Edits that remove content (redaction, deleting pages, removing comments, metadata or attachments, reducing file size) rewrite the whole file instead and invalidate the signature. After every edit of a signed document, whether from a menu, a dialog or a task in the background, the status line says whether the signatures stayed valid. A second signature is added after the first, and both stay valid. An encrypted signed file is also rewritten when saved. Sign last, after all other changes.</p>
+<p>Quintess tries to save later edits as an update after the signed version, which keeps the signature valid, and readers show that the document changed after signing. Edits that remove content (redaction, deleting pages, removing comments, metadata or attachments, flattening, clearing a form, reducing file size) rewrite the whole file instead and invalidate the signature. After every edit of a signed document, whether from a menu, a dialog or a task in the background, the status line says whether the signatures stayed valid. A second signature is added after the first, and both stay valid. An encrypted signed file is also rewritten when saved. Sign last, after all other changes.</p>
 <h3 id="digital-signatures-checking-signatures">Checking signatures</h3>
 <p><b>Tools ▸ Sign ▸ Check signatures</b> shows each signature as (a protected file is checked with the password it was opened with):</p>
 <ul>
@@ -501,7 +557,7 @@
 <p><b>Tools ▸ Recognize text (OCR)</b> reads the text in scanned pages and lays it invisibly over the page, so you can search, select and copy it while the page looks as before. Recognition runs on your computer and works best on Latin-script text.</p>
 <ul>
 <li>Pages that already have text are skipped, and the message afterward says how many. If every page has text, Quintess says so and changes nothing.</li>
-<li>The OCR models are included with the installer and the Linux packages. A copy built from source asks before downloading them once (about 12 MB).</li>
+<li>The OCR models are included with the Windows installers, the Mac disk image and the Linux packages. A copy built from source asks before downloading them once (about 12 MB).</li>
 <li>Check recognized text before relying on it, especially for redaction: OCR can misread words.</li>
 </ul>
 </section>
@@ -606,7 +662,7 @@
 <li><b>Turn pages to match the paper</b>, <b>Print in grayscale</b> and <b>Include comments and form fields</b>.</li>
 </ul>
 <p>On Windows, <b>Properties…</b> opens the printer&#x27;s own settings (paper, tray, quality).</p>
-<p>On Linux, Quintess prints through CUPS (the <code>cups-client</code> package): it sends the chosen pages as a PDF, and CUPS fits them to the paper. There is no Properties button; choose the <b>Paper</b> size in the dialog, and set trays and quality in your system&#x27;s printer settings.</p>
+<p>On Linux, Quintess prints through CUPS (the <code>cups-client</code> package): it sends the chosen pages as a PDF, and CUPS fits them to the paper. There is no Properties button; choose the <b>Paper</b> size in the dialog, and set trays and quality in your system&#x27;s printer settings. A Mac prints the same way, through the CUPS print system built into macOS.</p>
 <h3 id="printing-booklets-and-posters">Booklets and posters</h3>
 <p>Under <b>Tools ▸ Print production</b>. Both make a new document and leave the original unchanged.</p>
 <ul>
@@ -655,7 +711,8 @@
 <li><code>quintess qr flyer.pdf</code></li>
 <li><code>quintess watch ./Inbox --action stamp.json</code></li>
 </ul>
-<p>Commands that edit a PDF usually overwrite the input. Use <code>-o</code> to save a separate copy, and check each command&#x27;s <code>--help</code>. Set the <code>QUINTESS_PASSWORD</code> environment variable to open protected files without typing the password on the command line.</p>
+<p>Commands that edit a PDF usually overwrite the input. Use <code>-o</code> to save a separate copy, and check each command&#x27;s <code>--help</code>.</p>
+<p>A damaged file that Quintess can show but not edit (see &quot;Damaged files: reading only, and repairing&quot;) still works with the commands that only read: <code>info</code> (which then shows what PDFium reads, with a note), <code>text</code>, <code>render</code>, <code>search</code>, <code>images</code> and <code>qr</code>. Editing commands stop with a message saying the file can&#x27;t be edited. <code>quintess repair damaged.pdf</code> writes PDFium&#x27;s rewritten copy to <code>damaged-repaired.pdf</code> (or <code>-o</code>), never over the original, and only when Quintess can edit the copy. Set the <code>QUINTESS_PASSWORD</code> environment variable to open protected files without typing the password on the command line.</p>
 <p>Commands that write many files, <code>batch</code> and <code>form merge</code>, never replace a file silently: a name already taken gets a number unless you pass <code>--overwrite</code> or <code>--skip-existing</code>, and <code>form merge --combined</code> refuses an existing file without <code>--overwrite</code>. For actions with a password step, give <code>--owner-password</code> (or set <code>QUINTESS_OWNER_PASSWORD</code>, which keeps it off the command line) and optionally <code>--user-password</code> (<code>QUINTESS_USER_PASSWORD</code>); for an OCR step without installed models, pass <code>--download-models</code>. <code>batch</code> and <code>watch</code> stop before touching any file when one of these is missing.</p>
 </section>
 <section class="doc-topic" id="preferences-and-troubleshooting"><h2><a href="#preferences-and-troubleshooting">Preferences and troubleshooting</a></h2>
@@ -674,16 +731,24 @@
 </ul>
 <h3 id="preferences-and-troubleshooting-where-quintess-keeps-its-files">Where Quintess keeps its files</h3>
 <ul>
-<li>Settings, the personal dictionary, added dictionaries and trusted certificates: on Windows, <code>%APPDATA%\Quintess</code>; on Linux, <code>~/.config/quintess</code> by default (<code>$XDG_CONFIG_HOME/quintess</code> if that is set). Preferences are in <code>settings.json</code> there.</li>
-<li>Recovered documents, the crash log and downloaded OCR models: on Windows, <code>%LOCALAPPDATA%\Quintess</code>; on Linux, <code>~/.local/share/quintess</code> by default (<code>$XDG_DATA_HOME/quintess</code> if that is set).</li>
+<li>Settings, the personal dictionary, added dictionaries and trusted certificates: on Windows, <code>%APPDATA%\Quintess</code>; on macOS, <code>~/Library/Application Support/Quintess</code>; on Linux, <code>~/.config/quintess</code> by default (<code>$XDG_CONFIG_HOME/quintess</code> if that is set). Preferences are in <code>settings.json</code> there.</li>
+<li>Recovered documents, the crash log and downloaded OCR models: on Windows, <code>%LOCALAPPDATA%\Quintess</code>; on macOS, the same <code>~/Library/Application Support/Quintess</code>; on Linux, <code>~/.local/share/quintess</code> by default (<code>$XDG_DATA_HOME/quintess</code> if that is set).</li>
 </ul>
 <h3 id="preferences-and-troubleshooting-if-quintess-crashes">If Quintess crashes</h3>
-<p>If Quintess hits an internal error it can&#x27;t recover from, it tries to save your unsaved documents to the <code>Recovered</code> folder in its data folder, writes the details to <code>crash.log</code> there, and tells you before closing. This doesn&#x27;t help after a power failure or if Quintess is ended by force, so save often.</p>
+<p>If Quintess hits an internal error it can&#x27;t recover from, it saves your unsaved documents to the <code>Recovered</code> folder in its data folder (where autosave keeps its copies too), writes the details to <code>crash.log</code> there, and tells you before closing. A password-protected document is kept as of its last autosave, still protected, since its unprotected contents are never written out.</p>
+<p>After a power cut, a forced shutdown or anything else that ends Quintess without its usual goodbye, the latest autosaved copies are still there.</p>
+<p>The next time Quintess starts, it lists the documents it kept, with their names, where they were saved before and when the copy was made:</p>
+<ul>
+<li><b>Open</b> opens the copy as a new document with unsaved changes, named &quot;*name* (recovered)&quot;. <b>Save</b> then asks where to keep it, starting at its old location, so you can choose whether to replace the old file. A protected copy asks for its password or certificate first.</li>
+<li><b>Delete</b> deletes the copy for good.</li>
+<li><b>Decide later</b> keeps the copies; Quintess asks again when it next starts.</li>
+</ul>
+<p>Copies made while another Quintess window is still open belong to that window and aren&#x27;t listed.</p>
 <h3 id="preferences-and-troubleshooting-if-something-looks-wrong">If something looks wrong</h3>
 <ul>
 <li>Pages draw wrongly or not at all: try the other <b>Graphics</b> choice in Preferences, then restart Quintess.</li>
 <li>An edit went wrong: <b>Ctrl+Z</b> undoes up to 60 recent edits.</li>
-<li>A converter, scanner, printer or voice is missing on Linux: install the optional program listed under <b>Installing on Linux</b>.</li>
+<li>A converter, scanner, printer or voice is missing on Linux or macOS: install the optional program listed under <b>Installing on Linux</b> or <b>Installing on macOS</b>.</li>
 </ul>
 </section>
 <section class="doc-topic" id="keyboard-shortcuts"><h2><a href="#keyboard-shortcuts">Keyboard shortcuts</a></h2>
@@ -716,10 +781,10 @@
 <li><b>Downloading a spelling dictionary</b> fetches it from the open-source dictionaries project on GitHub.</li>
 <li><b>Creating a PDF from a web page</b> loads that page. On Windows, <b>Microsoft Office</b> conversion isn&#x27;t blocked from the network.</li>
 <li><b>Trusted timestamps</b> send a fingerprint of the signature (not the document) to the timestamp server, and <b>checking revocation</b> or <b>adding long-term validation</b> asks the certificates&#x27; issuers whether they were revoked.</li>
-<li>A copy of Quintess built from source asks before downloading the OCR models once (a batch action asks too, and the command line needs <code>--download-models</code>); the installer and the Linux packages include them.</li>
+<li>A copy of Quintess built from source asks before downloading the OCR models once (a batch action asks too, and the command line needs <code>--download-models</code>); the installers, the Mac disk image and the Linux packages include them.</li>
 </ul>
 <p>Opening a link or QR code opens your browser, after showing you where it goes.</p>
-<p>On Linux, Quintess doesn&#x27;t update itself: when a new version is out, it opens the release page, and you install the new package the same way you installed the old one.</p>
+<p>On Linux, Quintess doesn&#x27;t update itself: when a new version is out, it opens the release page, and you install the new package the same way you installed the old one. On a Mac, download the new disk image and drag Quintess into Applications again, replacing the old copy.</p>
 </section>
   </article>
 </div>
@@ -736,6 +801,6 @@
     <p class="mono faint keep-case">© 2026 William Hanright · MIT or Apache-2.0 · this site sets no cookies</p>
   </div>
 </footer>
-<script src="/assets/site.js?v=c130bebb51" defer></script>
+<script src="/assets/site.js?v=23a95e540d" defer></script>
 </body>
 </html>
