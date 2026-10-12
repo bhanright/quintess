@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/quintess-core", "crates/quintess-cli", "crates/quintess-app", "crates/quintess-console"]
-# vendor/ holds patched copies of crates.io crates (see [patch.crates-io] below), not members.
-exclude = ["vendor"]
+members = ["crates/quintess-core", "crates/quintess-cli", "crates/quintess-app", "crates/quintess-console", "tools/robustness"]
+# vendor/ holds patched copies of crates.io crates (see [patch.crates-io] below), not members;
+# the cargo-fuzz targets build on nightly with their own settings (see docs/ROBUSTNESS.md).
+exclude = ["vendor", "fuzz"]
 
 [workspace.package]
 version = "0.3.0"

@@ -12,3 +12,11 @@
 /.claude/
 /installer/output/
 __pycache__/
+
+# The robustness corpus and results (tools/robustness); never committed.
+/corpus/
+/robustness-out/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/

@@ -1,0 +1,42 @@
+# cargo-fuzz targets for Quintess's own parsing and saving (nightly Rust,
+# Linux or macOS). Kept out of the main workspace: it needs nightly and
+# libFuzzer. How to run them: docs/ROBUSTNESS.md.
+[package]
+name = "quintess-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# The Word layout engine isn't needed here and is slow to build.
+quintess-core = { path = "../crates/quintess-core", default-features = false }
+
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "content_stream"
+path = "fuzz_targets/content_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "save_round_trip"
+path = "fuzz_targets/save_round_trip.rs"
+test = false
+doc = false
+bench = false

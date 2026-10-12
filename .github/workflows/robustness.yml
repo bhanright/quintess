@@ -1,0 +1,182 @@
+# Robustness: runs Quintess over the pdf.js test corpus (tools/robustness)
+# and fails on regressions against tools/robustness/baseline.json: new
+# crashes or hangs, or files that round-tripped and no longer do. Known
+# failures don't fail it. Nightly it also fuzzes for 15 minutes (cargo-fuzz
+# targets in fuzz/, and mutation fuzzing through the full check, PDFium
+# included) and uploads anything found. See docs/ROBUSTNESS.md.
+name: Robustness
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz:
+        description: "Also run the fuzzing jobs"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PDFIUM_URL: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086/pdfium-linux-x64.tgz
+  # Keep in step with PDFJS_COMMIT in tools/robustness/src/corpus.rs (the cache key).
+  PDFJS_COMMIT: d0991a0d53f3bb3a7307e3b83f279c1d117aafb3
+
+concurrency:
+  group: robustness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: Corpus sweep
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies and the outside checkers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config fonts-liberation fonts-dejavu-core qpdf poppler-utils
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: robustness
+      - name: PDFium
+        run: mkdir -p vendor/pdfium-linux && curl -sSfL "$PDFIUM_URL" | tar -xz -C vendor/pdfium-linux
+      - name: Corpus cache
+        uses: actions/cache/restore@v4
+        with:
+          path: corpus
+          # The newest saved copy for this pin; linked files fetched once stay
+          # cached, and a new pin starts afresh.
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
+          restore-keys: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-
+      - name: Build the sweep tool
+        run: cargo build -j 4 -p quintess-robustness
+      - name: Fetch the corpus
+        id: fetch
+        run: |
+          # Linked files from web.archive.org are fetched a few at a time; it
+          # refuses bursts from CI runners. Files still missing are tried again next run.
+          target/debug/quintess-robustness fetch --jobs 3
+          if grep -q '"outcome": "fetched"' corpus/pdfjs-linked/fetch-report.json; then echo "new_files=true" >> "$GITHUB_OUTPUT"; fi
+      # Saved straight after fetching (so a sweep that finds a regression, and
+      # fails the job, doesn't lose the download), and only when something new
+      # came in, since a cache entry can't be overwritten and each is large.
+      - name: Save the corpus
+        if: steps.fetch.outputs.new_files == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: corpus
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
+      - name: Sweep
+        env:
+          QUINTESS_PDFIUM_DIR: ${{ github.workspace }}/vendor/pdfium-linux/lib
+        run: target/debug/quintess-robustness sweep --jobs 4 --timeout 120 --check
+      - name: Summary
+        if: always()
+        run: test -f robustness-out/sweep.md && cat robustness-out/sweep.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: robustness-sweep
+          path: |
+            robustness-out/sweep.json
+            robustness-out/sweep.md
+            robustness-out/work/*.stderr.txt
+            corpus/pdfjs-linked/fetch-report.json
+          if-no-files-found: ignore
+
+  cargo-fuzz:
+    name: cargo-fuzz (${{ matrix.target }}, 15 min)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fuzz) || github.ref == 'refs/heads/ci/robustness'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parse, content_stream, save_round_trip]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+          key: fuzz-${{ matrix.target }}
+      - name: cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Corpus cache (seeds)
+        uses: actions/cache/restore@v4
+        with:
+          path: corpus
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
+          restore-keys: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-
+      - name: Fuzzing corpus from earlier nights
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Seeds
+        run: |
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          if [ "${{ matrix.target }}" = content_stream ]; then
+            printf 'BT /F1 12 Tf 72 712 Td (Hello) Tj ET\n0 0 1 rg 10 10 50 50 re f\nq 20 0 0 20 100 100 cm /Im1 Do Q\n' > fuzz/corpus/content_stream/seed-text-and-shapes
+          elif [ -d corpus/pdfjs/test/pdfs ]; then
+            # Small files only: libFuzzer works best on inputs it can mutate quickly.
+            find corpus/pdfjs/test/pdfs corpus/pdfjs-linked -name '*.pdf' -size -64k -exec cp -n {} "fuzz/corpus/${{ matrix.target }}/" \; 2>/dev/null || true
+          fi
+          ls "fuzz/corpus/${{ matrix.target }}" | wc -l
+      - name: Fuzz
+        working-directory: fuzz
+        # -rss_limit_mb keeps a runaway allocation a finding instead of a dead runner.
+        # Fork mode: inputs run in child processes, so a crash that kills the
+        # process outright (a stack overflow) is still saved as an artifact.
+        run: cargo fuzz run --sanitizer none ${{ matrix.target }} -- -fork=2 -max_total_time=900 -rss_limit_mb=4096 -timeout=30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cargo-fuzz-findings-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+
+  mutate:
+    name: Mutation fuzzing (15 min, PDFium included)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fuzz) || github.ref == 'refs/heads/ci/robustness'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config fonts-liberation fonts-dejavu-core
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: robustness
+      - name: PDFium
+        run: mkdir -p vendor/pdfium-linux && curl -sSfL "$PDFIUM_URL" | tar -xz -C vendor/pdfium-linux
+      - name: Corpus cache (seeds)
+        uses: actions/cache/restore@v4
+        with:
+          path: corpus
+          key: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-${{ github.run_id }}
+          restore-keys: pdfjs-corpus-${{ env.PDFJS_COMMIT }}-v2-
+      - name: Build
+        run: cargo build -j 4 -p quintess-robustness
+      - name: Fuzz
+        env:
+          QUINTESS_PDFIUM_DIR: ${{ github.workspace }}/vendor/pdfium-linux/lib
+        run: target/debug/quintess-robustness mutate --time 900 --jobs 4 --seed ${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-findings
+          path: robustness-out/mutate/findings
+          if-no-files-found: ignore

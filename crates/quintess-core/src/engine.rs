@@ -112,12 +112,19 @@ impl Default for RenderOptions {
 /// Renders page `page_index` (0-based) to an RGBA image.
 pub fn render_page(document: &PdfDocument, page_index: usize, options: &RenderOptions) -> Result<RgbaImage> {
     let page = document.pages().get(page_index as i32)?;
-    let scale = options.dpi / 72.0;
-    let width = (page.width().value * scale).round().max(1.0) as i32;
-    let height = (page.height().value * scale).round().max(1.0) as i32;
+    let (width, height) = render_size(page.width().value, page.height().value, options.dpi);
+    // A page whose visible area is empty (a crop box outside its media box,
+    // as in pdf.js's boundingBox_invalid.pdf) shows nothing; PDFium refuses
+    // to draw it at all, so it is drawn here as the blank page it is.
+    let visible = |side: f32| side.is_finite() && side > 0.0;
+    if !visible(page.width().value) || !visible(page.height().value) {
+        return Ok(RgbaImage::from_pixel(width as u32, height as u32, image::Rgba([255, 255, 255, 255])));
+    }
+    // An exact size rather than a width and a height limit: the limit is
+    // applied through the page's aspect ratio, which a page with an empty or
+    // inverted box (zero or negative size) turns into an impossible bitmap.
     let mut config = PdfRenderConfig::new()
-        .set_target_width(width)
-        .set_maximum_height(height)
+        .set_target_size(width, height)
         .render_annotations(options.draw_annotations)
         .render_form_data(options.draw_form_fields)
         .use_lcd_text_rendering(false);
@@ -126,6 +133,20 @@ pub fn render_page(document: &PdfDocument, page_index: usize, options: &RenderOp
     }
     let bitmap = page.render_with_config(&config)?;
     Ok(bitmap.as_image()?.into_rgba8())
+}
+
+/// The bitmap size for a page of `width` by `height` points at `dpi`: at
+/// least one pixel a side, and one pixel for a side that isn't a positive
+/// number (an empty or inverted page box). A side too large for memory is
+/// left for PDFium to refuse, which it reports as an error.
+pub fn render_size(width: f32, height: f32, dpi: f32) -> (i32, i32) {
+    let scale = dpi / 72.0;
+    let side = |points: f32| {
+        let pixels = (points * scale).round();
+        // `as` saturates, so an absurd size becomes i32::MAX rather than wrapping.
+        if pixels.is_finite() && pixels > 1.0 { pixels as i32 } else { 1 }
+    };
+    (side(width), side(height))
 }
 
 /// Size of every page in points, as displayed (rotation applied).

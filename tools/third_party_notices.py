@@ -188,6 +188,18 @@ def main():
         if path.is_file():
             title = "pdfium-binaries build scripts" if path.parent == pdfium else path.stem
             lines += ["", "-" * 78, title, "-" * 78, path.read_text(encoding="utf-8", errors="replace").strip()]
+    # Code adapted into the developer tools (tools/robustness), which are not
+    # part of the programs; credited here because the MIT license asks for its
+    # notice to travel with substantial portions of the code.
+    pdfcraft = ROOT / "licenses" / "pdfcraft" / "LICENSE-MIT"
+    lines += [
+        "", "=" * 78, "PdfCraft (adapted into the developer tools, not the programs)", "=" * 78, "",
+        "tools/robustness (the corpus fetch, the child-process runner, the baseline",
+        "comparison and the mutation fuzzer) is adapted, with changes, from PdfCraft,",
+        "https://github.com/storytold/pdfcraft (commit 6d843a8e8b22e4442666eb9e12f506c40458af3d),",
+        "licensed MIT OR Apache-2.0. Its MIT license:", "",
+        pdfcraft.read_text(encoding="utf-8").strip(),
+    ]
     OUTPUT.parent.mkdir(exist_ok=True)
     OUTPUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {OUTPUT} ({len(packages)} crates)")
