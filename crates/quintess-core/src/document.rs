@@ -14,6 +14,142 @@ use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, SaveOptions, Str
 /// set them itself (PDF 32000-1, table 30).
 const INHERITABLE_PAGE_KEYS: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox", b"Rotate"];
 
+/// Spaces appended to a file to make lopdf rebuild its cross-reference table
+/// (see [`Pdf::from_bytes`]); more than the 512 bytes it searches.
+const REBUILD_PADDING: usize = 1024;
+
+/// A trailer entry marking a document whose contents lopdf could not
+/// decrypt, so saving it would write them out scrambled. Bookkeeping like
+/// the remembered certificate dictionary; [`Pdf::to_bytes`] refuses such a
+/// document instead of writing it.
+const UNDECRYPTED_MARKER_KEY: &str = "QuintessUndecrypted";
+
+/// Loads with lopdf, trying the empty user password when none is given,
+/// which opens files that only restrict permissions.
+fn load_with_lopdf(bytes: &[u8], password: Option<&str>) -> Result<Document> {
+    Ok(match password {
+        Some(password) => Document::load_mem_with_options(bytes, lopdf::LoadOptions::with_password(password))?,
+        None => Document::load_mem(bytes).or_else(|first_error| Document::load_mem_with_options(bytes, lopdf::LoadOptions::with_password("")).map_err(|_| first_error))?,
+    })
+}
+
+/// The document with its cross-reference table rebuilt, when that finds more
+/// than `pages_found` pages.
+///
+/// lopdf rebuilds the table by scanning for objects only when it can't read
+/// the file's own. A table that reads but points to the wrong places, or
+/// misses objects appended later (both common in damaged files), leaves the
+/// catalog or pages missing, though PDFium, which rebuilds more eagerly,
+/// shows them. lopdf looks for the end-of-file marker in the last 512 bytes,
+/// so padding the end hides it and makes it rebuild.
+///
+/// Its rebuild also needs a classic `trailer` naming the catalog, which a
+/// file with a cross-reference stream doesn't have (pdf.js's issue7308.pdf,
+/// whose `startxref` lopdf can't parse). If the first rebuild fails, one is
+/// written after the padding, naming the last object of type `/Catalog`;
+/// not for encrypted files, whose `/Encrypt` entry it would lose.
+fn rebuilt_document(bytes: &[u8], password: Option<&str>, pages_found: usize) -> Option<Document> {
+    let mut padded = Vec::with_capacity(bytes.len() + REBUILD_PADDING + 64);
+    padded.extend_from_slice(bytes);
+    padded.resize(bytes.len() + REBUILD_PADDING, b' ');
+    let more_pages = |doc: &Document| doc.get_pages().len() > pages_found;
+    if let Some(rebuilt) = load_with_lopdf(&padded, password).ok().map(point_root_at_catalog).filter(more_pages) {
+        return Some(rebuilt);
+    }
+    if contains(bytes, b"/Encrypt") {
+        return None;
+    }
+    let (number, generation) = last_catalog_header(bytes)?;
+    padded.truncate(bytes.len());
+    padded.extend_from_slice(format!("\ntrailer\n<< /Root {number} {generation} R >>\n").as_bytes());
+    padded.resize(padded.len() + REBUILD_PADDING, b' ');
+    load_with_lopdf(&padded, password).ok().map(point_root_at_catalog).filter(more_pages)
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+/// The object number and generation of the last object in the file whose
+/// dictionary says `/Type /Catalog`, read from the `N G obj` header before it.
+fn last_catalog_header(bytes: &[u8]) -> Option<(u32, u16)> {
+    let catalog_at = bytes.windows(8).rposition(|window| window == b"/Catalog")?;
+    let before = &bytes[..catalog_at];
+    let header_end = before.windows(3).rposition(|window| window == b"obj")?;
+    let header = String::from_utf8_lossy(&before[header_end.saturating_sub(24)..header_end]).into_owned();
+    let mut numbers = header.split_whitespace().rev();
+    let generation = numbers.next()?.parse().ok()?;
+    let number = numbers.next()?.trim_start_matches(|c: char| !c.is_ascii_digit()).parse().ok()?;
+    Some((number, generation))
+}
+
+/// Removes the objects nothing reaches from the trailer, and returns how
+/// many. The same as lopdf's `prune_objects`, which keeps the ids it has seen
+/// in a list and searches it for every reference: on a 1,300-page manual
+/// (pdf.js's linked pdf.pdf, about 100,000 objects) that took 50 seconds of
+/// every save. A set makes it a fraction of a second.
+pub fn remove_unreachable_objects(doc: &mut Document) -> usize {
+    fn collect_references(object: &Object, found: &mut Vec<ObjectId>) {
+        match object {
+            Object::Reference(id) => found.push(*id),
+            Object::Array(items) => items.iter().for_each(|item| collect_references(item, found)),
+            Object::Dictionary(dictionary) => dictionary.iter().for_each(|(_, value)| collect_references(value, found)),
+            Object::Stream(stream) => stream.dict.iter().for_each(|(_, value)| collect_references(value, found)),
+            _ => {}
+        }
+    }
+    let mut reached: HashSet<ObjectId> = HashSet::new();
+    let mut pending = Vec::new();
+    doc.trailer.iter().for_each(|(_, value)| collect_references(value, &mut pending));
+    while let Some(id) = pending.pop() {
+        if !reached.insert(id) {
+            continue;
+        }
+        if let Some(object) = doc.objects.get(&id) {
+            collect_references(object, &mut pending);
+        }
+    }
+    let before = doc.objects.len();
+    doc.objects.retain(|id, _| reached.contains(id));
+    before - doc.objects.len()
+}
+
+/// Whether lopdf found pages, and at least as many as the page tree's root
+/// says there are. Fewer means pages it points to are missing.
+fn page_tree_complete(doc: &Document) -> bool {
+    let found = doc.get_pages().len();
+    let declared = doc.catalog().ok().and_then(|catalog| catalog.get(b"Pages").ok()).and_then(|pages| doc.dereference(pages).ok()).and_then(|(_, pages)| pages.as_dict().ok()).and_then(|pages| pages.get(b"Count").ok()).and_then(|count| count.as_i64().ok());
+    found > 0 && declared.is_none_or(|declared| declared <= found as i64)
+}
+
+/// Repoints the trailer's `/Root` at the catalog when it names something
+/// else (pdf.js's issue9418.pdf names its document information instead):
+/// the catalog is then the one object of type `/Catalog` with a page tree.
+fn point_root_at_catalog(mut doc: Document) -> Document {
+    let has_page_tree = |dictionary: &Dictionary| dictionary.get(b"Pages").is_ok();
+    if doc.catalog().is_ok_and(has_page_tree) {
+        return doc;
+    }
+    let catalog = doc.objects.iter().filter_map(|(id, object)| object.as_dict().ok().map(|dictionary| (*id, dictionary))).find(|(_, dictionary)| dictionary.has_type(b"Catalog") && has_page_tree(dictionary)).map(|(id, _)| id);
+    if let Some(catalog_id) = catalog {
+        doc.trailer.set("Root", catalog_id);
+    }
+    doc
+}
+
+/// Whether the crypt filter a version 4 or 5 encrypted file names for its
+/// streams or strings is missing from what lopdf read. lopdf (0.45) reads
+/// `/CF` only when it is written inside the encryption dictionary, not when
+/// it is a reference to another object, as in pdf.js's issue7665.pdf; it
+/// then leaves the contents encrypted without saying so.
+fn crypt_filters_unreadable(state: &lopdf::EncryptionState) -> bool {
+    if state.version() < 4 {
+        return false;
+    }
+    let missing = |name: &[u8]| !name.is_empty() && name != b"Identity" && !state.crypt_filters().contains_key(name);
+    missing(state.default_stream_filter()) || missing(state.default_string_filter())
+}
+
 /// An open PDF document that can be edited and saved.
 pub struct Pdf {
     pub doc: Document,
@@ -63,18 +199,25 @@ impl Pdf {
     }
 
     pub fn from_bytes(bytes: &[u8], password: Option<&str>) -> Result<Self> {
-        let doc = match password {
-            Some(password) => Document::load_mem_with_options(bytes, lopdf::LoadOptions::with_password(password))?,
-            None => Document::load_mem(bytes).or_else(|first_error| {
-                // Files that only restrict permissions open with an empty user password.
-                Document::load_mem_with_options(bytes, lopdf::LoadOptions::with_password("")).map_err(|_| first_error)
-            })?,
+        let first_attempt = load_with_lopdf(bytes, password).map(point_root_at_catalog);
+        let mut doc = match first_attempt {
+            Ok(doc) if page_tree_complete(&doc) => doc,
+            first_attempt => {
+                let pages_found = first_attempt.as_ref().map_or(0, |doc| doc.get_pages().len());
+                match rebuilt_document(bytes, password, pages_found) {
+                    Some(rebuilt) => rebuilt,
+                    None => first_attempt?,
+                }
+            }
         };
         if doc.is_encrypted() {
             if crate::public_key::is_certificate_encrypted(bytes) {
                 bail!("the document is encrypted for specific certificates; open it with a certificate and its private key (a password cannot open it)");
             }
             bail!("the document is encrypted and the password was not accepted");
+        }
+        if doc.encryption_state.as_ref().is_some_and(crypt_filters_unreadable) {
+            doc.trailer.set(UNDECRYPTED_MARKER_KEY, true);
         }
         Ok(Self { doc })
     }
@@ -142,6 +285,11 @@ impl Pdf {
     }
 
     pub fn to_bytes(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
+        if self.doc.trailer.has(UNDECRYPTED_MARKER_KEY.as_bytes()) {
+            bail!(
+                "this file can't be saved: its encryption keeps the crypt filter settings in a separate object, which Quintess's editing engine can't read yet, so the contents couldn't be decrypted for editing (the pages can still be viewed and printed)"
+            );
+        }
         // The remembered certificate dictionary is bookkeeping, not part of the file.
         let remembered = self.doc.trailer.remove(crate::public_key::REMEMBERED_DICTIONARY_KEY.as_bytes());
         let result = self.write_bytes(settings);
@@ -153,7 +301,7 @@ impl Pdf {
 
     fn write_bytes(&mut self, settings: &SaveSettings) -> Result<Vec<u8>> {
         if settings.remove_unused_objects {
-            self.doc.prune_objects();
+            remove_unreachable_objects(&mut self.doc);
         }
         if settings.compress_streams {
             self.doc.compress();
@@ -537,6 +685,75 @@ pub fn merge_documents(sources: &[(String, Pdf)], bookmark_each_source: bool) ->
 /// Number each page id against its position, for callers that need a lookup.
 pub fn page_numbers_by_id(pdf: &Pdf) -> BTreeMap<ObjectId, u32> {
     pdf.page_ids().into_iter().enumerate().map(|(index, id)| (id, index as u32 + 1)).collect()
+}
+
+/// What an edit does to a document, which decides how it is saved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditKind {
+    /// An ordinary change; a signed file takes it as an update after the
+    /// signed bytes, so its signatures stay valid.
+    Changes,
+    /// Removes content for good (redaction, deleting pages, stripping
+    /// metadata, comments or attachments): the whole file is rewritten so
+    /// nothing removed survives in an earlier version, even if that breaks
+    /// signatures.
+    RemovesContent,
+    /// Takes the password protection off.
+    Unprotects,
+}
+
+/// What became of a document's digital signatures when an edit was saved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignatureOutcome {
+    /// The document had no signatures.
+    Unsigned,
+    /// The edit was appended after the signed bytes; the signatures stay valid.
+    KeptByIncrementalUpdate,
+    /// The edit could not be appended as an update, so the whole file was
+    /// rewritten and the signatures no longer verify.
+    Invalidated,
+    /// Content was removed for good, so the whole file was rewritten on
+    /// purpose and the signatures no longer verify.
+    RemovedWithContent,
+}
+
+/// The bytes to write for an edited document, and what became of its signatures.
+pub struct EditedDocument {
+    pub bytes: Vec<u8>,
+    pub signatures: SignatureOutcome,
+}
+
+/// The bytes an edited document should be saved as: the command line's
+/// save path, shared so the robustness sweep exercises exactly what users
+/// run. `original` is the file as it was opened (empty when unknown) and
+/// `password` the one it was opened with. The input's password protection
+/// is kept unless the edit takes it off; `reopen_original` opens the input
+/// again when an edit produced new bytes that lost track of it. A signed
+/// file takes an ordinary change as an incremental update after its signed
+/// bytes.
+pub fn bytes_after_edit(pdf: &mut Pdf, original: &[u8], password: Option<&str>, edit: EditKind, use_object_streams: bool, reopen_original: impl FnOnce() -> Option<Pdf>) -> Result<EditedDocument> {
+    let signed = !original.is_empty() && crate::signatures::verify_protected(original, password).is_ok_and(|checks| !checks.is_empty());
+    if edit == EditKind::Unprotects {
+        pdf.forget_encryption();
+    } else if pdf.original_encryption().is_none() {
+        if let Some(source) = reopen_original().filter(|source| source.original_encryption().is_some()) {
+            pdf.take_encryption_from(&source);
+        }
+    }
+    let mut signatures = SignatureOutcome::Unsigned;
+    if signed && edit == EditKind::Changes {
+        let mut plain = Pdf { doc: pdf.doc.clone() };
+        plain.forget_encryption();
+        let edited = plain.to_bytes(&SaveSettings::default())?;
+        if let Ok(updated) = crate::incremental::update_from_bytes(original, &edited, None) {
+            return Ok(EditedDocument { bytes: updated, signatures: SignatureOutcome::KeptByIncrementalUpdate });
+        }
+        signatures = SignatureOutcome::Invalidated;
+    } else if signed {
+        signatures = SignatureOutcome::RemovedWithContent;
+    }
+    let bytes = pdf.to_bytes_keeping_encryption(&SaveSettings { use_object_streams, ..Default::default() })?;
+    Ok(EditedDocument { bytes, signatures })
 }
 
 /// Writes a file without risking the old one: the bytes go to a temporary

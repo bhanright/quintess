@@ -21,10 +21,14 @@ pub struct BookmarkEntry {
 
 /// Reads the outline as a tree. Destinations given by name are resolved
 /// through the catalog's `/Dests` dictionary or the `/Names` tree.
+///
+/// An outline that can't be read (a reference to a missing object, or to
+/// something other than a dictionary) counts as no bookmarks, as in other
+/// readers: such files otherwise open and display fine.
 pub fn read_bookmarks(pdf: &Pdf) -> Result<Vec<BookmarkEntry>> {
     let catalog = pdf.doc.catalog()?;
     let Ok(outlines) = catalog.get(b"Outlines") else { return Ok(Vec::new()) };
-    let outlines = pdf.resolve(outlines).as_dict()?;
+    let Ok(outlines) = pdf.resolve(outlines).as_dict() else { return Ok(Vec::new()) };
     let page_numbers = page_numbers_by_id(pdf);
     let mut visited = HashSet::new();
     Ok(read_siblings(pdf, outlines.get(b"First").ok(), &page_numbers, &mut visited))
@@ -94,27 +98,70 @@ fn resolve_named_destination(pdf: &Pdf, name: &[u8]) -> Option<Object> {
     search_name_tree(pdf, tree_root, name, 0)
 }
 
-/// Looks a key up in a name tree, walking `/Kids` and scanning `/Names`.
+/// Looks a key up in a name tree.
+///
+/// Keys are sorted (PDF 32000-1, 7.9.6), so like pdf.js this skips kids
+/// whose `/Limits` exclude the key and binary-searches each leaf, scanning a
+/// leaf in full only when the search misses. A plain scan of every node made
+/// listing the comments of a large manual (tens of thousands of links into a
+/// tree of as many names) take minutes; the robustness sweep found it.
 pub fn search_name_tree(pdf: &Pdf, node: &Dictionary, key: &[u8], depth: u32) -> Option<Object> {
     if depth > 32 {
         return None;
     }
     if let Ok(names) = node.get(b"Names") {
         let names = pdf.resolve(names).as_array().ok()?;
-        for pair in names.chunks(2) {
-            if let [Object::String(candidate, _), value] = pair {
-                if candidate == key || decode_text_string(candidate).as_bytes() == key {
-                    return Some(pdf.resolve(value).clone());
-                }
-            }
+        if let Some(found) = search_name_leaf(pdf, names, key) {
+            return Some(found);
         }
     }
     if let Ok(kids) = node.get(b"Kids") {
         for kid in pdf.resolve(kids).as_array().ok()? {
-            if let Ok(kid) = pdf.resolve(kid).as_dict() {
-                if let Some(found) = search_name_tree(pdf, kid, key, depth + 1) {
-                    return Some(found);
-                }
+            let Ok(kid) = pdf.resolve(kid).as_dict() else { continue };
+            if !limits_may_hold(pdf, kid, key) {
+                continue;
+            }
+            if let Some(found) = search_name_tree(pdf, kid, key, depth + 1) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// Whether a name-tree node's `/Limits` (its first and last keys) leave room
+/// for `key`. Nodes without readable limits are searched.
+fn limits_may_hold(pdf: &Pdf, node: &Dictionary, key: &[u8]) -> bool {
+    let Some(limits) = node.get(b"Limits").ok().and_then(|limits| pdf.resolve(limits).as_array().ok()) else { return true };
+    match (limits.first().map(|low| pdf.resolve(low)), limits.get(1).map(|high| pdf.resolve(high))) {
+        (Some(Object::String(low, _)), Some(Object::String(high, _))) => low.as_slice() <= key && key <= high.as_slice(),
+        _ => true,
+    }
+}
+
+/// Finds `key` among a leaf's `[key value key value ...]` pairs: a binary
+/// search, then a scan when that misses, which also matches keys written in
+/// another text encoding.
+fn search_name_leaf(pdf: &Pdf, names: &[Object], key: &[u8]) -> Option<Object> {
+    fn key_of(pair: &[Object]) -> Option<&[u8]> {
+        match &pair[0] {
+            Object::String(candidate, _) => Some(candidate.as_slice()),
+            _ => None,
+        }
+    }
+    let pairs: Vec<&[Object]> = names.chunks_exact(2).collect();
+    // A binary search finds the key in a sorted leaf; when it misses (an
+    // unsorted leaf, a key in another text encoding, or a name that isn't
+    // there) the leaf is scanned, so only misses cost a full pass.
+    if let Ok(index) = pairs.binary_search_by(|pair| key_of(pair).unwrap_or_default().cmp(key)) {
+        if key_of(pairs[index]) == Some(key) {
+            return Some(pdf.resolve(&pairs[index][1]).clone());
+        }
+    }
+    for pair in pairs {
+        if let [Object::String(candidate, _), value] = pair {
+            if candidate == key || decode_text_string(candidate).as_bytes() == key {
+                return Some(pdf.resolve(value).clone());
             }
         }
     }

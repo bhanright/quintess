@@ -4743,6 +4743,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "quintess-robustness"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "md-5",
+ "quintess-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "ureq",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"

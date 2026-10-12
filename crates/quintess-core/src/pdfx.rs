@@ -342,7 +342,7 @@ pub fn check_pdfx_with(pdf: &Pdf, level: PdfXLevel, options: &PdfXOptions) -> Ve
 /// what remains. The file is marked as PDF/X only when nothing remains.
 pub fn convert_to_pdfx(pdf: &mut Pdf, level: PdfXLevel, options: &PdfXOptions) -> Result<PdfXConversion> {
     let mut fixes = Vec::new();
-    pdf.doc.prune_objects();
+    crate::document::remove_unreachable_objects(&mut pdf.doc);
 
     let removed_actions = scan::remove_forbidden_actions(pdf);
     crate::optimize::remove_javascript(pdf)?;

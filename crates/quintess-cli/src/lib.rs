@@ -1023,19 +1023,7 @@ fn open(input: &Input) -> Result<Pdf> {
 }
 
 /// What an edit does to the document, for saving it rightly.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Edit {
-    /// An ordinary change; a signed file takes it as an update after the
-    /// signed bytes, so its signatures stay valid.
-    Changes,
-    /// Removes content for good (redaction, deleting pages, stripping
-    /// metadata, comments or attachments): the whole file is rewritten so
-    /// nothing removed survives in an earlier version, even if that breaks
-    /// signatures.
-    RemovesContent,
-    /// Takes the password protection off.
-    Unprotects,
-}
+pub(crate) type Edit = quintess_core::document::EditKind;
 
 fn save(pdf: &mut Pdf, input: &Input, output: &Output) -> Result<PathBuf> {
     save_edit(pdf, input, output, Edit::Changes)
@@ -1046,35 +1034,27 @@ fn save_removing(pdf: &mut Pdf, input: &Input, output: &Output) -> Result<PathBu
 }
 
 /// Writes an edited document over the input (or to `-o`), safely, keeping
-/// the input's password protection unless the edit takes it off.
+/// the input's password protection unless the edit takes it off. The bytes
+/// come from `document::bytes_after_edit`, which the robustness sweep runs too.
 pub(crate) fn save_edit(pdf: &mut Pdf, input: &Input, output: &Output, edit: Edit) -> Result<PathBuf> {
+    use quintess_core::document::{SignatureOutcome, bytes_after_edit};
     let target = output.output.clone().unwrap_or_else(|| input.input.clone());
     let original = std::fs::read(&input.input).unwrap_or_default();
-    let signed = !original.is_empty() && quintess_core::signatures::verify_protected(&original, input.password.as_deref()).is_ok_and(|checks| !checks.is_empty());
-    if edit == Edit::Unprotects {
-        pdf.forget_encryption();
-    } else if pdf.original_encryption().is_none() {
-        // Edits that produced new bytes lost track of the input's protection; take it from the input.
-        if let Some(source) = open(input).ok().filter(|source| source.original_encryption().is_some()) {
-            pdf.take_encryption_from(&source);
+    // Edits that produced new bytes lost track of the input's protection; it is taken from the input.
+    let edited = bytes_after_edit(pdf, &original, input.password.as_deref(), edit, output.compact, || open(input).ok())?;
+    write_file_safely(&target, &edited.bytes)?;
+    match edited.signatures {
+        SignatureOutcome::KeptByIncrementalUpdate => println!("wrote {} (as an update after the signatures, which stay valid)", target.display()),
+        SignatureOutcome::Invalidated => {
+            eprintln!("note: this edit invalidates the document's signatures");
+            println!("wrote {}", target.display());
         }
-    }
-    if signed && edit == Edit::Changes {
-        let mut plain = Pdf { doc: pdf.doc.clone() };
-        plain.forget_encryption();
-        let edited = plain.to_bytes(&SaveSettings::default())?;
-        if let Ok(updated) = quintess_core::incremental::update_from_bytes(&original, &edited, None) {
-            write_file_safely(&target, &updated)?;
-            println!("wrote {} (as an update after the signatures, which stay valid)", target.display());
-            return Ok(target);
+        SignatureOutcome::RemovedWithContent => {
+            eprintln!("note: content was removed for good, so the whole file was rewritten; its digital signatures no longer verify");
+            println!("wrote {}", target.display());
         }
-        eprintln!("note: this edit invalidates the document's signatures");
-    } else if signed {
-        eprintln!("note: content was removed for good, so the whole file was rewritten; its digital signatures no longer verify");
+        SignatureOutcome::Unsigned => println!("wrote {}", target.display()),
     }
-    let bytes = pdf.to_bytes_keeping_encryption(&SaveSettings { use_object_streams: output.compact, ..Default::default() })?;
-    write_file_safely(&target, &bytes)?;
-    println!("wrote {}", target.display());
     Ok(target)
 }
 

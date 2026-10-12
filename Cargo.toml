@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/quintess-core", "crates/quintess-cli", "crates/quintess-app", "crates/quintess-console"]
+members = ["crates/quintess-core", "crates/quintess-cli", "crates/quintess-app", "crates/quintess-console", "tools/robustness"]
+# The cargo-fuzz targets build on nightly with their own settings (see docs/ROBUSTNESS.md).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.3.0"

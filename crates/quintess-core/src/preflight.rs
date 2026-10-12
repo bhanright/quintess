@@ -346,7 +346,7 @@ pub fn convert_to_pdfa(pdf: &mut Pdf) -> Result<Vec<PreflightIssue>> {
 /// remaining issues is unfixable; otherwise the claim would be false.
 pub fn convert_to_pdfa_level(pdf: &mut Pdf, level: PdfALevel) -> Result<Vec<PreflightIssue>> {
     // Leftovers from earlier versions of the file are neither written nor judged.
-    pdf.doc.prune_objects();
+    crate::document::remove_unreachable_objects(&mut pdf.doc);
     crate::optimize::remove_javascript(pdf)?;
     scan::remove_forbidden_actions(pdf);
     for object in pdf.doc.objects.values_mut() {

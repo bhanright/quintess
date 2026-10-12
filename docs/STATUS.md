@@ -422,6 +422,41 @@ et.rs`): .pfx/.p12
   virtualization off, so WSL could not run); the Linux tests, packages and
   app have not run on Linux yet: the workflow's first run is that check.
 
+- Robustness (2026-10-11, docs/ROBUSTNESS.md): `tools/robustness`
+  (`quintess-robustness`, a developer tool outside the shipped program)
+  fetches the pdf.js test corpus at a pinned commit (987 files kept in the
+  repository plus 448 of its 459 linked files; 11 links are dead) and
+  sweeps it, each file in a child process with a time limit: open in lopdf
+  and PDFium, render every page, read text, comments, fields and bookmarks,
+  then rotate, comment, retitle, save through the command line's save path
+  (`document::bytes_after_edit`, shared since this change) and reopen in both
+  engines; qpdf and poppler check the saved copies in CI. Before the fixes:
+  1376 ok, 15 expected failures, 41 errors, 0 crashes, 3 hangs. After: 1400
+  ok, 14 expected failures, 19 errors, 0 crashes, 2 hangs (both in PDFium's
+  renderer: tiling-pattern-tiny-steps.pdf and -large.pdf), 1404 round trips
+  verified. Fixed: comment listing hung on large name trees (name-tree
+  lookups now use /Limits and binary search; pdf.pdf went from minutes to
+  under a second); every save of a large file spent 50 s in lopdf's
+  quadratic `prune_objects` (`document::remove_unreachable_objects`); files
+  whose cross-reference table is wrong, misses appended objects, has no
+  classic trailer, or whose /Root names the wrong object now open (lopdf's
+  rebuild is forced by `Pdf::from_bytes`, 14 more files), since the app
+  can't open a file lopdf can't; an unreadable /Outlines means no bookmarks
+  instead of an error; pages with an empty visible area render blank instead
+  of failing; a file whose AES crypt filter lopdf can't follow (issue7665)
+  is refused on saving instead of being written scrambled. Tests:
+  `crates/quintess-core/tests/corpus_regressions.rs`. The baseline
+  (`tools/robustness/baseline.json`) makes `.github/workflows/robustness.yml`
+  fail on new crashes, hangs or lost round trips (push to main and nightly);
+  nightly also runs the cargo-fuzz targets in `fuzz/` (parse, content
+  stream, save round trip) and mutation fuzzing through the full check for
+  15 minutes each. Remaining errors are lopdf limitations (UTF-8 and
+  SASLprep passwords, a corrupt latest copy of an object where PDFium uses an
+  earlier one, a catalog whose /Pages is a page), PDFium refusing files, and
+  fuzzed files. Corpus fetch, child runner, baseline comparison and mutation
+  fuzzer are adapted from PdfCraft (MIT OR Apache-2.0, credited in
+  licenses/THIRD-PARTY-NOTICES.txt).
+
 ## Ideas for next
 
 1. Compile the installer (needs Inno Setup 6); William wanted to discuss
