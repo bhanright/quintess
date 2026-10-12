@@ -94,7 +94,7 @@ jobs:
 
   cargo-fuzz:
     name: cargo-fuzz (${{ matrix.target }}, 15 min)
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fuzz) || github.ref == 'refs/heads/ci/robustness'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fuzz)
     runs-on: ubuntu-22.04
     timeout-minutes: 75
     strategy:
@@ -147,7 +147,7 @@ jobs:
 
   mutate:
     name: Mutation fuzzing (15 min, PDFium included)
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fuzz) || github.ref == 'refs/heads/ci/robustness'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fuzz)
     runs-on: ubuntu-22.04
     timeout-minutes: 75
     steps:
