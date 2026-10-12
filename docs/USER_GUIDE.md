@@ -234,7 +234,11 @@ All of these are under **File ▸ Create**. Each new PDF opens in a new tab, uns
 
 - **Built-in** is always there and never uses the network. Word documents (.docx) get a built-in page layout: approximate, and fonts you don't have are replaced. OpenDocument text, simple web pages and Markdown become a simplified document. Spreadsheets and CSV become a table of their values: formulas show their last saved results, and colors, merged cells, charts and pictures are left out. It can't convert presentations, .doc or .rtf files.
 - **LibreOffice** (free to install) handles Word, OpenDocument, RTF, spreadsheets, presentations and web pages with higher fidelity. It runs with macros off and the network blocked, so pictures the document links to on the web are missing.
-- **WordCraft** (free to install) handles Word, OpenDocument text, RTF, web pages, Markdown and text with higher fidelity. Quintess uses its command-line converter, `wordcraft-cli`, from its install folder or the PATH.
+- The **Craft** programs (free to install) each handle their own kind of file, using their command-line tools from their install folders or the PATH:
+  - **WordCraft**: Word, OpenDocument text, RTF, web pages, Markdown and text.
+  - **GridCraft**: spreadsheets printed with their formatting, page setup, charts and borders (.xlsx and .xls; .ods and .xlsb come through as data only), and CSV. Letters outside Western European ones show as question marks; use LibreOffice for those.
+  - **DeckCraft**: PowerPoint presentations (.pptx, .potx, .ppsx). Each slide becomes a picture with searchable text. It can't read .ppt or .odp.
+  - **PhotoCraft**: photos and design files Quintess can't read on its own, such as HEIC, Photoshop (.psd), camera RAW, SVG and OpenEXR, each placed on a page as a picture.
 - **Microsoft Office** (on Windows only) opens the document invisibly in Word, Excel or PowerPoint. You must tick **Let Quintess open this document in Microsoft Office to convert it** each time. Quintess turns macros off and opens a read-only copy, but it doesn't block Office from the network.
 - **Microsoft Edge** or **Chrome or Chromium** print web pages. Local web pages are printed with the network blocked, so pictures, fonts and styles from the web are missing.
 

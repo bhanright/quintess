@@ -797,7 +797,8 @@ enum CreateSource {
         file: PathBuf,
         #[arg(short, long)]
         output: PathBuf,
-        /// builtin (always available, offline), libreoffice, wordcraft, office,
+        /// builtin (always available, offline), libreoffice, wordcraft,
+        /// gridcraft, deckcraft, photocraft, office,
         /// browser (Edge, Chrome or Chromium), or best (the most faithful one
         /// installed; Office only with --allow-office).
         #[arg(long, default_value = "builtin")]
@@ -1791,12 +1792,15 @@ fn provider_choice(name: &str) -> Result<ProviderChoice> {
         "builtin" | "built-in" => ProviderChoice::Use(Provider::BuiltIn),
         "libreoffice" => ProviderChoice::Use(Provider::LibreOffice),
         "wordcraft" => ProviderChoice::Use(Provider::WordCraft),
+        "gridcraft" => ProviderChoice::Use(Provider::GridCraft),
+        "deckcraft" => ProviderChoice::Use(Provider::DeckCraft),
+        "photocraft" => ProviderChoice::Use(Provider::PhotoCraft),
         "office" | "microsoft-office" => ProviderChoice::Use(Provider::MicrosoftOffice),
         "browser" => ProviderChoice::AnyBrowser,
         "edge" => ProviderChoice::Use(Provider::Edge),
         "chrome" | "chromium" => ProviderChoice::Use(Provider::Chromium),
         "best" => ProviderChoice::BestAvailable,
-        other => bail!("unknown provider \"{other}\" (try builtin, libreoffice, wordcraft, office, browser or best)"),
+        other => bail!("unknown provider \"{other}\" (try builtin, libreoffice, wordcraft, gridcraft, deckcraft, photocraft, office, browser or best)"),
     })
 }
 

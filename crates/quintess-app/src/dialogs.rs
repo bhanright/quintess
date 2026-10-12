@@ -2786,6 +2786,7 @@ impl ConvertDialog {
                     Some(quintess_core::conversion::InputFormat::Spreadsheet | quintess_core::conversion::InputFormat::Csv) => "table export of the values",
                     _ => "simplified document",
                 },
+                Provider::PhotoCraft => "pictures on pages",
                 _ => "higher fidelity",
             };
             let version = info.version.as_deref().map(|v| format!(" {v}")).unwrap_or_default();
@@ -2795,12 +2796,12 @@ impl ConvertDialog {
             ui.checkbox(&mut self.allow_office, "Let Quintess open this document in Microsoft Office to convert it");
         }
         // Only where it's true: the built-in converter never uses the
-        // network, LibreOffice and the browsers run with it blocked, and
-        // WordCraft's converter has no network code (it fetched nothing when
-        // given documents with pictures linked from a web server). A web
-        // page comes from the internet, and Microsoft Office uses the
+        // network, LibreOffice and the browsers run with it blocked, and the
+        // Craft programs' converters have no network code (none fetched
+        // anything when given files with pictures linked from a web server).
+        // A web page comes from the internet, and Microsoft Office uses the
         // network as it normally would.
-        let kept_offline = matches!(self.provider, Some(Provider::BuiltIn | Provider::LibreOffice | Provider::WordCraft | Provider::Edge | Provider::Chromium));
+        let kept_offline = matches!(self.provider, Some(Provider::BuiltIn | Provider::LibreOffice | Provider::WordCraft | Provider::GridCraft | Provider::DeckCraft | Provider::PhotoCraft | Provider::Edge | Provider::Chromium));
         if !self.web_page && kept_offline {
             ui.weak("Conversion is handled offline.");
         }

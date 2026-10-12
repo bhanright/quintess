@@ -112,13 +112,17 @@ pub fn find_libreoffice(search: &SearchLocations) -> Option<FoundProgram> {
     Some(FoundProgram { path, version })
 }
 
-/// WordCraft's command-line converter, `wordcraft-cli`, from the PATH or
-/// its install folder.
-pub fn find_wordcraft(search: &SearchLocations) -> Option<FoundProgram> {
-    let installed = if cfg!(windows) { search.installed(&[r"WordCraft\wordcraft-cli.exe"]) } else { search.installed(&["Applications/WordCraft.app/Contents/MacOS/wordcraft-cli", "usr/bin/wordcraft-cli", "usr/local/bin/wordcraft-cli"]) };
-    let path = search.on_path(&["wordcraft-cli"]).or(installed)?;
-    // "wordcraft-cli 0.5.0" → "0.5.0"
-    let version = quick_output(&path, &["--version"]).and_then(|text| text.split_whitespace().last().map(str::to_string));
+/// A Craft program's command-line tool (`wordcraft-cli`, `gridcraft-cli`,
+/// ...), from the PATH or the app's install folder (`WordCraft`, ...).
+pub fn find_craft_program(search: &SearchLocations, app: &str, program: &str) -> Option<FoundProgram> {
+    let installed = if cfg!(windows) {
+        search.installed(&[&format!("{app}\\{program}.exe")])
+    } else {
+        search.installed(&[&format!("Applications/{app}.app/Contents/MacOS/{program}"), &format!("usr/bin/{program}"), &format!("usr/local/bin/{program}")])
+    };
+    let path = search.on_path(&[program]).or(installed)?;
+    // "wordcraft-cli 0.5.0", or "photocraft-cli 0.7.0 (792616159, 2026-10-11)": the second word.
+    let version = quick_output(&path, &["--version"]).and_then(|text| text.split_whitespace().nth(1).map(str::to_string));
     Some(FoundProgram { path, version })
 }
 
@@ -552,6 +556,46 @@ pub fn convert_with_wordcraft(program: &FoundProgram, input: &Path, timeout: Dur
     let arguments: Vec<OsString> = vec!["convert".into(), copy.into_os_string(), pdf_path.clone().into_os_string()];
     let output = run_supervised(&program.path, &arguments, &workspace.path, timeout, cancellation, diagnostics, &|| {})?;
     read_pdf_output(&pdf_path, &output, "WordCraft")
+}
+
+pub fn convert_with_deckcraft(program: &FoundProgram, input: &Path, timeout: Duration, cancellation: &Cancellation, diagnostics: &mut Vec<String>) -> Result<Vec<u8>> {
+    let workspace = Workspace::new()?;
+    let copy = workspace.folder("input")?.join(safe_copy_name(input));
+    std::fs::copy(input, &copy).with_context(|| format!("could not read {}", input.display()))?;
+    let pdf_path = workspace.folder("output")?.join("document.pdf");
+    // The output's extension picks the format.
+    let arguments: Vec<OsString> = vec!["convert".into(), copy.into_os_string(), pdf_path.clone().into_os_string()];
+    let output = run_supervised(&program.path, &arguments, &workspace.path, timeout, cancellation, diagnostics, &|| {})?;
+    read_pdf_output(&pdf_path, &output, "DeckCraft")
+}
+
+pub fn convert_with_gridcraft(program: &FoundProgram, input: &Path, timeout: Duration, cancellation: &Cancellation, diagnostics: &mut Vec<String>) -> Result<Vec<u8>> {
+    let workspace = Workspace::new()?;
+    let copy = workspace.folder("input")?.join(safe_copy_name(input));
+    std::fs::copy(input, &copy).with_context(|| format!("could not read {}", input.display()))?;
+    let pdf_path = workspace.folder("output")?.join("document.pdf");
+    // Its convert command doesn't write PDF; printing every sheet does.
+    let export = serde_json::json!({ "path": pdf_path, "sheets": "all" });
+    let arguments: Vec<OsString> = vec!["run".into(), "--in".into(), copy.into_os_string(), "--cmd".into(), format!("file.exportPdf={export}").into(), "--quiet".into()];
+    let output = run_supervised(&program.path, &arguments, &workspace.path, timeout, cancellation, diagnostics, &|| {})?;
+    read_pdf_output(&pdf_path, &output, "GridCraft")
+}
+
+/// PhotoCraft doesn't write PDFs: it turns the file into a PNG, which goes
+/// on a page the way any picture does.
+pub fn convert_with_photocraft(program: &FoundProgram, input: &Path, timeout: Duration, cancellation: &Cancellation, diagnostics: &mut Vec<String>) -> Result<Vec<u8>> {
+    let workspace = Workspace::new()?;
+    let copy = workspace.folder("input")?.join(safe_copy_name(input));
+    std::fs::copy(input, &copy).with_context(|| format!("could not read {}", input.display()))?;
+    let picture = workspace.folder("output")?.join("picture.png");
+    let arguments: Vec<OsString> = vec!["convert".into(), copy.into_os_string(), picture.clone().into_os_string()];
+    let output = run_supervised(&program.path, &arguments, &workspace.path, timeout, cancellation, diagnostics, &|| {})?;
+    if !picture.is_file() {
+        let detail = if output.stderr.trim().is_empty() { output.stdout.trim() } else { output.stderr.trim() };
+        bail!("PhotoCraft did not produce a picture ({}){}", output.exit_description, if detail.is_empty() { String::new() } else { format!(": {}", last_characters(detail, 400)) });
+    }
+    let mut pdf = crate::create::images_to_pdf(&[picture], &crate::create::ImagePageSettings::default())?;
+    pdf.to_bytes(&crate::SaveSettings::default())
 }
 
 // ---------------------------------------------------------------------------

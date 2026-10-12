@@ -8,9 +8,11 @@
 //!   ("built-in layout", approximate). OpenDocument text, simple HTML,
 //!   Markdown and plain text become a reflowed "simplified document";
 //!   spreadsheets and CSV files become a "table export" of their values.
-//! - **LibreOffice**, **WordCraft**, **Microsoft Office** (Windows, only
-//!   with explicit permission) and a **browser** (Edge, Chrome or Chromium)
-//!   give higher fidelity when installed. They run as separate programs in a private
+//! - **LibreOffice**, the **Craft** programs (WordCraft for word processing,
+//!   GridCraft for spreadsheets, DeckCraft for presentations, PhotoCraft for
+//!   photos and design files), **Microsoft Office** (Windows, only with
+//!   explicit permission) and a **browser** (Edge, Chrome or Chromium) give
+//!   higher fidelity when installed. They run as separate programs in a private
 //!   temporary folder with a time limit (see `external`).
 //!
 //! Nothing is substituted behind the caller's back: the caller names a
@@ -49,6 +51,13 @@ pub enum Provider {
     /// WordCraft's command-line converter, `wordcraft-cli`, for word
     /// processing documents.
     WordCraft,
+    /// GridCraft's `gridcraft-cli`, printing spreadsheets with their formatting.
+    GridCraft,
+    /// DeckCraft's `deckcraft-cli`, for PowerPoint presentations.
+    DeckCraft,
+    /// PhotoCraft's `photocraft-cli`, turning photos and design files
+    /// (HEIC, Photoshop, camera RAW, SVG and more) into pictures for pages.
+    PhotoCraft,
     /// Word, Excel or PowerPoint through automation (Windows only, and only
     /// when the caller explicitly allows it).
     MicrosoftOffice,
@@ -60,13 +69,16 @@ pub enum Provider {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 6] = [Provider::BuiltIn, Provider::LibreOffice, Provider::WordCraft, Provider::MicrosoftOffice, Provider::Edge, Provider::Chromium];
+    pub const ALL: [Provider; 9] = [Provider::BuiltIn, Provider::LibreOffice, Provider::WordCraft, Provider::GridCraft, Provider::DeckCraft, Provider::PhotoCraft, Provider::MicrosoftOffice, Provider::Edge, Provider::Chromium];
 
     pub fn name(self) -> &'static str {
         match self {
             Provider::BuiltIn => "Built-in",
             Provider::LibreOffice => "LibreOffice",
             Provider::WordCraft => "WordCraft",
+            Provider::GridCraft => "GridCraft",
+            Provider::DeckCraft => "DeckCraft",
+            Provider::PhotoCraft => "PhotoCraft",
             Provider::MicrosoftOffice => "Microsoft Office",
             Provider::Edge => "Microsoft Edge",
             Provider::Chromium => "Chrome or Chromium",
@@ -84,12 +96,17 @@ impl Provider {
             Provider::BuiltIn => match format {
                 WordDocument => cfg!(feature = "word-layout"),
                 OpenDocumentText | Spreadsheet | Csv | Html | PlainText | Markdown | Image => true,
-                LegacyWord | Presentation => false,
+                LegacyWord | Presentation | OtherPresentation | OtherImage => false,
             },
-            Provider::LibreOffice => !matches!(format, Image | Markdown),
+            Provider::LibreOffice => !matches!(format, Image | OtherImage | Markdown),
             // What `wordcraft-cli convert` reads: docx, doc, odt, rtf, html, md and txt.
             Provider::WordCraft => matches!(format, WordDocument | LegacyWord | OpenDocumentText | Html | PlainText | Markdown),
-            Provider::MicrosoftOffice => matches!(format, WordDocument | LegacyWord | OpenDocumentText | Spreadsheet | Csv | Presentation),
+            // GridCraft keeps the formatting of .xlsx and .xls; .ods and .xlsb come through as data.
+            Provider::GridCraft => matches!(format, Spreadsheet | Csv),
+            // DeckCraft reads PowerPoint's own formats, not .ppt or .odp.
+            Provider::DeckCraft => matches!(format, Presentation),
+            Provider::PhotoCraft => matches!(format, Image | OtherImage),
+            Provider::MicrosoftOffice => matches!(format, WordDocument | LegacyWord | OpenDocumentText | Spreadsheet | Csv | Presentation | OtherPresentation),
             Provider::Edge | Provider::Chromium => matches!(format, Html),
         }
     }
@@ -108,8 +125,10 @@ pub enum InputFormat {
     Spreadsheet,
     /// .csv, .tsv
     Csv,
-    /// .pptx, .ppt, .odp: external providers only.
+    /// .pptx, .potx, .ppsx: external providers only.
     Presentation,
+    /// .ppt and .odp, which DeckCraft can't read.
+    OtherPresentation,
     /// .html, .htm, .xhtml
     Html,
     /// .txt
@@ -118,12 +137,15 @@ pub enum InputFormat {
     Markdown,
     /// .png, .jpg, .gif, .bmp, .tif, .webp
     Image,
+    /// Photos and design files the built-in converter can't read: HEIC,
+    /// Photoshop, camera RAW, SVG, OpenEXR and others. PhotoCraft only.
+    OtherImage,
 }
 
 impl InputFormat {
     /// Every file extension `from_path` recognizes, for file pickers.
     pub const EXTENSIONS: &'static [&'static str] = &[
-        "docx", "docm", "dotx", "doc", "rtf", "odt", "xlsx", "xlsm", "xlsb", "xls", "ods", "csv", "tsv", "pptx", "ppt", "odp", "html", "htm", "xhtml", "txt", "text", "log", "md", "markdown", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp",
+        "docx", "docm", "dotx", "doc", "rtf", "odt", "xlsx", "xlsm", "xlsb", "xls", "ods", "csv", "tsv", "pptx", "potx", "ppsx", "ppt", "odp", "html", "htm", "xhtml", "txt", "text", "log", "md", "markdown", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "psd", "psb", "dng", "cr2", "cr3", "nef", "nrw", "arw", "rw2", "orf", "pef", "raf", "svg", "exr", "hdr", "pdn", "ora", "tga", "qoi", "ico", "afphoto",
     ];
 
     pub fn from_path(path: &Path) -> Option<Self> {
@@ -134,11 +156,13 @@ impl InputFormat {
             "odt" => InputFormat::OpenDocumentText,
             "xlsx" | "xlsm" | "xlsb" | "xls" | "ods" => InputFormat::Spreadsheet,
             "csv" | "tsv" => InputFormat::Csv,
-            "pptx" | "ppt" | "odp" => InputFormat::Presentation,
+            "pptx" | "potx" | "ppsx" => InputFormat::Presentation,
+            "ppt" | "odp" => InputFormat::OtherPresentation,
             "html" | "htm" | "xhtml" => InputFormat::Html,
             "txt" | "text" | "log" => InputFormat::PlainText,
             "md" | "markdown" => InputFormat::Markdown,
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "webp" => InputFormat::Image,
+            "heic" | "heif" | "psd" | "psb" | "dng" | "cr2" | "cr3" | "nef" | "nrw" | "arw" | "rw2" | "orf" | "pef" | "raf" | "svg" | "exr" | "hdr" | "pdn" | "ora" | "tga" | "qoi" | "ico" | "afphoto" => InputFormat::OtherImage,
             _ => return None,
         })
     }
@@ -151,10 +175,12 @@ impl InputFormat {
             InputFormat::Spreadsheet => "spreadsheet",
             InputFormat::Csv => "CSV file",
             InputFormat::Presentation => "presentation",
+            InputFormat::OtherPresentation => "presentation",
             InputFormat::Html => "web page",
             InputFormat::PlainText => "text file",
             InputFormat::Markdown => "Markdown file",
             InputFormat::Image => "picture",
+            InputFormat::OtherImage => "photo or design file",
         }
     }
 
@@ -164,7 +190,10 @@ impl InputFormat {
         use Provider::*;
         match self {
             InputFormat::WordDocument | InputFormat::LegacyWord | InputFormat::OpenDocumentText => &[MicrosoftOffice, LibreOffice, WordCraft, BuiltIn],
-            InputFormat::Spreadsheet | InputFormat::Presentation => &[MicrosoftOffice, LibreOffice, BuiltIn],
+            InputFormat::Spreadsheet => &[MicrosoftOffice, LibreOffice, GridCraft, BuiltIn],
+            InputFormat::Presentation => &[MicrosoftOffice, LibreOffice, DeckCraft],
+            InputFormat::OtherPresentation => &[MicrosoftOffice, LibreOffice],
+            InputFormat::OtherImage => &[PhotoCraft],
             InputFormat::Html => &[Edge, Chromium, BuiltIn],
             // Plain data and text gain nothing from an office suite.
             InputFormat::Csv | InputFormat::PlainText | InputFormat::Markdown | InputFormat::Image => &[BuiltIn],
@@ -246,15 +275,21 @@ pub fn available_providers_in(search: &SearchLocations) -> Vec<ProviderInfo> {
         location: libreoffice.map(|found| found.path),
         note: "Word, OpenDocument, RTF, spreadsheets, presentations and web pages; higher fidelity".to_string(),
     });
-    let wordcraft = external::find_wordcraft(search);
-    providers.push(ProviderInfo {
-        provider: Provider::WordCraft,
-        available: wordcraft.is_some(),
-        engine: "WordCraft".to_string(),
-        version: wordcraft.as_ref().and_then(|found| found.version.clone()),
-        location: wordcraft.map(|found| found.path),
-        note: "Word, OpenDocument text, RTF, web pages, Markdown and text; higher fidelity".to_string(),
-    });
+    for (provider, found, note) in [
+        (Provider::WordCraft, external::find_craft_program(search, "WordCraft", "wordcraft-cli"), "Word, OpenDocument text, RTF, web pages, Markdown and text; higher fidelity"),
+        (Provider::GridCraft, external::find_craft_program(search, "GridCraft", "gridcraft-cli"), "spreadsheets printed with their formatting (.xlsx, .xls; .ods and .xlsb as data) and CSV; higher fidelity"),
+        (Provider::DeckCraft, external::find_craft_program(search, "DeckCraft", "deckcraft-cli"), "PowerPoint presentations (.pptx, .potx, .ppsx); higher fidelity"),
+        (Provider::PhotoCraft, external::find_craft_program(search, "PhotoCraft", "photocraft-cli"), "photos and design files: HEIC, Photoshop, camera RAW, SVG, OpenEXR and more, as pictures on pages"),
+    ] {
+        providers.push(ProviderInfo {
+            provider,
+            available: found.is_some(),
+            engine: provider.name().to_string(),
+            version: found.as_ref().and_then(|found| found.version.clone()),
+            location: found.map(|found| found.path),
+            note: note.to_string(),
+        });
+    }
     let office = external::find_office(search);
     let office_note = match &office {
         Some(installation) => {
@@ -411,15 +446,20 @@ pub fn convert_file(input: &Path, options: &ConversionOptions, cancellation: &Ca
             let warnings = vec!["LibreOffice ran with the network blocked, so any pictures the document links to on the web are missing.".to_string()];
             (pdf, info.engine.clone(), info.version.clone(), Fidelity::HigherFidelity, warnings)
         }
-        Provider::WordCraft => {
+        Provider::WordCraft | Provider::GridCraft | Provider::DeckCraft | Provider::PhotoCraft => {
             let program = external::FoundProgram { path: info.location.clone().expect("found programs have a location"), version: info.version.clone() };
-            let pdf = external::convert_with_wordcraft(&program, input, options.timeout, cancellation, &mut diagnostics)?;
-            (pdf, info.engine.clone(), info.version.clone(), Fidelity::HigherFidelity, Vec::new())
+            let (pdf, fidelity) = match provider {
+                Provider::WordCraft => (external::convert_with_wordcraft(&program, input, options.timeout, cancellation, &mut diagnostics)?, Fidelity::HigherFidelity),
+                Provider::GridCraft => (external::convert_with_gridcraft(&program, input, options.timeout, cancellation, &mut diagnostics)?, Fidelity::HigherFidelity),
+                Provider::DeckCraft => (external::convert_with_deckcraft(&program, input, options.timeout, cancellation, &mut diagnostics)?, Fidelity::HigherFidelity),
+                _ => (external::convert_with_photocraft(&program, input, options.timeout, cancellation, &mut diagnostics)?, Fidelity::PicturePages),
+            };
+            (pdf, info.engine.clone(), info.version.clone(), fidelity, Vec::new())
         }
         Provider::MicrosoftOffice => {
             let application = match format {
                 InputFormat::Spreadsheet | InputFormat::Csv => external::OfficeApplication::Excel,
-                InputFormat::Presentation => external::OfficeApplication::PowerPoint,
+                InputFormat::Presentation | InputFormat::OtherPresentation => external::OfficeApplication::PowerPoint,
                 _ => external::OfficeApplication::Word,
             };
             let pdf = external::convert_with_office(application, input, options.timeout, cancellation, &mut diagnostics)?;
