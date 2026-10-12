@@ -506,6 +506,15 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
         self.status_is_error = true;
     }
 
+    /// A note from opening the window (the chosen renderer couldn't start,
+    /// so the other one draws), shown unless an error already holds the
+    /// status line.
+    pub(crate) fn startup_note(&mut self, note: String) {
+        if !self.status_is_error {
+            self.info(note);
+        }
+    }
+
     fn report<T>(&mut self, result: anyhow::Result<T>) -> Option<T> {
         match result {
             Ok(value) => Some(value),

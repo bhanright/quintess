@@ -1,5 +1,10 @@
 /target
-/vendor
+# vendor/ holds downloaded binaries (PDFium, the OCR models), kept out of git,
+# and the patched crates below, which are part of the source.
+/vendor/*
+!/vendor/README.md
+!/vendor/winit/
+!/vendor/egui-wgpu/
 /scratch
 *.secrets*
 

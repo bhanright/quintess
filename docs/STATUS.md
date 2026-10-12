@@ -269,7 +269,8 @@ saves a picture of the window and exits (setup options are documented on
 - Performance (2026-10-11, measured against Acrobat 26.2 on this PC: open and
   settle 0.8 s vs 9 s, 134 MB vs 577 MB on a 624-page document): no redraw
   loop (the window title is set only when it changes); OpenGL by default with
-  wgpu fallback (`QUINTESS_RENDERER`), halving memory; page pictures within a
+  wgpu fallback and the reverse (`QUINTESS_RENDERER`, see "Window layer"),
+  halving memory; page pictures within a
   memory budget (`page_memory_megabytes`, Preferences, default 768 MB),
   nearest pages kept with scrolled-past pages counted 3x as far; 24 DPI
   previews around the view and sharp pages ahead in the scroll direction
@@ -421,6 +422,29 @@ et.rs`): .pfx/.p12
   Verified only by cross-building from Windows with zig (this PC has
   virtualization off, so WSL could not run); the Linux tests, packages and
   app have not run on Linux yet: the workflow's first run is that check.
+- Window layer (2026-10-11): patched copies of winit 0.30.13 and egui-wgpu
+  0.36.2 in `vendor/` (from PdfCraft, MIT OR Apache-2.0; `[patch.crates-io]`
+  in Cargo.toml; `vendor/README.md` lists every patch and when to drop the
+  copies). winit: Windows 11 mixed-DPI window drags, the Microsoft Korean
+  IME caret, input-method typing on Wayland and X11, Apple input methods
+  (Korean, Japanese, the emoji picker) on macOS, X11 scale without
+  `Xft.dpi`, maximized start without a white flash (dormant: Quintess does
+  not restore maximized windows). egui-wgpu: a window larger than the GPU's
+  texture limit, and a GPU that can't configure the surface or build the
+  pipelines at start-up, return errors or fit instead of panicking.
+  `window_start.rs` opens the window: whichever renderer is tried first
+  (OpenGL, or wgpu by the Graphics preference / `QUINTESS_RENDERER=wgpu`),
+  if it fails or panics before the app is created, the other one opens the
+  window and the status line says so (before: only OpenGL fell back, on any
+  error, even one after the app had started; a wgpu failure or any start-up
+  panic closed the app). wgpu's device asks for the GPU's real texture
+  limit, not egui-wgpu's fixed 8192. Developer switch:
+  `QUINTESS_FAIL_RENDERER=glow|wgpu` breaks that renderer's start (glow
+  through eframe's own panic when no OpenGL pixel format matches, wgpu
+  through an error); both were run on this PC and fell back. Tests: `tests/vendored_window_crates.rs` (the crates resolve to the
+  copies, every patch is present, `surface_fit`) and real-device tests of
+  `catch_errors` in `window_start.rs`. Not tested here: CJK typing (this PC
+  has only the US keyboard installed), mixed-DPI monitors, Linux and macOS.
 
 ## Ideas for next
 

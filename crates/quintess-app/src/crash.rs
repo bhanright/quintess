@@ -4,6 +4,7 @@
 //! vanishing.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Unsaved documents (title and bytes), kept current by the app each frame
@@ -22,10 +23,28 @@ fn data_folder() -> PathBuf {
     quintess_core::system::data_folder()
 }
 
+/// Set while a renderer starts, before the app exists: a panic then is
+/// caught by `window_start::run_once` and the other renderer is tried, so
+/// it goes only to standard error, with no crash log (which would replace
+/// the last real one) and no "has to close" message. There is no unsaved
+/// work yet.
+static RENDERER_STARTING: AtomicBool = AtomicBool::new(false);
+
+pub fn renderer_starting() {
+    RENDERER_STARTING.store(true, Ordering::SeqCst);
+}
+
+pub fn renderer_started() {
+    RENDERER_STARTING.store(false, Ordering::SeqCst);
+}
+
 pub fn install_handler() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         default_hook(info);
+        if RENDERER_STARTING.load(Ordering::SeqCst) {
+            return;
+        }
         let folder = data_folder();
         let _ = std::fs::create_dir_all(&folder);
         // Save unsaved work first, in case anything below fails too.

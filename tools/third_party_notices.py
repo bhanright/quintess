@@ -44,6 +44,22 @@ def shipped_packages(metadata):
     return sorted((packages[pid] for pid in seen if pid not in workspace), key=lambda p: (p["name"].lower(), p["version"]))
 
 
+# Crates Quintess builds from a patched copy in vendor/ ([patch.crates-io]
+# in Cargo.toml) rather than from crates.io; vendor/README.md lists the
+# patches. Cargo reports them without a "source".
+VENDORED_NOTE = (
+    "Modified: Quintess builds a patched copy (vendor/{name}), taken from PdfCraft\n"
+    "(https://github.com/storytold/pdfcraft, vendor/{name} at commit\n"
+    "6d843a8e8b22e4442666eb9e12f506c40458af3d). PdfCraft's changes:\n"
+    "Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors, licensed\n"
+    "MIT OR Apache-2.0. Each change is marked \"PdfCraft patch\" in the source."
+)
+
+
+def is_vendored(package):
+    return package.get("source") is None and "/vendor/" in Path(package["manifest_path"]).as_posix()
+
+
 def license_texts(folder):
     files = [f for f in sorted(folder.iterdir()) if f.is_file() and f.name.lower().startswith(LICENSE_FILE_PREFIXES)]
     return [(f.name, f.read_text(encoding="utf-8", errors="replace").strip()) for f in files]
@@ -90,6 +106,8 @@ def main():
     for package in packages:
         system = only_on.get(package["id"])
         note = f"  ({system} only)" if system else ""
+        if is_vendored(package):
+            note += "  (modified, see below)"
         lines.append(f"  {package['name']} {package['version']}  -  {package.get('license') or 'see its license file'}{note}")
     lines.append("")
     printed = {}
@@ -97,6 +115,8 @@ def main():
         folder = Path(package["manifest_path"]).parent
         header = f"{package['name']} {package['version']} ({package.get('license') or 'license file'})"
         lines += ["", "-" * 78, header, "-" * 78]
+        if is_vendored(package):
+            lines += [VENDORED_NOTE.format(name=package["name"]), ""]
         texts = license_texts(folder)
         if not texts:
             lines.append(f"No license file is included in the crate; its declared license is {package.get('license')}.")
