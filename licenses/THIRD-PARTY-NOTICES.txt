@@ -303,7 +303,7 @@ Rust crates (654):
   lock_api 0.4.14  -  MIT OR Apache-2.0
   log 0.4.34  -  MIT OR Apache-2.0
   loop9 0.1.5  -  MIT
-  lopdf 0.45.0  -  MIT
+  lopdf 0.45.0  -  MIT  (modified, see below)
   lru 0.18.5  -  MIT
   malloc_buf 0.0.6  -  MIT  (macOS only)
   maybe-owned 0.3.4  -  MIT OR Apache-2.0
@@ -11782,6 +11782,13 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 ------------------------------------------------------------------------------
 lopdf 0.45.0 (MIT)
 ------------------------------------------------------------------------------
+Modified: Quintess builds a patched copy (vendor/lopdf), taken from PdfCraft
+(https://github.com/storytold/pdfcraft, vendor/lopdf at commit
+6d843a8e8b22e4442666eb9e12f506c40458af3d). PdfCraft's changes:
+Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors, licensed
+MIT OR Apache-2.0. Each change is marked "PdfCraft patch" in the source.
+Quintess's own changes are marked "Quintess patch" in the source.
+
 LICENSE:
 
 MIT License

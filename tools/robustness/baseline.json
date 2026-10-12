@@ -2,12 +2,12 @@
   "pdfjs_commit": "d0991a0d53f3bb3a7307e3b83f279c1d117aafb3",
   "counts": {
     "crash": 0,
-    "error": 19,
+    "error": 12,
     "expected failure": 14,
     "hang": 2,
-    "ok": 1409
+    "ok": 1418
   },
-  "round_trips_verified": 1412,
+  "round_trips_verified": 1422,
   "files": {
     "160F-2019.pdf": "ok",
     "20130226130259.pdf": "ok",
@@ -613,7 +613,7 @@
     "issue13748.pdf": "ok",
     "issue13751.pdf": "ok",
     "issue13756.pdf": "ok",
-    "issue13783.pdf": "error",
+    "issue13783.pdf": "ok",
     "issue13794.pdf": "ok",
     "issue13823.pdf": "ok",
     "issue13845.pdf": "ok",
@@ -920,7 +920,7 @@
     "issue2139.pdf": "ok",
     "issue21406.pdf": "ok",
     "issue21430.pdf": "ok",
-    "issue21436.pdf": "error",
+    "issue21436.pdf": "ok",
     "issue21458.pdf": "ok",
     "issue215.pdf": "ok",
     "issue21523.pdf": "ok",
@@ -1071,8 +1071,8 @@
     "issue5972.pdf": "ok",
     "issue5994.pdf": "ok",
     "issue6006.pdf": "ok",
-    "issue6010_1.pdf": "error",
-    "issue6010_2.pdf": "error",
+    "issue6010_1.pdf": "ok",
+    "issue6010_2.pdf": "ok",
     "issue6019.pdf": "ok",
     "issue6066.pdf": "ok",
     "issue6068.pdf": "ok",
@@ -1142,13 +1142,13 @@
     "issue7446.pdf": "ok",
     "issue7454.pdf": "ok",
     "issue7492.pdf": "ok",
-    "issue7496.pdf": "error",
+    "issue7496.pdf": "ok",
     "issue7507.pdf": "ok",
     "issue7544.pdf": "ok",
     "issue7580.pdf": "ok",
     "issue7598.pdf": "ok",
     "issue7625.pdf": "ok",
-    "issue7665.pdf": "error",
+    "issue7665.pdf": "ok",
     "issue7696.pdf": "ok",
     "issue7769.pdf": "ok",
     "issue7821.pdf": "ok",
@@ -1341,7 +1341,7 @@
     "rotated_freetexts.pdf": "ok",
     "rotated_ink.pdf": "ok",
     "rotation.pdf": "ok",
-    "saslprep-r6.pdf": "error",
+    "saslprep-r6.pdf": "ok",
     "scan-bad.pdf": "ok",
     "sci-notation.pdf": "ok",
     "scorecard_reduced.pdf": "ok",
@@ -1426,8 +1426,10 @@
     "xfa_bug1735738.pdf": "ok",
     "xfa_bug1739502.pdf": "ok",
     "xfa_bug1998843.pdf": "ok",
+    "xfa_candidate_petitions.pdf": "ok",
     "xfa_dhl_shipment.pdf": "ok",
     "xfa_filled_imm1344e.pdf": "ok",
+    "xfa_fish_licence.pdf": "ok",
     "xfa_hsbc_closure.pdf": "ok",
     "xfa_imm1295e.pdf": "ok",
     "xfa_imm1344e.pdf": "ok",
@@ -1455,10 +1457,6 @@
     "zerowidthline.pdf": "ok"
   },
   "disagreements": {
-    "Pages-tree-refs.pdf": "pdfinfo counts 2 pages in the saved copy; Quintess wrote 1",
-    "issue13783.pdf": "pdfinfo counts 15 pages in the saved copy; Quintess wrote 14",
-    "issue1721.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: page object 149 0 (item index 0 (from 0)): ignoring non-stream in an array of streams",
-    "issue5592.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: page object 8 0 (item index 0 (from 0)): ignoring non-stream in an array of streams",
-    "issue7496.pdf": "qpdf --check warns about the saved copy but not the original: WARNING: object 5 1: operation for dictionary attempted on object of type null: returning false for a key containment request; pdfinfo counts 220 pages in the saved copy; Quintess wrote 219"
+    "Pages-tree-refs.pdf": "pdfinfo counts 2 pages in the saved copy; Quintess wrote 1"
   }
 }

@@ -93,6 +93,9 @@ VENDORED_NOTE = (
     "Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors, licensed\n"
     "MIT OR Apache-2.0. Each change is marked \"PdfCraft patch\" in the source."
 )
+# Vendored crates Quintess changed further, on top of PdfCraft's copy.
+QUINTESS_CHANGES_NOTE = "Quintess's own changes are marked \"Quintess patch\" in the source."
+CHANGED_BY_QUINTESS = {"lopdf"}
 
 
 def is_vendored(package):
@@ -163,7 +166,10 @@ def main():
         header = f"{package['name']} {package['version']} ({package.get('license') or 'license file'})"
         lines += ["", "-" * 78, header, "-" * 78]
         if is_vendored(package):
-            lines += [VENDORED_NOTE.format(name=package["name"]), ""]
+            lines.append(VENDORED_NOTE.format(name=package["name"]))
+            if package["name"] in CHANGED_BY_QUINTESS:
+                lines.append(QUINTESS_CHANGES_NOTE)
+            lines.append("")
         texts = license_texts(folder)
         if not texts:
             lines.append(f"No license file is included in the crate; its declared license is {package.get('license')}.")

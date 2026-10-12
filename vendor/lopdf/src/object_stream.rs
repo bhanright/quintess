@@ -1,3 +1,8 @@
+// Vendored for Quintess from PdfCraft (https://github.com/storytold/pdfcraft),
+// vendor/lopdf/src/object_stream.rs at commit 6d843a8e8b22e4442666eb9e12f506c40458af3d.
+// Modified by PdfCraft from lopdf 0.45.0 (MIT); each change is marked
+// "PdfCraft patch". PdfCraft's changes: Copyright (c) 2026 ArtCraft Team and the
+// PdfCraft contributors, MIT OR Apache-2.0. See vendor/README.md.
 use crate::parser;
 use crate::{Document, Error, Object, ObjectId, Result, Stream};
 use std::collections::BTreeMap;

@@ -17,6 +17,11 @@ quintess-core = { path = "../crates/quintess-core", default-features = false }
 
 [workspace]
 
+# The patched lopdf the main workspace builds (vendor/README.md); this
+# workspace is separate, so it needs its own patch section.
+[patch.crates-io]
+lopdf = { path = "../vendor/lopdf" }
+
 [profile.release]
 debug = 1
 

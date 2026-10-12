@@ -160,9 +160,11 @@ fn run(arguments: Arguments) -> Result<bool> {
             let baseline_path = baseline_path.unwrap_or_else(default_baseline);
             if update_baseline {
                 let mut recorded = baseline::Baseline::from_summary(&summary);
-                // Without qpdf and poppler (as on Windows) there is nothing to
-                // say about disagreements, so the recorded ones are kept.
-                if summary.external_tools.is_empty() {
+                // Without all of qpdf, pdfinfo and pdftotext (as on Windows,
+                // where Git's MSYS2 may bring pdftotext alone) the sweep can't
+                // judge every disagreement, so the recorded ones are kept.
+                let every_tool_ran = ["qpdf", "pdfinfo", "pdftotext"].iter().all(|tool| summary.external_tools.iter().any(|found| found == tool));
+                if !every_tool_ran {
                     if let Some(previous) = baseline::Baseline::read(&baseline_path) {
                         recorded.disagreements = previous.disagreements;
                     }

@@ -363,43 +363,21 @@ pub fn run_mutate(options: &MutateOptions) -> Result<()> {
     let runs = done.load(Ordering::Relaxed).min(iterations);
     let found = found.into_inner().expect("the findings lock is never poisoned");
     let crashes = found.iter().filter(|finding| finding.0 == Outcome::Crash).count();
-    let known = found.iter().filter(|finding| finding.0 == Outcome::Crash && known_upstream_panic(&finding.1).is_some()).count();
     let hangs = found.len() - crashes;
     let seconds = start.elapsed().as_secs_f64().max(0.001);
-    println!("mutate: {runs} runs in {seconds:.0} s ({:.1} a second): {crashes} distinct crashes ({known} known in lopdf), {hangs} hangs", runs as f64 / seconds);
-    if crashes > known {
-        bail!("{} new crashes: see {}", crashes - known, findings_folder.display());
+    println!("mutate: {runs} runs in {seconds:.0} s ({:.1} a second): {crashes} distinct crashes, {hangs} hangs", runs as f64 / seconds);
+    // Every crash fails the run. Two lopdf overflow panics used to be let
+    // through as known upstream bugs; lopdf is now a patched copy in
+    // vendor/lopdf, where both are fixed, so a panic in it is ours to fix too.
+    if crashes > 0 {
+        bail!("{crashes} crashes: see {}", findings_folder.display());
     }
     Ok(())
-}
-
-/// Panics in lopdf that only debug builds have (overflow checks; release
-/// builds wrap the arithmetic instead) and that Quintess can't reach to fix:
-/// reported and saved like any finding, but they don't fail the run, so a
-/// nightly failure always means something new. Each entry is the panic's
-/// location and what it is.
-const KNOWN_UPSTREAM_PANICS: &[(&str, &str)] = &[
-    ("lopdf-0.45.0/src/object.rs:1237", "PNG predictor Columns times Colors overflows"),
-    ("lopdf-0.45.0/src/parser_aux.rs:633", "cross-reference stream /Index start plus count overflows"),
-];
-
-fn known_upstream_panic(detail: &str) -> Option<&'static str> {
-    let detail = detail.replace('\\', "/");
-    KNOWN_UPSTREAM_PANICS.iter().find(|(location, _)| detail.contains(location)).map(|(_, what)| *what)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn known_lopdf_panics_are_recognized_on_any_system() {
-        let windows = r"exit code 101 (a Rust panic) in lopdf open; thread 'main' panicked at C:\cargo\registry\src\index\lopdf-0.45.0\src\object.rs:1237:37:: attempt to multiply with overflow";
-        let linux = "exit code 101 (a Rust panic) in lopdf open; thread 'main' panicked at /home/runner/.cargo/registry/src/index/lopdf-0.45.0/src/parser_aux.rs:633:37:: attempt to add with overflow";
-        assert!(known_upstream_panic(windows).is_some());
-        assert!(known_upstream_panic(linux).is_some());
-        assert!(known_upstream_panic("thread 'main' panicked at crates/quintess-core/src/bookmarks.rs:84:40").is_none());
-    }
 
     #[test]
     fn the_same_random_seed_gives_the_same_input() {

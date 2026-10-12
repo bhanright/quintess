@@ -1,3 +1,7 @@
+// Vendored for Quintess: lopdf 0.45.0 (MIT), from PdfCraft's copy
+// (https://github.com/storytold/pdfcraft, vendor/lopdf at commit 6d843a8e8b22e4442666eb9e12f506c40458af3d),
+// which leaves this file unchanged. Modified for Quintess; each change is marked
+// "Quintess patch". See vendor/README.md.
 use super::{Dictionary, Object, ObjectId, Reader, Stream, StringFormat};
 use crate::Error;
 use crate::content::*;

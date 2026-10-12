@@ -6,7 +6,8 @@ William asked for them to be removed on 2026-10-10, so do not add any.
 
 ## Architecture
 
-- `crates/quintess-core`: the engine. `lopdf` is the editable object model,
+- `crates/quintess-core`: the engine. `lopdf` (a patched copy in
+  `vendor/lopdf`, see vendor/README.md) is the editable object model,
   PDFium (`vendor/pdfium/bin/pdfium.dll`, chromium/8086, gitignored) does
   rendering and positioned text. `engine.rs` lists where the DLL is found.
 - `crates/quintess-cli`: the command-line tool (library, `run_cli`) and the
@@ -573,8 +574,7 @@ et.rs`): .pfx/.p12
   couldn't open a file lopdf can't (it now opens such files for reading
   only, see "Reading only and repair"); an unreadable /Outlines means no bookmarks
   instead of an error; pages with an empty visible area render blank instead
-  of failing; a file whose AES crypt filter lopdf can't follow (issue7665)
-  is refused on saving instead of being written scrambled. Fuzzing then
+  of failing. Fuzzing then
   found three panics, fixed: an object numbered 4294967295 overflowed
   lopdf's counter for new objects (renumbered on opening), absurd page-tree
   /Count values overflowed or asked lopdf for 51 GB (recounted on opening),
@@ -582,29 +582,56 @@ et.rs`): .pfx/.p12
   decoding a damaged JBIG2 image. cargo-fuzz showed lopdf writing an
   infinite number as "inf", which led to `pages::number` (Quintess's own
   content writer did the same with "inf" and "NaN") writing 0 instead.
-  lopdf also panics, in builds with overflow checks only, on a PNG
-  predictor whose Columns times Colors overflows (object.rs:1237) and on a
-  cross-reference stream /Index near the largest integer
-  (parser_aux.rs:633); release builds wrap instead, so those are left for
-  lopdf and listed as known in `mutate.rs`. Twice save_round_trip fuzzing
+  Two lopdf panics in builds with overflow checks (a PNG predictor whose
+  Columns times Colors overflows, a cross-reference stream /Index near the
+  largest integer) are fixed in the vendored lopdf (below). Twice save_round_trip fuzzing
   died of a bare SIGSEGV with no input saved (likely a stack overflow on
   libFuzzer's thread, where Rust has no overflow handler); the targets now
   run each input on a 64 MB thread, where an overflow is reported and
-  saved. qpdf in CI flagged saved copies that lose
-  objects lopdf can't parse (issue1721: a stream whose data runs into
-  `endstream`; issue7496 and issue13783: a corrupt latest copy of a page).
+  saved. qpdf in CI flagged saved copies that lost objects lopdf couldn't
+  parse (fixed in the vendored lopdf, below).
   Tests:
   `crates/quintess-core/tests/corpus_regressions.rs`. The baseline
   (`tools/robustness/baseline.json`) makes `.github/workflows/robustness.yml`
   fail on new crashes, hangs or lost round trips (push to main and nightly);
   nightly also runs the cargo-fuzz targets in `fuzz/` (parse, content
   stream, save round trip) and mutation fuzzing through the full check for
-  15 minutes each. Remaining errors are lopdf limitations (UTF-8 and
-  SASLprep passwords, a corrupt latest copy of an object where PDFium uses an
-  earlier one, a catalog whose /Pages is a page), PDFium refusing files, and
-  fuzzed files. Corpus fetch, child runner, baseline comparison and mutation
-  fuzzer are adapted from PdfCraft (MIT OR Apache-2.0, credited in
+  15 minutes each. Corpus fetch, child runner, baseline comparison and
+  mutation fuzzer are adapted from PdfCraft (MIT OR Apache-2.0, credited in
   licenses/THIRD-PARTY-NOTICES.txt).
+
+- Patched lopdf (2026-10-12): lopdf 0.45.0 (still the newest release) is
+  vendored in `vendor/lopdf` through `[patch.crates-io]` (also in
+  `fuzz/Cargo.toml`), starting from PdfCraft's patched copy (predictor
+  overflows, lookup depth, object-stream extents) with Quintess's own
+  patches, each marked `Quintess patch` and listed with its test and when
+  to drop it in vendor/README.md; drafts of upstream reports are in
+  `vendor/lopdf-upstream.md` (not filed). Fixed: the password is prepared
+  (SASLprep, PDFDocEncoding) before the file key is made, not only for the
+  check (saslprep-r6); revision 2 to 4 owner passwords give the right key;
+  an `/Encrypt` dictionary written in the trailer is used (issue6010_1/_2);
+  crypt filters in separate objects are followed, so issue7665 opens and
+  saves (Quintess's refusal to save such files is gone); whitespace before
+  `endstream` and an indented `endstream` after a wrong /Length keep the
+  stream (issue1721, issue5592); a damaged latest copy of an object falls
+  back to the newest copy that parses (issue13783); the /Index overflow;
+  and the quadratic prune. In `Pdf::from_bytes`: references with a
+  generation the file lacks are repointed at the one it has (issue7496),
+  and a catalog whose /Pages is a page gets a page tree (issue21436).
+  `engine::open_document` retries PDFium with the SASLprep-prepared
+  password (PDFium skips SASLprep). The mutation fuzzer no longer lets any
+  lopdf panic through as known. Sweep on Windows (1446 files): before,
+  1411 ok, 14 expected failures, 19 errors, 2 hangs, 1415 round trips;
+  after, 1418 ok, 14 expected failures, 12 errors, 2 hangs, 1422 round
+  trips. lopdf's page count changed only where it now matches PDFium's
+  (issue13783 14 to 15, issue7496 219 to 220, issue21436 0 to 1, and the
+  three encrypted files that didn't open). The qpdf disagreements for
+  issue1721, issue5592, issue7496 and issue13783 were removed from the
+  baseline; CI's qpdf has to confirm (qpdf isn't installed here). Tests:
+  `crates/quintess-core/tests/lopdf_patches.rs`. Left: issue9105_other
+  (no cross-reference table, a direct /Root and a page written inside
+  /Kids; PDFium refuses it too), and the other remaining errors are PDFium
+  refusing files, files with no pages, and damaged bookmarks.
 
 - Reading only and repair (2026-10-12): a file lopdf can't read, or reads
   with a different page count than PDFium (often zero pages), opens

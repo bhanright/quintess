@@ -93,8 +93,9 @@ or once a change is understood, record a new one:
 cargo run -p quintess-robustness -- sweep --update-baseline
 ```
 
-A sweep without qpdf and poppler (as on Windows) keeps the recorded
-disagreements when it updates the baseline; those come from CI, whose
+A sweep without all of qpdf, pdfinfo and pdftotext (as on Windows, where
+Git's MSYS2 may bring pdftotext alone) keeps the recorded disagreements
+when it updates the baseline; those come from CI, whose
 `robustness-sweep` artifact holds the run's `sweep.json`. The classes have
 matched between Windows and Linux so far.
 
@@ -135,10 +136,10 @@ QUINTESS_PDFIUM_DIR=... cargo run -p quintess-robustness -- mutate --time 300
 mutates corpus files of 64 KB or less (and two synthetic files) and runs
 each through `check-file` in a child process, so PDFium crashes are found
 too. Crashes are minimized and saved with a note in
-`robustness-out/mutate/findings/`. The run fails on a crash unless it is
-one of the known lopdf panics listed in `KNOWN_UPSTREAM_PANICS` in
-`tools/robustness/src/mutate.rs` (arithmetic overflows that only debug
-builds check; release builds wrap). Hangs are reported but don't fail it:
+`robustness-out/mutate/findings/`. The run fails on any crash: lopdf is a
+patched copy in `vendor/lopdf` (vendor/README.md), so a panic in it is
+fixed there like one in Quintess (the two overflow panics once let through
+as known upstream bugs are patched). Hangs are reported but don't fail it:
 so far every one has been PDFium rendering (damaged JBIG2 images, tiny
 tiling steps).
 
