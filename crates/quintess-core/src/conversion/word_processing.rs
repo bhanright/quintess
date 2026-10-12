@@ -246,9 +246,12 @@ struct FontFamilies {
     /// Every family: in its styles, its theme, its text, its headers and
     /// footers, for the Latin, east Asian and complex script variants.
     all: BTreeSet<String>,
-    /// The Latin text families only. Word's templates name east Asian and
-    /// complex script fonts in their defaults even for English documents,
-    /// so only these are worth a warning when they are missing.
+    /// The Latin text families named for text and styles, the ones worth a
+    /// warning when missing. Word's templates name east Asian and complex
+    /// script fonts in their defaults even for English documents, and a
+    /// theme names heading and body fonts many documents never use (a
+    /// document set in Calibri can carry an Aptos theme), so those are left
+    /// out.
     latin: BTreeSet<String>,
 }
 
@@ -279,7 +282,7 @@ fn collect_font_names(value: &serde_json::Value, font_key: Option<&str>, familie
                 return;
             }
             families.all.insert(name.to_string());
-            if matches!(key, "font" | "majorFont" | "minorFont") {
+            if key == "font" {
                 families.latin.insert(name.to_string());
             }
         }
@@ -464,7 +467,9 @@ mod tests {
         collect_font_names(&serialized, None, &mut families);
         let all: Vec<&str> = families.all.iter().map(String::as_str).collect();
         assert_eq!(all, ["Aptos", "Aptos Display", "Consolas", "MS Mincho"]);
+        // The theme's heading font is loaded but not warned about: many
+        // documents never use it.
         let latin: Vec<&str> = families.latin.iter().map(String::as_str).collect();
-        assert_eq!(latin, ["Aptos", "Aptos Display", "Consolas"]);
+        assert_eq!(latin, ["Aptos", "Consolas"]);
     }
 }

@@ -346,7 +346,9 @@ fn opendocument_text_converts_through_wordcraft() {
     if cfg!(feature = "word-processing") {
         assert_eq!(result.engine, "WordCraft", "{:?}", result.warnings);
         assert_eq!(result.fidelity, Fidelity::BuiltInLayout);
-        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        // A computer without the document's fonts (a build machine without
+        // Arial, say) is told they were replaced; nothing else is wrong.
+        assert!(result.warnings.iter().all(|warning| warning.starts_with("Fonts the document names that aren't on this computer")), "{:?}", result.warnings);
     } else {
         assert_eq!(result.fidelity, Fidelity::SimplifiedDocument);
     }
