@@ -344,8 +344,22 @@ et.rs`): .pfx/.p12
   the field editor runs the keystroke script on each change
   (`viewer::filtered_keystroke`), keeping, reshaping or refusing it.
 - Document conversion (`conversion.rs`, `conversion/`): one provider interface;
-  built-in .docx via Oxi (oxidocs =0.8.0, MPL-2.0, feature `word-layout`,
-  +15 MB), .odt/HTML subset/Markdown/text as simplified documents; built-in
+  built-in .docx/.docm/.dotx/.dotm, .doc, .rtf and .odt laid out by
+  WordCraft's library crates (`conversion/word_processing.rs`, feature
+  `word-processing`, default on; wordcraft-doc, -docx, -docbin, -formats,
+  -fonts and -pdf from git, `rev` pinned to the v0.6.1 tag's commit, MIT OR
+  Apache-2.0, no networking crates; not `wordcraft-engine`). It compiles in
+  about 4 MB of OFL fonts and hyphenation patterns (en-us, pl, pt; notices in
+  THIRD-PARTY-NOTICES). Office's cloud font cache
+  (`%LOCALAPPDATA%\Microsoft\FontCache\4\CloudFonts`, and the Mac Office
+  equivalent) is cataloged once, and the families a document names (Aptos)
+  are added to WordCraft's `FontDb::global()` before layout; without them
+  Aptos documents break lines differently from Word. Password-protected
+  documents are refused with advice. When WordCraft errors or panics on a
+  Word document, Oxi (oxidocs =0.8.0, MPL-2.0, feature `word-layout`, +15 MB;
+  kept for one release as a fallback) lays it out and the first warning says
+  so; .odt falls back to the simplified typesetter. HTML subset/Markdown/text
+  stay simplified documents; built-in
   .xlsx/.xlsm/.xltx/.xltm/.xls printed with formatting by GridCraft's engine
   (`conversion/spreadsheet_print.rs`, feature `spreadsheet-print`, default
   on; `gridcraft-engine` from git, `rev` pinned to the v0.6.1 tag's commit,

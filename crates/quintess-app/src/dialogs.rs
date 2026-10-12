@@ -2782,7 +2782,11 @@ impl ConvertDialog {
         for info in &suitable {
             let quality = match info.provider {
                 Provider::BuiltIn => match self.format() {
-                    Some(quintess_core::conversion::InputFormat::WordDocument) => "built-in layout, approximate",
+                    // Word documents, RTF and OpenDocument text are laid out
+                    // by WordCraft's engine (Oxi's for a Word document it
+                    // can't); without that engine, OpenDocument text is
+                    // simplified.
+                    Some(format) if quintess_core::conversion::built_in_lays_out_pages(format) => "built-in layout, approximate",
                     // Excel workbooks are printed with their formatting
                     // (falling back to a table when the engine can't);
                     // OpenDocument, .xlsb and CSV files become tables.

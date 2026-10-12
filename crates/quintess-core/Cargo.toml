@@ -48,13 +48,30 @@ oxidocs = { version = "=0.8.0", optional = true }
 # (MIT OR Apache-2.0). It isn't published on crates.io, so it comes from the
 # repository, pinned to the commit of the v0.6.1 release tag.
 gridcraft-engine = { git = "https://github.com/storytold/gridcraft", rev = "fc45b7f6d8ab79ef20f74e3c8347a2fd731e6af5", optional = true }
+# WordCraft's library crates for the built-in word processing conversion
+# (MIT OR Apache-2.0): readers for .docx, .doc, .rtf and .odt, its page
+# layout, and its PDF writer. Not its `wordcraft-engine` crate, which is the
+# editor's command layer. Not on crates.io either, so they come from the
+# repository, pinned to the commit of the v0.6.1 release tag.
+wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "7dfa6b0ee2aeeafec004c51fdd2ab9a697da3cc4", optional = true }
+wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "7dfa6b0ee2aeeafec004c51fdd2ab9a697da3cc4", optional = true }
+wordcraft-docbin = { git = "https://github.com/storytold/wordcraft", rev = "7dfa6b0ee2aeeafec004c51fdd2ab9a697da3cc4", optional = true }
+wordcraft-formats = { git = "https://github.com/storytold/wordcraft", rev = "7dfa6b0ee2aeeafec004c51fdd2ab9a697da3cc4", optional = true }
+wordcraft-fonts = { git = "https://github.com/storytold/wordcraft", rev = "7dfa6b0ee2aeeafec004c51fdd2ab9a697da3cc4", optional = true }
+wordcraft-pdf = { git = "https://github.com/storytold/wordcraft", rev = "7dfa6b0ee2aeeafec004c51fdd2ab9a697da3cc4", optional = true }
 # RSA key transport for certificate encryption (public_key.rs); ring cannot encrypt with RSA.
 rsa = "0.9.10"
 # SASLprep for AES-256 passwords handed to PDFium (engine::open_document); lopdf already uses it.
 stringprep = "0.1.5"
 
 [features]
-default = ["word-layout", "spreadsheet-print"]
+default = ["word-processing", "word-layout", "spreadsheet-print"]
+# The built-in converter for word processing documents (.docx, .docm, .dotx,
+# .dotm, .doc, .rtf and .odt) through WordCraft's engine. It brings its own
+# fonts (about 4 MB, SIL Open Font License) for documents whose fonts aren't
+# installed. With `word-layout` also on, Oxi lays out a Word document that
+# WordCraft can't (kept for one release as a fallback).
+word-processing = ["dep:wordcraft-doc", "dep:wordcraft-docx", "dep:wordcraft-docbin", "dep:wordcraft-formats", "dep:wordcraft-fonts", "dep:wordcraft-pdf"]
 # The built-in Word (.docx) converter. It adds about 15 MB to the program
 # (Word font metrics are compiled in); without it, .docx files need
 # LibreOffice or Microsoft Office.

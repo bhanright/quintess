@@ -78,14 +78,15 @@ fn sample_docx() -> Vec<u8> {
 }
 
 #[test]
-fn built_in_word_conversion_keeps_text_in_order() {
+fn built_in_word_conversion_goes_through_wordcraft_and_keeps_text_in_order() {
     let path = folder("docx").join("report.docx");
     std::fs::write(&path, sample_docx()).unwrap();
     let result = conversion::convert_file(&path, &built_in(), &Cancellation::new()).unwrap();
     assert_eq!(result.provider, Provider::BuiltIn);
     assert_eq!(result.fidelity, Fidelity::BuiltInLayout);
-    assert!(result.engine.contains("Oxi"), "the engine is named: {}", result.engine);
-    assert!(result.engine_version.is_some());
+    assert_eq!(result.engine, "WordCraft", "the engine is named");
+    assert_eq!(result.engine_version.as_deref(), Some("0.6.1"));
+    assert!(!result.warnings.iter().any(|warning| warning.contains("Oxi")), "WordCraft did the work itself: {:?}", result.warnings);
     assert_eq!(result.page_count, 1);
     std::fs::write(folder("docx").join("report.pdf"), &result.pdf).unwrap();
     let text = pdf_text(&result.pdf);
@@ -283,8 +284,42 @@ fn simple_html_subset_converts() {
     assert!(has_link);
 }
 
+/// A short letter in RTF, with a bold word and a table.
+const LETTER_RTF: &str = r"{\rtf1\ansi\deff0{\fonttbl{\f0 Times New Roman;}}\f0\fs24
+Dear neighbor,\par
+The fence between our gardens is \b fixed\b0  at last.\par
+\trowd\cellx2000\cellx4000 Posts\cell 12\cell\row
+Kind regards,\par
+}";
+
 #[test]
-fn opendocument_text_converts() {
+#[cfg(feature = "word-processing")]
+fn rtf_documents_convert_with_the_built_in_provider() {
+    assert!(Provider::BuiltIn.supports(InputFormat::LegacyWord));
+    let path = folder("rtf").join("letter.rtf");
+    std::fs::write(&path, LETTER_RTF).unwrap();
+    let result = conversion::convert_file(&path, &built_in(), &Cancellation::new()).unwrap();
+    assert_eq!(result.provider, Provider::BuiltIn);
+    assert_eq!(result.engine, "WordCraft");
+    assert_eq!(result.fidelity, Fidelity::BuiltInLayout);
+    assert_eq!(result.page_count, 1);
+    let text = pdf_text(&result.pdf);
+    assert_in_order(&text, &["Dear neighbor,", "The fence between our gardens is", "fixed", "at last.", "Posts", "12", "Kind regards,"]);
+}
+
+#[test]
+#[cfg(feature = "word-processing")]
+fn password_protected_word_documents_are_refused_with_advice() {
+    // A small spin count keeps the test quick; Word uses 100,000.
+    let encrypted = wordcraft_docx::encrypt_with_spin_count(&sample_docx(), "garden gate", 1_000).unwrap();
+    let path = folder("encrypted").join("locked.docx");
+    std::fs::write(&path, encrypted).unwrap();
+    let error = conversion::convert_file(&path, &built_in(), &Cancellation::new()).unwrap_err().to_string();
+    assert!(error.contains("password-protected") && error.contains("save it without a password"), "{error}");
+}
+
+#[test]
+fn opendocument_text_converts_through_wordcraft() {
     use std::io::Write;
     let content = r#"<?xml version="1.0" encoding="UTF-8"?>
 <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.3">
@@ -308,7 +343,13 @@ fn opendocument_text_converts() {
     let path = folder("odt").join("survey.odt");
     std::fs::write(&path, bytes).unwrap();
     let result = conversion::convert_file(&path, &built_in(), &Cancellation::new()).unwrap();
-    assert_eq!(result.fidelity, Fidelity::SimplifiedDocument);
+    if cfg!(feature = "word-processing") {
+        assert_eq!(result.engine, "WordCraft", "{:?}", result.warnings);
+        assert_eq!(result.fidelity, Fidelity::BuiltInLayout);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    } else {
+        assert_eq!(result.fidelity, Fidelity::SimplifiedDocument);
+    }
     let text = pdf_text(&result.pdf);
     assert_in_order(&text, &["Survey & summary", "Normal text with strong words", "here.", "Item one", "Item two", "A1", "B1"]);
 }
@@ -374,6 +415,8 @@ fn formats_are_recognized() {
     assert_eq!(InputFormat::from_path(Path::new("x.xlsx")), Some(InputFormat::Spreadsheet));
     assert!(Provider::BuiltIn.supports(InputFormat::Csv));
     assert!(!Provider::BuiltIn.supports(InputFormat::Presentation));
+    assert_eq!(InputFormat::from_path(Path::new("letter.dotm")), Some(InputFormat::WordDocument));
+    assert_eq!(Provider::BuiltIn.supports(InputFormat::LegacyWord), cfg!(feature = "word-processing"));
     assert!(Provider::LibreOffice.supports(InputFormat::Presentation));
 }
 

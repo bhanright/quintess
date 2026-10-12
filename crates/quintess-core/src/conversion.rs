@@ -4,9 +4,11 @@
 //! A conversion is done by a [`Provider`]:
 //!
 //! - **Built-in** converters are always available and never use the network.
-//!   Word documents are laid out page by page by Oxi's Word layout engine
-//!   ("built-in layout", approximate). OpenDocument text, simple HTML,
-//!   Markdown and plain text become a reflowed "simplified document".
+//!   Word documents (.docx and the older .doc), RTF and OpenDocument text are
+//!   laid out page by page by WordCraft's engine, compiled in ("built-in
+//!   layout", approximate); a Word document it can't lay out goes to Oxi's
+//!   Word layout engine instead (kept for one release as a fallback). Simple
+//!   HTML, Markdown and plain text become a reflowed "simplified document".
 //!   Excel workbooks are printed with their formatting by GridCraft's
 //!   engine, compiled in ("printed with formatting"); OpenDocument and
 //!   binary workbooks, CSV files, and workbooks that engine can't print
@@ -31,6 +33,8 @@ mod sheets;
 mod spreadsheet_print;
 #[cfg(feature = "word-layout")]
 mod word_layout;
+#[cfg(feature = "word-processing")]
+mod word_processing;
 
 use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
@@ -101,9 +105,10 @@ impl Provider {
         use InputFormat::*;
         match self {
             Provider::BuiltIn => match format {
-                WordDocument => cfg!(feature = "word-layout"),
+                WordDocument => cfg!(any(feature = "word-processing", feature = "word-layout")),
+                LegacyWord => cfg!(feature = "word-processing"),
                 OpenDocumentText | Spreadsheet | Csv | Html | PlainText | Markdown | Image => true,
-                LegacyWord | Presentation | OtherPresentation | OtherImage => false,
+                Presentation | OtherPresentation | OtherImage => false,
             },
             Provider::LibreOffice => !matches!(format, Image | OtherImage | Markdown),
             // What `wordcraft-cli convert` reads: docx, doc, odt, rtf, html, md and txt.
@@ -122,9 +127,10 @@ impl Provider {
 /// The kinds of files Quintess can convert, judged by extension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputFormat {
-    /// .docx, .docm, .dotx
+    /// .docx, .docm, .dotx, .dotm
     WordDocument,
-    /// .doc and .rtf: external providers only.
+    /// .doc and .rtf: the built-in converter needs the `word-processing`
+    /// feature; otherwise external providers only.
     LegacyWord,
     /// .odt
     OpenDocumentText,
@@ -152,13 +158,13 @@ pub enum InputFormat {
 impl InputFormat {
     /// Every file extension `from_path` recognizes, for file pickers.
     pub const EXTENSIONS: &'static [&'static str] = &[
-        "docx", "docm", "dotx", "doc", "rtf", "odt", "xlsx", "xlsm", "xltx", "xltm", "xlsb", "xls", "ods", "csv", "tsv", "pptx", "potx", "ppsx", "ppt", "odp", "html", "htm", "xhtml", "txt", "text", "log", "md", "markdown", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "psd", "psb", "dng", "cr2", "cr3", "nef", "nrw", "arw", "rw2", "orf", "pef", "raf", "svg", "exr", "hdr", "pdn", "ora", "tga", "qoi", "ico", "afphoto",
+        "docx", "docm", "dotx", "dotm", "doc", "rtf", "odt", "xlsx", "xlsm", "xltx", "xltm", "xlsb", "xls", "ods", "csv", "tsv", "pptx", "potx", "ppsx", "ppt", "odp", "html", "htm", "xhtml", "txt", "text", "log", "md", "markdown", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "psd", "psb", "dng", "cr2", "cr3", "nef", "nrw", "arw", "rw2", "orf", "pef", "raf", "svg", "exr", "hdr", "pdn", "ora", "tga", "qoi", "ico", "afphoto",
     ];
 
     pub fn from_path(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
         Some(match extension.as_str() {
-            "docx" | "docm" | "dotx" => InputFormat::WordDocument,
+            "docx" | "docm" | "dotx" | "dotm" => InputFormat::WordDocument,
             "doc" | "rtf" => InputFormat::LegacyWord,
             "odt" => InputFormat::OpenDocumentText,
             "xlsx" | "xlsm" | "xltx" | "xltm" | "xlsb" | "xls" | "ods" => InputFormat::Spreadsheet,
@@ -225,6 +231,17 @@ pub fn built_in_prints_with_formatting(path: &Path) -> bool {
     }
 }
 
+/// Whether the built-in converter lays this kind of file out page by page,
+/// the way a word processor does ("built-in layout"), rather than as a
+/// simplified document.
+pub fn built_in_lays_out_pages(format: InputFormat) -> bool {
+    match format {
+        InputFormat::WordDocument => cfg!(any(feature = "word-processing", feature = "word-layout")),
+        InputFormat::LegacyWord | InputFormat::OpenDocumentText => cfg!(feature = "word-processing"),
+        _ => false,
+    }
+}
+
 /// How close to the original a result is. Never "exact": even an office
 /// suite substitutes fonts it lacks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,8 +254,9 @@ pub enum Fidelity {
     /// number formats, fonts, fills, borders and page setup, by the built-in
     /// engine; the fonts are standard ones, not the workbook's own.
     FormattedPrint,
-    /// Pages laid out like Word lays them out, by the built-in engine;
-    /// fonts that aren't installed are replaced.
+    /// Pages laid out like Word lays them out, by a built-in engine
+    /// (WordCraft's, or Oxi's as its fallback); fonts that aren't installed
+    /// are replaced.
     BuiltInLayout,
     /// One picture per page.
     PicturePages,
@@ -282,9 +300,15 @@ pub fn available_providers() -> Vec<ProviderInfo> {
 /// Every provider, looking only in `search` (tests pass
 /// [`SearchLocations::nowhere`] to check a computer with nothing installed).
 pub fn available_providers_in(search: &SearchLocations) -> Vec<ProviderInfo> {
-    let word = if cfg!(feature = "word-layout") { "Word (.docx) with built-in layout; " } else { "" };
+    let (word, simplified) = if cfg!(feature = "word-processing") {
+        ("Word (.docx, .doc), RTF and OpenDocument text with built-in layout; ", "simple HTML")
+    } else if cfg!(feature = "word-layout") {
+        ("Word (.docx) with built-in layout; ", "OpenDocument text, simple HTML")
+    } else {
+        ("", "OpenDocument text, simple HTML")
+    };
     let spreadsheets = if cfg!(feature = "spreadsheet-print") { "Excel workbooks printed with their formatting; other spreadsheets and CSV as table exports" } else { "spreadsheets and CSV as table exports" };
-    let built_in_formats = format!("{word}OpenDocument text, simple HTML, Markdown and text as simplified documents; {spreadsheets}; pictures");
+    let built_in_formats = format!("{word}{simplified}, Markdown and text as simplified documents; {spreadsheets}; pictures");
     let mut providers = vec![ProviderInfo {
         provider: Provider::BuiltIn,
         available: true,
@@ -548,17 +572,39 @@ fn convert_built_in(input: &Path, format: InputFormat, options: &ConversionOptio
     };
     let read = || std::fs::read(input).with_context(|| format!("could not read {}", input.display()));
     match format {
-        #[cfg(feature = "word-layout")]
+        #[cfg(any(feature = "word-processing", feature = "word-layout"))]
         InputFormat::WordDocument => {
-            let converted = word_layout::convert(&read()?, cancellation)?;
-            let mut pdf = converted.pdf;
-            Ok(BuiltInConversion { pdf: pdf.to_bytes(&SaveSettings::default())?, engine: word_layout::ENGINE_NAME.to_string(), engine_version: Some(word_layout::ENGINE_VERSION.to_string()), fidelity: Fidelity::BuiltInLayout, warnings: converted.warnings })
+            let bytes = read()?;
+            // Why WordCraft didn't do the work, for the warnings when Oxi
+            // does it instead.
+            #[cfg(feature = "word-processing")]
+            let wordcraft_failure = match convert_with_wordcraft(&bytes, input, cancellation)? {
+                Ok(converted) => return Ok(converted),
+                Err(reason) => Some(reason),
+            };
+            #[cfg(not(feature = "word-processing"))]
+            let wordcraft_failure: Option<String> = None;
+            convert_with_oxi(&bytes, wordcraft_failure, cancellation)
         }
+        #[cfg(feature = "word-processing")]
+        InputFormat::LegacyWord => match convert_with_wordcraft(&read()?, input, cancellation)? {
+            Ok(converted) => Ok(converted),
+            Err(reason) => bail!("WordCraft couldn't lay this document out ({reason}); try LibreOffice or Microsoft Office instead"),
+        },
         InputFormat::OpenDocumentText => {
-            let document = odt::read_odt(&read()?)?;
+            let bytes = read()?;
+            #[cfg_attr(not(feature = "word-processing"), allow(unused_mut))]
+            let mut warnings = Vec::new();
+            #[cfg(feature = "word-processing")]
+            match convert_with_wordcraft(&bytes, input, cancellation)? {
+                Ok(converted) => return Ok(converted),
+                Err(reason) => warnings.push(format!("WordCraft couldn't lay this document out ({reason}); it was typeset as a simplified document instead.")),
+            }
+            let document = odt::read_odt(&bytes)?;
             cancellation.check()?;
             let pdf = flow::typeset(&document, &options.page, cancellation)?;
-            made_by_quintess(pdf, Fidelity::SimplifiedDocument, document.warnings)
+            warnings.extend(document.warnings);
+            made_by_quintess(pdf, Fidelity::SimplifiedDocument, warnings)
         }
         InputFormat::Html => {
             let document = html::read_html(&read()?, input.parent());
@@ -616,16 +662,53 @@ fn convert_built_in(input: &Path, format: InputFormat, options: &ConversionOptio
     }
 }
 
+/// Converts a word processing document with WordCraft's engine. The outer
+/// error ends the conversion (it was canceled, or the document has a
+/// password, which no built-in engine can open); the inner one is
+/// WordCraft's reason for failing, for the caller to fall back on another
+/// engine or report.
+#[cfg(feature = "word-processing")]
+fn convert_with_wordcraft(bytes: &[u8], input: &Path, cancellation: &Cancellation) -> Result<std::result::Result<BuiltInConversion, String>> {
+    use word_processing::WordProcessingFailure;
+    let extension = input.extension().map(|extension| extension.to_string_lossy().into_owned()).unwrap_or_default();
+    match word_processing::convert(bytes, &extension, cancellation) {
+        Ok(converted) => Ok(Ok(BuiltInConversion { pdf: converted.pdf, engine: word_processing::ENGINE_NAME.to_string(), engine_version: Some(word_processing::ENGINE_VERSION.to_string()), fidelity: Fidelity::BuiltInLayout, warnings: converted.warnings })),
+        Err(WordProcessingFailure::Canceled(error)) => Err(error),
+        Err(WordProcessingFailure::PasswordProtected) => bail!(word_processing::PASSWORD_PROTECTED),
+        Err(WordProcessingFailure::EngineFailed(reason)) => Ok(Err(reason)),
+    }
+}
+
+/// Lays a Word document out with Oxi's engine. `wordcraft_failure` is why
+/// WordCraft couldn't, said first among the warnings.
+#[cfg(feature = "word-layout")]
+fn convert_with_oxi(bytes: &[u8], wordcraft_failure: Option<String>, cancellation: &Cancellation) -> Result<BuiltInConversion> {
+    let converted = word_layout::convert(bytes, cancellation)?;
+    let mut pdf = converted.pdf;
+    let mut warnings = converted.warnings;
+    if let Some(reason) = wordcraft_failure {
+        warnings.insert(0, format!("WordCraft couldn't lay this document out ({reason}); used the Oxi layout engine instead."));
+    }
+    Ok(BuiltInConversion { pdf: pdf.to_bytes(&SaveSettings::default())?, engine: word_layout::ENGINE_NAME.to_string(), engine_version: Some(word_layout::ENGINE_VERSION.to_string()), fidelity: Fidelity::BuiltInLayout, warnings })
+}
+
+/// Without Oxi's engine there is nothing to fall back on.
+#[cfg(all(feature = "word-processing", not(feature = "word-layout")))]
+fn convert_with_oxi(_bytes: &[u8], wordcraft_failure: Option<String>, _cancellation: &Cancellation) -> Result<BuiltInConversion> {
+    bail!("WordCraft couldn't lay this document out ({}); try LibreOffice or Microsoft Office instead", wordcraft_failure.unwrap_or_default())
+}
+
 thread_local! {
     /// How many engine guards this thread is inside (see [`run_engine_guarded`]).
     static ENGINE_GUARD_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
-/// Runs a young third-party engine (Oxi's Word layout, GridCraft's
-/// spreadsheet engine) behind a panic guard: a document it can't handle
-/// gives back the panic's message instead of taking the program down.
-/// Unused only in builds without either engine's feature.
-#[cfg_attr(not(any(feature = "word-layout", feature = "spreadsheet-print")), allow(dead_code))]
+/// Runs a young third-party engine (WordCraft's word processing engine,
+/// Oxi's Word layout, GridCraft's spreadsheet engine) behind a panic guard:
+/// a document it can't handle gives back the panic's message instead of
+/// taking the program down. Unused only in builds without any engine's
+/// feature.
+#[cfg_attr(not(any(feature = "word-processing", feature = "word-layout", feature = "spreadsheet-print")), allow(dead_code))]
 pub(crate) fn run_engine_guarded<T>(work: impl FnOnce() -> T) -> std::result::Result<T, String> {
     ENGINE_GUARD_DEPTH.with(|depth| depth.set(depth.get() + 1));
     // Whatever the engine was in the middle of is thrown away with the

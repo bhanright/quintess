@@ -67,6 +67,18 @@ SOFTWARE."""
 # above each crate's manifest, and are printed once in their own section.
 GRIDCRAFT_CRATE_PREFIX = "gridcraft-"
 GRIDCRAFT_LICENSE_FILES = ["NOTICE", "LICENSE-MIT"]
+# WordCraft's library crates are compiled in the same way (feature
+# `word-processing`), with the same layout. They also compile in fonts
+# (Source Sans 3, Source Serif 4, Inter, JetBrains Mono; SIL Open Font
+# License, whose texts sit beside the fonts in assets/fonts) and hyphenation
+# data (assets/hyphenation): the US English word list and patterns (public
+# domain and CC0, said in its NOTICE), the Polish patterns (MIT) and the
+# Portuguese patterns (BSD 3-clause), whose notices are in the pattern files'
+# own headers and are copied from there.
+WORDCRAFT_CRATE_PREFIX = "wordcraft-"
+WORDCRAFT_LICENSE_FILES = ["NOTICE", "LICENSE-MIT"]
+WORDCRAFT_FONT_LICENSES = ["OFL-SourceSans3.txt", "OFL-SourceSerif4.txt", "OFL-Inter.txt", "OFL-JetBrainsMono.txt"]
+WORDCRAFT_HYPHENATION_PATTERNS = ["pl.pat", "pt.pat"]
 LICENSE_FILE_PREFIXES = ("license", "licence", "copying", "notice", "copyright")
 
 
@@ -106,6 +118,17 @@ CHANGED_BY_QUINTESS = {"lopdf"}
 
 def is_vendored(package):
     return package.get("source") is None and "/vendor/" in Path(package["manifest_path"]).as_posix()
+
+
+def pattern_file_header(path):
+    """The comment header of a TeX hyphenation pattern file (title,
+    copyright, authors and license), up to its first non-license field."""
+    header = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("%") or line.startswith("% hyphenmins:"):
+            break
+        header.append(line[1:].removeprefix(" ").rstrip())
+    return "\n".join(header).strip()
 
 
 def license_texts(folder):
@@ -148,6 +171,15 @@ def main():
         "GridCraft (the gridcraft-* crates), the built-in formatted spreadsheet printing: by the",
         "  ArtCraft Team and the GridCraft contributors, MIT OR Apache-2.0, from",
         "  https://github.com/storytold/gridcraft; its notice and MIT license are below.",
+        "WordCraft (the wordcraft-* crates), the built-in word processing converter: by the",
+        "  ArtCraft Team and the WordCraft contributors, MIT OR Apache-2.0, from",
+        "  https://github.com/storytold/wordcraft. It compiles in the fonts Source Sans 3 and",
+        "  Source Serif 4 (Adobe), Inter (The Inter Project Authors) and JetBrains Mono (The",
+        "  JetBrains Mono Project Authors), all under the SIL Open Font License 1.1, and",
+        "  hyphenation data: a US English word list from Grady Ward's Moby Hyphenator II (public",
+        "  domain) with patterns trained from it (CC0-1.0), and the Polish (MIT) and Portuguese",
+        "  (BSD 3-clause) patterns of the hyph-utf8 package. Its notice, MIT license, the fonts'",
+        "  licenses and the patterns' notices are below.",
         "Oxi (oxidocs, oxidocs-core, oxidocs-common), the built-in Word layout engine: MPL-2.0",
         "  (https://mozilla.org/MPL/2.0/); its source is at https://github.com/Ryujiyasu/oxi.",
         "Icons (built into the app, used where Segoe Fluent Icons is missing, as on Linux):",
@@ -182,6 +214,8 @@ def main():
         texts = license_texts(folder)
         if not texts and package["name"].startswith(GRIDCRAFT_CRATE_PREFIX):
             lines.append("Its notice and license are GridCraft's, in the GridCraft section at the end.")
+        elif not texts and package["name"].startswith(WORDCRAFT_CRATE_PREFIX):
+            lines.append("Its notice and license are WordCraft's, in the WordCraft section at the end.")
         elif not texts:
             lines.append(f"No license file is included in the crate; its declared license is {package.get('license')}.")
         for name, text in texts:
@@ -196,6 +230,15 @@ def main():
         lines += ["", "=" * 78, "GridCraft (the built-in formatted spreadsheet printing)", "=" * 78]
         for name in GRIDCRAFT_LICENSE_FILES:
             lines += ["", f"{name}:", "", (root / name).read_text(encoding="utf-8").strip()]
+    wordcraft_roots = sorted({Path(package["manifest_path"]).parents[2] for package in packages if package["name"].startswith(WORDCRAFT_CRATE_PREFIX)})
+    for root in wordcraft_roots:
+        lines += ["", "=" * 78, "WordCraft (the built-in word processing converter)", "=" * 78]
+        for name in WORDCRAFT_LICENSE_FILES:
+            lines += ["", f"{name}:", "", (root / name).read_text(encoding="utf-8").strip()]
+        for name in WORDCRAFT_FONT_LICENSES:
+            lines += ["", "-" * 78, f"Fonts compiled into WordCraft: assets/fonts/{name}", "-" * 78, (root / "assets" / "fonts" / name).read_text(encoding="utf-8").strip()]
+        for name in WORDCRAFT_HYPHENATION_PATTERNS:
+            lines += ["", "-" * 78, f"Hyphenation patterns compiled into WordCraft: assets/hyphenation/{name} (its header)", "-" * 78, pattern_file_header(root / "assets" / "hyphenation" / name)]
     lines += ["", "=" * 78, "PdfCraft (adapted packaging code)", "=" * 78, "", PDFCRAFT_NOTICE]
     icons = ROOT / "assets" / "fonts" / "quintess-icons.LICENSE.txt"
     lines += ["", "=" * 78, "Material Icons (the app's fallback icons)", "=" * 78, "", icons.read_text(encoding="utf-8").strip()]
@@ -223,7 +266,8 @@ def main():
         pdfcraft.read_text(encoding="utf-8").strip(),
     ]
     OUTPUT.parent.mkdir(exist_ok=True)
-    OUTPUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # LF line endings on every system, as the repository keeps them.
+    OUTPUT.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {OUTPUT} ({len(packages)} crates)")
 
 
