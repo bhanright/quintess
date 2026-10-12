@@ -155,7 +155,7 @@ jobs:
       - name: Flatpak tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder xvfb dbus-daemon cups cups-client
+          sudo apt-get install -y flatpak flatpak-builder xvfb dbus-daemon cups cups-client desktop-file-utils
           # Ubuntu 24.04 stops unprivileged programs from making user
           # namespaces, which bubblewrap (flatpak's sandbox) needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
@@ -167,6 +167,11 @@ jobs:
           # Mesa for the runtime, to draw under Xvfb (normally installed with the runtime).
           flatpak install --user -y --noninteractive flathub org.freedesktop.Platform.GL.default//26.08 || true
           flatpak info --user --show-permissions cc.quintess.Quintess
+          # The menu entry, PDF association and icons Flatpak exports to the desktop.
+          exports=~/.local/share/flatpak/exports/share
+          desktop-file-validate "$exports/applications/cc.quintess.Quintess.desktop"
+          cat "$exports/applications/cc.quintess.Quintess.desktop"
+          ls "$exports"/icons/hicolor/*/apps/cc.quintess.Quintess.png
           flatpak run cc.quintess.Quintess --version
           # The sandbox sees Documents (and Downloads), not the workspace.
           mkdir -p ~/.config ~/Documents
@@ -190,6 +195,9 @@ jobs:
           sudo systemctl restart cups
           sudo lpadmin -p QuintessTest -E -v file:///dev/null -m drv:///sample.drv/generic.ppd
           lpstat -p
+          # Which server the sandbox's CUPS client uses: the socket, not the network.
+          flatpak run --command=sh cc.quintess.Quintess -c 'ls -l /var/run/cups/; lpstat -H' | tee server.txt
+          grep -q "^/var/run/cups/cups.sock$" server.txt
           flatpak run cc.quintess.Quintess printers
           flatpak run cc.quintess.Quintess print ~/Documents/sample.pdf --printer QuintessTest
           sleep 5

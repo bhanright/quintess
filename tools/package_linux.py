@@ -312,12 +312,15 @@ def metainfo_text(version):
 
 def reverse_dns_desktop_file():
     """quintess.desktop with the icon named by APP_ID, for the AppImage,
-    whose desktop file and icon are named that way. The window's class stays
-    "quintess" (StartupWMClass), which is what the app sets."""
+    whose desktop file and icon are named that way. TryExec goes: no
+    `quintess` is on the PATH, and the tools that add an AppImage to the menu
+    rewrite Exec but not TryExec, which would hide the entry. The window's
+    class stays "quintess" (StartupWMClass), which is what the app sets."""
     text = (INSTALLER / "quintess.desktop").read_text(encoding="utf-8")
     if "\nIcon=quintess\n" not in text:
         raise SystemExit("installer/linux/quintess.desktop has no Icon=quintess line to rename")
-    return text.replace("\nIcon=quintess\n", f"\nIcon={APP_ID}\n")
+    text = text.replace("\nIcon=quintess\n", f"\nIcon={APP_ID}\n")
+    return "".join(line for line in text.splitlines(keepends=True) if not line.startswith("TryExec="))
 
 
 def write_checksum(path):

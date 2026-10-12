@@ -22,11 +22,23 @@ Download the installer (`Quintess-<version>-setup.exe`) from the releases page a
 
 ## Installing on Linux
 
-Quintess runs on 64-bit Linux with glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and newer. Download one of the two packages from the releases page at github.com/bhanright/quintess/releases.
+Quintess runs on 64-bit Linux with glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and newer. Download one of the four packages from the releases page at github.com/bhanright/quintess/releases: the .deb for apt systems, the tarball for any distribution, the AppImage to run without installing, or the Flatpak to run in a sandbox.
 
 **Debian, Ubuntu, Mint and other apt systems**: download `quintess_<version>_amd64.deb`, then in a terminal in that folder run `sudo apt install ./quintess_<version>_amd64.deb`. apt installs the libraries it needs. Quintess appears in your applications menu and under **Open with** for PDF files; the command is `quintess` (on its own or with files it opens the app, and followed by a command it is the command-line tool). Remove it with `sudo apt remove quintess`.
 
 **Any other distribution**: download `quintess-<version>-linux-x86_64.tar.gz`, unpack it with `tar -xzf quintess-<version>-linux-x86_64.tar.gz`, go into the `quintess-<version>-linux-x86_64` folder and run `./install.sh`. This installs for you only, into `~/.local` (the program in `~/.local/lib/quintess`, the `quintess` command in `~/.local/bin`, a menu entry and icons). `sudo ./install.sh --system` installs for everyone into `/opt/quintess` instead, with the command in `/usr/local/bin`. Remove it with `~/.local/lib/quintess/uninstall.sh` (or `sudo /opt/quintess/uninstall.sh`). The tarball needs `libspeechd2` (Fedora: `speech-dispatcher-libs`), which most desktops already have; `install.sh` names any missing library.
+
+**AppImage, nothing to install**: download `Quintess-<version>-x86_64.AppImage`, make it executable (`chmod +x Quintess-<version>-x86_64.AppImage`, or Properties ▸ Allow executing in your file manager) and run it. Followed by a command it is the command-line tool, as `quintess` is (`./Quintess-<version>-x86_64.AppImage --help`). The AppImage mounts itself with FUSE, which most desktops have (`libfuse2` or `fuse3`); where it's missing, the AppImage says so, and `./Quintess-<version>-x86_64.AppImage --appimage-extract-and-run` runs it without. It doesn't add itself to the applications menu or to **Open with**; tools such as Gear Lever or AppImageLauncher do that. The optional programs below work with it as with the other packages. To remove it, delete the file.
+
+**Flatpak, in a sandbox**: Flatpak must be installed, with the Flathub remote added (`flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`; most distributions' software stores have done this already). Download `Quintess-<version>-x86_64.flatpak`, then run `flatpak install --user Quintess-<version>-x86_64.flatpak`, which also fetches the freedesktop runtime from Flathub the first time. Quintess appears in your applications menu; from a terminal, `flatpak run cc.quintess.Quintess` starts it, and with a command after it, it is the command-line tool. Remove it with `flatpak uninstall --user cc.quintess.Quintess`. Printing and reading aloud are included, so the optional programs below aren't needed for those.
+
+**What the Flatpak sandbox changes**:
+
+- Files: Quintess can open and save any file you choose in its Open and Save dialogs or drop on its window. Without a dialog, it reaches only your Documents and Downloads folders: files named on the command line, recent files, **Search a folder**, a watched folder, and commands that write new files beside the original (such as splitting a document) work there. To let it reach your whole home folder, run `flatpak override --user --filesystem=home cc.quintess.Quintess`.
+- Printing goes to the printers set up on your computer, through CUPS.
+- Reading aloud needs `speech-dispatcher` installed on your computer, as outside the sandbox; Quintess can't start it from inside, so if nothing is read, start it with `speech-dispatcher -d` (most desktops start it when a program first asks).
+- Not available in the Flatpak: scanning (SANE isn't in the sandbox) and converting with LibreOffice or Chrome (Office documents, web pages), which are other programs the sandbox can't start. Quintess's built-in conversions work, and the AppImage, the .deb or the tarball do all of these.
+- Spelling dictionaries installed with the system (`/usr/share/hunspell`) aren't visible; the bundled ones are, and **Add a language…** in the spelling settings downloads others.
 
 Each download has a `.sha256` file beside it; `sha256sum -c quintess_<version>_amd64.deb.sha256` checks the download.
 
@@ -40,7 +52,7 @@ Each download has a `.sha256` file beside it; `sha256sum -c quintess_<version>_a
 - File dialogs on desktops without a portal: `zenity`.
 - Editing text in documents whose fonts aren't embedded: `fonts-liberation`, which match Arial, Times New Roman and Courier New in width.
 
-On apt systems the first ones are installed with Quintess unless you turned off recommended packages.
+On apt systems the first ones are installed with Quintess unless you turned off recommended packages. The AppImage includes what reading aloud needs on Quintess's side, but the voices still come from `speech-dispatcher` on your computer.
 
 **What differs from Windows**: there is no certificate store to sign from (use a .pfx or .p12 file), Microsoft Office can't convert documents (LibreOffice can), printing has no printer Properties dialog (choose the paper size in the Print dialog), and Quintess doesn't update itself.
 

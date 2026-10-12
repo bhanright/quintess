@@ -415,7 +415,15 @@ et.rs`): .pfx/.p12
   (+ `.sha256`) from `installer/linux/` (install.sh, uninstall.sh, the
   .desktop file) and `assets/linux/icons`; `.github/workflows/linux-release.yml`
   builds on Ubuntu 22.04 (glibc 2.35), runs the tests, installs both
-  packages and screenshots the app under Xvfb. Not on Linux: the Windows
+  packages and screenshots the app under Xvfb. AppImage and Flatpak
+  (app ID `cc.quintess.Quintess`; see docs/BUILDING.md): the AppImage from
+  `package_linux.py --appimage` (libspeechd bundled), the Flatpak bundle
+  from the tarball by `installer/linux/flatpak/build-bundle.sh`
+  (freedesktop 26.08; libspeechd and CUPS's lp built in; no scanning and no
+  LibreOffice or Chrome conversion inside the sandbox). Parts of the
+  Flatpak and AppStream files are adapted from PdfCraft (credited in their
+  headers and the notices). `system::linux_package()` tells the update
+  window which download to name. Not on Linux: the Windows
   certificate store (the Sign dialog hides it), Microsoft Office conversion
   (listed as "Windows only"), the printer Properties dialog, self-update.
   Verified only by cross-building from Windows with zig (this PC has

@@ -51,7 +51,26 @@ sudo ./install.sh --system # or for everyone, into /opt/quintess
 
 Remove it with `~/.local/lib/quintess/uninstall.sh` (or `sudo /opt/quintess/uninstall.sh`). The tarball needs `libspeechd2` (Fedora: `speech-dispatcher-libs`); `install.sh` names anything missing.
 
-Both put Quintess in the applications menu and under "Open with" for PDFs, with the command `quintess` (the app, or the command-line tool when followed by a command). Optional, per feature: `cups-client` (printing), `sane-utils` (scanning), `speech-dispatcher` (read aloud), LibreOffice (converting Office files), `xdg-utils` (opening links), `zenity` (file dialogs without a desktop portal), `fonts-liberation` (stand-in fonts when editing text). On Linux there is no certificate store to sign from (use a .pfx/.p12 file), no Microsoft Office conversion and no self-update; see [Installing on Linux](docs/USER_GUIDE.md#installing-on-linux) in the guide.
+AppImage, nothing to install:
+
+```sh
+chmod +x Quintess-<version>-x86_64.AppImage
+./Quintess-<version>-x86_64.AppImage            # the app
+./Quintess-<version>-x86_64.AppImage --help     # the command-line tool
+```
+
+It needs FUSE to mount itself (`libfuse2` or `fuse3`, present on most desktops); without it, run it with `--appimage-extract-and-run`. Tools such as Gear Lever or AppImageLauncher add it to the applications menu.
+
+Flatpak, in a sandbox:
+
+```sh
+flatpak install --user Quintess-<version>-x86_64.flatpak
+flatpak run cc.quintess.Quintess
+```
+
+It needs Flatpak and the Flathub remote (`flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`), from which it fetches the freedesktop runtime. Inside the sandbox it reaches your Documents and Downloads folders, and any file you pick in a dialog or drop on the window; scanning and converting with LibreOffice or Chrome don't work there (see the guide).
+
+The .deb and the tarball put Quintess in the applications menu and under "Open with" for PDFs, with the command `quintess` (the app, or the command-line tool when followed by a command). Optional, per feature: `cups-client` (printing), `sane-utils` (scanning), `speech-dispatcher` (read aloud), LibreOffice (converting Office files), `xdg-utils` (opening links), `zenity` (file dialogs without a desktop portal), `fonts-liberation` (stand-in fonts when editing text). On Linux there is no certificate store to sign from (use a .pfx/.p12 file), no Microsoft Office conversion and no self-update; see [Installing on Linux](docs/USER_GUIDE.md#installing-on-linux) in the guide.
 
 ## Privacy
 
@@ -59,7 +78,7 @@ Quintess never sends your documents anywhere. It goes online only when you ask: 
 
 ## Building from source
 
-See [docs/BUILDING.md](docs/BUILDING.md). In short: Rust, PDFium from pdfium-binaries in `vendor/pdfium` (Windows) or `vendor/pdfium-linux` (Linux), then `cargo build -j 6`. `python3 tools/package_linux.py` makes the Linux packages.
+See [docs/BUILDING.md](docs/BUILDING.md). In short: Rust, PDFium from pdfium-binaries in `vendor/pdfium` (Windows) or `vendor/pdfium-linux` (Linux), then `cargo build -j 6`. `python3 tools/package_linux.py` makes the Linux packages (with `--appimage`, the AppImage too), and `installer/linux/flatpak/build-bundle.sh` the Flatpak bundle from the tarball.
 
 ## License
 

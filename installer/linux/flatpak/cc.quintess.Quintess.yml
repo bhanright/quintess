@@ -89,13 +89,15 @@ modules:
 
   # CUPS's command-line client (lp, lpstat, lpoptions), Apache-2.0. The
   # runtime has libcups but not these programs. libcups is linked in
-  # statically, so nothing replaces the runtime's copy. Flatpak points them at
-  # the system's CUPS socket (CUPS_SERVER) when --socket=cups is granted.
+  # statically, so nothing replaces the runtime's copy. With --socket=cups,
+  # Flatpak puts the system's CUPS socket at /var/run/cups/cups.sock, which
+  # is where these look first (--with-domainsocket); /etc is the runtime's.
   - name: cups-client
     buildsystem: simple
     build-commands:
       - >-
-        ./configure --prefix=/app --disable-shared --with-tls=openssl --with-dnssd=no
+        ./configure --prefix=/app --sysconfdir=/etc --with-domainsocket=/var/run/cups/cups.sock
+        --disable-shared --with-tls=openssl --with-dnssd=no
         --disable-pam --disable-dbus --disable-gssapi --without-rcdir
       - make -C cups -j "$FLATPAK_BUILDER_N_JOBS" libcups.a
       - make -C systemv lp lpstat lpoptions
@@ -115,10 +117,11 @@ modules:
     build-commands:
       - mkdir -p /app/lib /app/bin && cp -R program /app/lib/quintess
       - ln -s ../lib/quintess/quintess /app/bin/quintess
-      # Flatpak exports only files named after the app ID.
+      # Flatpak exports only files named after the app ID. TryExec goes:
+      # outside the sandbox there is no `quintess` on the PATH.
       - >-
-        sed -e 's/^Icon=quintess$/Icon=cc.quintess.Quintess/' share/applications/quintess.desktop
-        > quintess-flatpak.desktop
+        sed -e 's/^Icon=quintess$/Icon=cc.quintess.Quintess/' -e '/^TryExec=/d'
+        share/applications/quintess.desktop > quintess-flatpak.desktop
       - install -Dm644 quintess-flatpak.desktop /app/share/applications/cc.quintess.Quintess.desktop
       - >-
         for icon in share/icons/hicolor/*/apps/quintess.png; do

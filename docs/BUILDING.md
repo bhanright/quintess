@@ -117,6 +117,28 @@ built on Ubuntu 22.04 (glibc 2.35) by `.github/workflows/linux-release.yml`,
 which also installs both packages, takes self-check screenshots under Xvfb
 and attaches the packages to the release on version tags.
 
+AppImage: `python3 tools/package_linux.py --appimage --appimagetool FILE
+--appimage-runtime FILE` also writes `Quintess-<version>-x86_64.AppImage`
+(+ `.sha256`). It needs `patchelf` and `libspeechd2` on the build system, and
+appimagetool 1.9.1 and the type2-runtime release 20251108 (the workflow
+downloads both and checks their checksums). The AppDir is the tarball's
+program folder under `usr/lib/quintess`, plus the build system's
+`libspeechd.so.2` (the program's RUNPATH is set to `$ORIGIN` in that copy
+only), `installer/linux/appimage/AppRun`, and the desktop file, icons and
+AppStream metadata named `cc.quintess.Quintess`.
+
+Flatpak: `installer/linux/flatpak/build-bundle.sh quintess-<version>-linux-x86_64.tar.gz`
+writes `Quintess-<version>-x86_64.flatpak` (+ `.sha256`) beside the tarball.
+It needs `flatpak` and `flatpak-builder`; the manifest,
+`installer/linux/flatpak/cc.quintess.Quintess.yml`, repackages the tarball
+against org.freedesktop.Platform 26.08 and builds libspeechd and CUPS's
+`lp`, `lpstat` and `lpoptions`, which the runtime lacks. Its permissions are
+explained in its comments, and notes at its end list what a from-source
+Flathub submission needs. The workflow builds both, runs them under Xvfb
+(the AppImage with `--appimage-extract-and-run`, as runners have no FUSE)
+and sends a print job from inside the Flatpak to a CUPS queue on the runner.
+The metadata template is `installer/linux/cc.quintess.Quintess.metainfo.xml.in`.
+
 From Windows, the Linux program can be cross-built (not run) with zig:
 `pip install ziglang cargo-zigbuild libclang`, the headers and library of
 Ubuntu's `libspeechd-dev`/`libspeechd2` unpacked into a sysroot, then
