@@ -21,3 +21,6 @@ tts = "0.26.3"
 
 [dev-dependencies]
 ttf-parser = "0.25"
+# Waits on wgpu calls in the renderer start-up tests (src/window_start.rs);
+# the version eframe already uses.
+pollster = "1.0.1"

@@ -49,6 +49,14 @@ the programs start without the Visual C++ redistributable). To build on
 another drive, make `target` a directory junction to a folder there
 (`mklink /J target E:\QuintessBuild`), as the author does.
 
+Two crates are built from patched copies in the repository rather than
+from crates.io: `vendor/winit` and `vendor/egui-wgpu` (window and input
+fixes, taken from PdfCraft; `[patch.crates-io]` in `Cargo.toml`). They are
+part of the source, unlike the PDFium and OCR downloads beside them, and
+need no extra step. `vendor/README.md` lists the patches and when to drop
+the copies; `crates/quintess-app/tests/vendored_window_crates.rs` fails if
+Cargo stops using them or a patch goes missing.
+
 The OCR test runs only when the OCR models are present (installed, or
 downloaded once by `quintess ocr`); tests never use the network.
 
