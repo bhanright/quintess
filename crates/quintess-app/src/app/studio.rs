@@ -382,14 +382,14 @@ impl QuintessApp {
                     ui.horizontal(|ui| {
                         let (dot, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                         ui.painter().circle_filled(dot.center(), 3.5, colors.success);
-                        ui.label(RichText::new(format!("v{}  ·  works offline  ·  no account", env!("CARGO_PKG_VERSION"))).size(11.5).color(colors.text_muted));
+                        ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).size(11.5).color(colors.text_muted));
                     });
                 });
             });
             ui.add_space(18.0);
             ui.label(RichText::new("PDFs, without the friction.").family(theme::display_family()).size(46.0).color(colors.text));
             ui.add_space(6.0);
-            ui.label(RichText::new("Edit text, sign, redact, fill and automate. Everything runs on your machine.").size(15.0).color(colors.text_muted));
+            ui.label(RichText::new("Edit text, sign, redact, fill and automate.").size(15.0).color(colors.text_muted));
             ui.add_space(26.0);
             ui.horizontal(|ui| {
                 let buttons_width = 420.0;

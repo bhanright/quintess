@@ -617,8 +617,9 @@ When a signer isn't trusted, the result offers **Trust…** with the certificate
 
 ## Text, Word, Markdown and web pages
 
-- **File ▸ Export as ▸ Word document (.docx)…** makes Word pages that look like the PDF's. Each page keeps its size, and what it draws (colored areas, lines, pictures) becomes the page's background. The text goes on top, in the PDF's fonts, sizes and colors, where it stood, and you can edit it in Word. Shapes and pictures can't be moved separately. Rotated text stays part of the background. If you don't have a font the PDF uses, Word puts a similar one in its place, so lines can come out a little longer or shorter.
-- **Word, text only (.docx)…**, **Markdown (.md)…** and **Web page (.html)…** rebuild the text into headings, paragraphs and lists from the page layout, with the pictures. The result is meant for reuse, not an exact copy of the pages. Markdown puts its pictures in a folder beside the file.
+- **File ▸ Export as ▸ Word document (.docx)…** makes Word pages that look like the PDF's. Each page keeps its size, and what it draws (colored areas, lines, pictures) becomes the page's background. The text goes on top, in the PDF's fonts, sizes and colors, where it stood, and you can edit it in Word. Shapes and pictures can't be moved separately. Rotated text stays part of the background. Letters are spaced so each line is as long as in the PDF. When the PDF's font isn't installed, Word uses a similar one, and if that isn't Arial, Times New Roman or Courier New, lines can come out a little longer or shorter.
+- **Web page (.html)…** does the same for a web page: each page is a picture of what it draws, with real text on top that you can select, search and copy. Pages shrink to fit a narrow window. The pictures are inside the one file.
+- **Word, text only (.docx)…**, **Web page, text only (.html)…** and **Markdown (.md)…** rebuild the text into headings, paragraphs and lists from the page layout, with the pictures. The result is meant for reuse, not an exact copy of the pages. Markdown puts its pictures in a folder beside the file.
 - **File ▸ Export ▸ Text…** saves the plain text.
 
 ## Pictures
@@ -639,9 +640,11 @@ Limits: numbers in European formats (`1.234,56`) stay as text, and `1.234` meani
 ## PowerPoint
 
 - **PowerPoint, page pictures (.pptx)…** makes one slide per page, each a picture of the page at 150 dpi.
-- **PowerPoint, editable (.pptx)…** builds real text boxes, pictures and lines instead, which you can edit but which may differ from the original. Text color isn't kept: all text is black.
+- **PowerPoint, editable (.pptx)…** makes slides that look like the pages, the way the Word export does: what each page draws is the slide's background picture, and the text is in text boxes on top, in its fonts, sizes and colors, which you can edit.
 
-From the command line: `quintess tables report.pdf` lists the tables found (`--json` for positions and spans); `quintess export report.pdf -f xlsx` (`--tables-only`), `-f csv` (`--table 2` for one table) and `-f pptx` (`--editable`, `--dpi`).
+A presentation has one slide size: the size most of the pages share. Pages of another size are fitted inside it, centered.
+
+From the command line: `quintess tables report.pdf` lists the tables found (`--json` for positions and spans); `quintess export report.pdf -f xlsx` (`--tables-only`), `-f csv` (`--table 2` for one table), `-f pptx` (`--editable`, `--dpi`), `-f docx` and `-f html` (`--flowing` for the text-only versions, `--dpi`).
 
 # Attachments, portfolios and media
 

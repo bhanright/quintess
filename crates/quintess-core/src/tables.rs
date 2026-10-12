@@ -209,7 +209,6 @@ pub(crate) struct Segment {
     pub font_size: f32,
     pub bold: bool,
     pub italic: bool,
-    pub font_name: String,
 }
 
 /// One visual line of a page, left to right.
@@ -306,7 +305,7 @@ fn lines_from_chars(chars: &[&TextChar]) -> Vec<SegmentLine> {
                     segment.bold &= item.bold;
                     segment.italic &= item.italic;
                 }
-                _ => segments.push(Segment { text: item.character.to_string(), rect: item.rect, font_size: size, bold: item.bold, italic: item.italic, font_name: item.font_name.clone() }),
+                _ => segments.push(Segment { text: item.character.to_string(), rect: item.rect, font_size: size, bold: item.bold, italic: item.italic }),
             }
         }
         if let Some(rect) = segments.iter().map(|s| s.rect).reduce(union) {

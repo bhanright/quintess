@@ -142,6 +142,37 @@ pub fn is_readable_face(data: &[u8], index: u32) -> bool {
     ttf_parser::Face::parse(data, index).is_ok()
 }
 
+/// The family name of an installed font, from a PostScript name as a PDF
+/// gives it ("DejaVuSansCondensed-Bold" finds "DejaVu Sans Condensed").
+/// Many fonts' files are named after their PostScript name, so the file is
+/// found by name, then its own name table gives the family. `None` when no
+/// such file is installed. Answers are kept, since exports ask for every
+/// character.
+pub fn family_of_postscript_name(postscript_name: &str) -> Option<String> {
+    static FOUND: OnceLock<std::sync::Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    let found = FOUND.get_or_init(Default::default);
+    if let Some(known) = found.lock().ok()?.get(postscript_name) {
+        return known.clone();
+    }
+    let base = postscript_name.split(['-', ',']).next().unwrap_or(postscript_name);
+    let family = [postscript_name, base]
+        .iter()
+        .flat_map(|name| ["ttf", "otf"].map(|extension| format!("{name}.{extension}")))
+        .find_map(|file_name| find(&file_name))
+        .and_then(|path| {
+            let data = std::fs::read(path).ok()?;
+            let face = ttf_parser::Face::parse(&data, 0).ok()?;
+            // The plain family, the name Word and PowerPoint look for; the
+            // typographic family can fold widths together ("DejaVu Sans"
+            // for the Condensed faces too), which would pick the wrong one.
+            face.names().into_iter().filter(|name| name.name_id == ttf_parser::name_id::FAMILY && name.is_unicode()).find_map(|name| name.to_string())
+        });
+    if let Ok(mut found) = found.lock() {
+        found.insert(postscript_name.to_string(), family.clone());
+    }
+    family
+}
+
 /// The first of these file names that is installed.
 pub fn find_first(file_names: &[&str]) -> Option<PathBuf> {
     file_names.iter().find_map(|name| find(name))

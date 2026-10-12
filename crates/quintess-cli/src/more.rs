@@ -41,11 +41,11 @@ pub enum MoreCommand {
         /// The file to write; for csv without --table, the folder for one file per table.
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Leave images out of Markdown, HTML and flowing Word output.
+        /// Leave images out of Markdown and flowing HTML and Word output.
         #[arg(long)]
         no_images: bool,
-        /// docx: the text alone, as flowing headings and paragraphs, instead
-        /// of each page's layout with the text set where it stands.
+        /// docx and html: the text alone, as flowing headings and paragraphs,
+        /// instead of each page's layout with the text set where it stands.
         #[arg(long)]
         flowing: bool,
         /// xlsx: only the detected tables, one per sheet ("Page 3 table 1"),
@@ -58,7 +58,7 @@ pub enum MoreCommand {
         /// pptx: text boxes, pictures and lines you can edit.
         #[arg(long)]
         editable: bool,
-        /// pptx pictures and docx page backgrounds: resolution of the pictures.
+        /// pptx, docx and html: resolution of the page pictures and backgrounds.
         #[arg(long, default_value_t = 150.0)]
         dpi: f32,
         /// csv: write only this table (its number from `quintess tables`) to one file.
@@ -678,9 +678,13 @@ pub fn run(command: MoreCommand) -> Result<()> {
                     println!("wrote {}", path.display());
                 }
                 "html" => {
-                    let structure = convert::analyze(&document, !no_images)?;
                     let path = target("html");
-                    quintess_core::document::write_file_safely(&path, convert::to_html(&structure, &stem).as_bytes())?;
+                    let html = if flowing {
+                        convert::to_html(&convert::analyze(&document, !no_images)?, &stem)
+                    } else {
+                        quintess_core::html_export::document_to_html_with_layout(&document, &stem, &quintess_core::html_export::HtmlLayoutSettings { background_dpi: dpi })?
+                    };
+                    quintess_core::document::write_file_safely(&path, html.as_bytes())?;
                     println!("wrote {}", path.display());
                 }
                 "docx" | "word" => {

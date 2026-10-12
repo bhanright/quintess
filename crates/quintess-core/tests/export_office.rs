@@ -317,7 +317,9 @@ fn exports_editable_slides_with_the_page_text() {
     // Size 16 points is 1600 hundredths.
     assert!(first.contains("sz=\"1600\""));
     let second = zip_text(&bytes, "ppt/slides/slide2.xml");
-    assert!(second.contains("Anchor plate with") && second.contains("<p:cxnSp>"), "the second slide has its text and its ruling lines");
+    // The ruling lines are in the slide's background picture, the text on top.
+    assert!(second.contains("Anchor plate with") && second.contains("<p:pic>"), "the second slide has its text and its background");
+    assert!(entries.iter().any(|e| e.starts_with("ppt/media/image2.")), "each slide has a background picture");
     // US Letter, in EMUs.
     let presentation = zip_text(&bytes, "ppt/presentation.xml");
     assert!(presentation.contains("cx=\"7772400\" cy=\"10058400\""), "{presentation}");
@@ -405,4 +407,25 @@ fn exports_word_pages_that_keep_the_layout() {
     assert!(band_is_plain_red, "the white text was taken out of the background");
     let turned_text_drawn = (488..502).flat_map(|x| (400..500).map(move |y| (x, y))).any(|(x, y)| background.get_pixel(x, y).0[0] < 128);
     assert!(turned_text_drawn, "the turned text stays in the background");
+}
+
+/// A web page with the layout kept: the band's white text is real text on
+/// top of a background picture, and positions scale with the page.
+#[test]
+fn exports_web_pages_that_keep_the_layout() {
+    let mut banner = String::from("1 0 0 rg 72 680 300 60 re f
+");
+    banner += "1 1 1 rg BT /F2 24 Tf 90 700 Td (WHITE & RED) Tj ET
+";
+    let document = open(pdf_with_pages(&[banner, unruled_page()]));
+    let html = quintess_core::html_export::document_to_html_with_layout(&document, "Banner <test>", &quintess_core::html_export::HtmlLayoutSettings { background_dpi: 72.0 }).unwrap();
+    std::fs::write(folder().join("layout.html"), &html).unwrap();
+    assert!(html.contains("<title>Banner &lt;test&gt;</title>"));
+    assert_eq!(html.matches("<section class=\"page\"").count(), 2);
+    assert_eq!(html.matches("<img src=\"data:image/").count(), 2);
+    // Escaped text, in its color and weight; 90 points of a 612-point page
+    // is 14.7059% from the left.
+    for expected in ["WHITE &amp; RED", "color: #ffffff;", "font-weight: bold;", "left: 14.7059%", "Quarterly results"] {
+        assert!(html.contains(expected), "the web page lacks {expected}");
+    }
 }

@@ -1236,7 +1236,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     fn start_export(&mut self, ctx: &egui::Context, format: &'static str) {
         let Some((_, bytes, password, title)) = self.job_input() else { return };
         let stem = title.trim_end_matches(".pdf").to_string();
-        // "tables.xlsx", "editable.pptx" and "flowing.docx" are variants of the same file type.
+        // "tables.xlsx", "editable.pptx", "flowing.docx" and "flowing.html" are variants of the same file type.
         let extension = format.rsplit('.').next().unwrap_or(format);
         let path = if format == "csv" {
             // One file per table, so pick a folder.
@@ -1249,6 +1249,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             let document = quintess_core::engine::open_document(bytes.as_ref().clone(), password.as_deref())?;
             match format {
                 "docx" => return write_export(&path, quintess_core::word_export::document_to_docx_with_layout(&document, &Default::default())?),
+                "html" => return write_export(&path, quintess_core::html_export::document_to_html_with_layout(&document, &stem, &Default::default())?.into_bytes()),
                 "xlsx" => return write_export(&path, quintess_core::spreadsheet::document_to_xlsx(&document)?),
                 "tables.xlsx" => return write_export(&path, quintess_core::spreadsheet::document_tables_to_xlsx(&document)?),
                 "pptx" | "editable.pptx" => {
@@ -1273,7 +1274,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             // Through a temporary file, so a failure midway never leaves half a file.
             let bytes = match format {
                 "flowing.docx" => quintess_core::convert::to_docx(&structure)?,
-                "html" => quintess_core::convert::to_html(&structure, &stem).into_bytes(),
+                "flowing.html" => quintess_core::convert::to_html(&structure, &stem).into_bytes(),
                 _ => {
                     let folder = path.with_file_name(format!("{stem}-images"));
                     let link = format!("{stem}-images/");

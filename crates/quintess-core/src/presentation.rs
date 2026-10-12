@@ -6,10 +6,13 @@
 //!
 //! - [`SlideMode::Pictures`]: each page is rendered and placed as one
 //!   full-slide picture, so the look is exact and nothing is editable.
-//! - [`SlideMode::Editable`]: each text segment becomes a positioned text
-//!   box with the page's font size, bold and italic, embedded pictures are
-//!   placed where they were, and ruling lines become line shapes, all on a
-//!   white slide.
+//! - [`SlideMode::Editable`]: the page split into layers by
+//!   [`crate::page_layers`]: what it draws (shapes, fills, rules, pictures)
+//!   is a picture filling the slide, and the text goes on top in text boxes
+//!   placed where each line stood, in its font, size, weight and color.
+//!
+//! A presentation has one slide size. It is the size most pages share, and
+//! pages of other sizes are fitted inside it, centered.
 
 use std::io::{Cursor, Write};
 
@@ -19,21 +22,21 @@ use pdfium_render::prelude::PdfDocument;
 use zip::write::SimpleFileOptions;
 
 use crate::engine::{self, RenderOptions};
-use crate::images::{ExtractedImage, extract_images};
-use crate::tables::{page_rules, segment_lines};
+use crate::page_layers::{TextFrame, layered_page};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlideMode {
     /// Each page as one picture.
     Pictures,
-    /// Text boxes, pictures and lines.
+    /// Each page's drawing as a picture, with its text in text boxes on top.
     Editable,
 }
 
 #[derive(Clone, Debug)]
 pub struct PresentationSettings {
     pub mode: SlideMode,
-    /// Resolution of the page pictures in [`SlideMode::Pictures`].
+    /// Resolution of the page pictures, and of the backgrounds in
+    /// [`SlideMode::Editable`].
     pub picture_dpi: f32,
 }
 
@@ -49,6 +52,11 @@ const EMU_PER_POINT: f64 = 12_700.0;
 const MAXIMUM_SLIDE_EMU: f64 = 51_206_400.0;
 /// Opaque pictures with more pixels than this are stored as JPEG.
 const JPEG_PIXEL_THRESHOLD: u64 = 2_000_000;
+/// Line height of a text box's paragraph, in font sizes.
+const LINE_HEIGHT_IN_FONT_SIZES: f32 = 1.2;
+/// Where PowerPoint puts the baseline in a line of exact height: this many
+/// font sizes below the top of the box.
+const BASELINE_DROP_IN_FONT_SIZES: f32 = 0.96;
 
 const NAMESPACES: &str = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#;
 const RELATIONSHIP_BASE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -70,9 +78,9 @@ pub(crate) fn escape(text: &str) -> String {
     escaped
 }
 
-/// The font family to ask PowerPoint for, from the name inside the PDF
-/// ("ABCDEF+Arial-BoldMT" becomes "Arial"); PowerPoint substitutes a
-/// similar font when the family is not installed.
+/// The font family to ask PowerPoint or Word for, from the name inside the
+/// PDF ("ABCDEF+Arial-BoldMT" becomes "Arial"); they substitute a similar
+/// font when the family is not installed.
 pub(crate) fn font_family(pdf_font_name: &str) -> String {
     let without_subset = match pdf_font_name.split_once('+') {
         Some((prefix, rest)) if prefix.len() == 6 && prefix.chars().all(|c| c.is_ascii_uppercase()) => rest,
@@ -86,6 +94,10 @@ pub(crate) fn font_family(pdf_font_name: &str) -> String {
         "Times New Roman".to_string()
     } else if lower.starts_with("courier") {
         "Courier New".to_string()
+    } else if let Some(installed) = crate::system_fonts::family_of_postscript_name(without_subset) {
+        // "DejaVuSansCondensed" is installed as "DejaVu Sans Condensed",
+        // the name the office programs look for.
+        installed
     } else {
         let trimmed = base.trim_end_matches("PSMT").trim_end_matches("MT").trim_end_matches("PS");
         if trimmed.is_empty() { "Arial".to_string() } else { trimmed.to_string() }
@@ -121,24 +133,40 @@ impl Slide {
         ));
     }
 
-    fn add_text_box(&mut self, text: &str, font: &str, size_points: f32, bold: bool, italic: bool, [x, y, width, height]: [i64; 4]) {
+    /// A text box holding one frame's line, its runs in their own fonts,
+    /// sizes and colors. It never wraps, so a wider stand-in font can't push
+    /// words onto a second line.
+    fn add_text_frame(&mut self, frame: &TextFrame, left: i64, top: i64, emu_per_point: f64) {
         let id = self.take_id();
+        let line_height = frame.largest_font_size * LINE_HEIGHT_IN_FONT_SIZES;
+        let characters: usize = frame.runs.iter().map(|run| run.text.chars().count()).sum();
+        // An estimate; the box doesn't wrap, so its width only matters when it is selected.
+        let width = (f64::from(frame.largest_font_size) * 0.55 * characters as f64 * emu_per_point).round().max(1.0) as i64;
+        let height = (f64::from(line_height) * emu_per_point).round().max(1.0) as i64;
+        let mut runs = String::new();
+        for run in &frame.runs {
+            let style = &run.style;
+            let [red, green, blue] = style.color;
+            // PowerPoint picks a similar installed font from the kind of font.
+            let pitch_family = match style.stand_in {
+                "Times New Roman" => 18,
+                "Courier New" => 49,
+                _ => 34,
+            };
+            runs.push_str(&format!(
+                r#"<a:r><a:rPr lang="en-US" sz="{}" b="{}" i="{}" spc="{}" dirty="0"><a:solidFill><a:srgbClr val="{red:02X}{green:02X}{blue:02X}"/></a:solidFill><a:latin typeface="{family}" pitchFamily="{pitch_family}"/><a:cs typeface="{family}" pitchFamily="{pitch_family}"/></a:rPr><a:t>{}</a:t></a:r>"#,
+                (style.size_points * 100.0).round().clamp(100.0, 400_000.0) as i64,
+                u8::from(style.bold),
+                u8::from(style.italic),
+                // Letter spacing in hundredths of a point, so the run is as long as in the PDF.
+                (run.letter_spacing_points * 100.0).round() as i64,
+                escape(&run.text),
+                family = escape(&style.family),
+            ));
+        }
         self.shapes.push_str(&format!(
-            r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="Text {id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="l"/><a:r><a:rPr lang="en-US" sz="{}" b="{}" i="{}" dirty="0"><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:latin typeface="{}"/><a:cs typeface="{}"/></a:rPr><a:t>{}</a:t></a:r></a:p></p:txBody></p:sp>"#,
-            (size_points * 100.0).round().clamp(100.0, 400_000.0) as i64,
-            u8::from(bold),
-            u8::from(italic),
-            escape(font),
-            escape(font),
-            escape(text)
-        ));
-    }
-
-    /// A straight line; the box is `width` by `height` EMUs with one of them zero.
-    fn add_line(&mut self, [x, y, width, height]: [i64; 4]) {
-        let id = self.take_id();
-        self.shapes.push_str(&format!(
-            r#"<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="{id}" name="Line {id}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="9525"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></p:spPr></p:cxnSp>"#
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="Text {id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="{left}" y="{top}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="l"><a:lnSpc><a:spcPts val="{}"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft></a:pPr>{runs}</a:p></p:txBody></p:sp>"#,
+            (line_height * 100.0).round().max(100.0) as i64
         ));
     }
 
@@ -174,14 +202,29 @@ pub(crate) fn encode_picture(picture: &DynamicImage) -> Result<(Vec<u8>, &'stati
     }
 }
 
+/// The page size most pages share, in points; the earliest such page's
+/// size when there is a tie.
+fn most_common_size(sizes: &[(f32, f32)]) -> Option<(f32, f32)> {
+    let rounded = |(width, height): (f32, f32)| (width.round() as i64, height.round() as i64);
+    let count = |size: (f32, f32)| sizes.iter().filter(|other| rounded(**other) == rounded(size)).count();
+    let mut best: Option<((f32, f32), usize)> = None;
+    for &size in sizes {
+        let pages = count(size);
+        if best.is_none_or(|(_, most)| pages > most) {
+            best = Some((size, pages));
+        }
+    }
+    best.map(|(size, _)| size)
+}
+
 /// Builds the .pptx for a document.
 pub fn document_to_pptx(document: &PdfDocument, settings: &PresentationSettings) -> Result<Vec<u8>> {
     let sizes = engine::page_sizes(document);
-    let all_images = if settings.mode == SlideMode::Editable { extract_images(document, 8)? } else { Vec::new() };
-
-    // Slide size follows the first page (PowerPoint has one size per file);
-    // other pages are scaled to fit it, keeping their proportions.
-    let (first_width, first_height) = sizes.first().copied().unwrap_or((612.0, 792.0));
+    // Slide size follows the size most pages share (PowerPoint has one size
+    // per file), so a document of portrait pages with a few landscape ones
+    // gets portrait slides; other pages are scaled to fit, keeping their
+    // proportions.
+    let (first_width, first_height) = most_common_size(&sizes).unwrap_or((612.0, 792.0));
     let scale_down = (MAXIMUM_SLIDE_EMU / (f64::from(first_width.max(first_height)) * EMU_PER_POINT)).min(1.0);
     let emu_per_point = EMU_PER_POINT * scale_down;
     let slide_width = (f64::from(first_width) * emu_per_point).round() as i64;
@@ -208,30 +251,18 @@ pub fn document_to_pptx(document: &PdfDocument, settings: &PresentationSettings)
                 slide.add_picture(name, &format!("Page {}", page_index + 1), [to_x(0.0), to_y(page_height), to_length(page_width), to_length(page_height)]);
             }
             SlideMode::Editable => {
-                let page = document.pages().get(page_index as i32)?;
-                let text = engine::page_text(document, page_index)?;
-                // Back to front: pictures, then lines, then text.
-                let on_page: Vec<&ExtractedImage> = all_images.iter().filter(|image| image.page_number as usize == page_index + 1).collect();
-                for (picture_number, extracted) in on_page.iter().enumerate() {
-                    let [left, bottom, right, top] = extracted.bounds;
-                    let (bytes, extension) = encode_picture(&extracted.image)?;
-                    let name = format!("image{}.{extension}", media_files.len() + 1);
-                    media_files.push((name.clone(), bytes));
-                    slide.add_picture(name, &format!("Picture {} on page {}", picture_number + 1, page_index + 1), [to_x(left), to_y(top), to_length(right - left), to_length(top - bottom)]);
-                }
-                let rules = page_rules(&page);
-                for rule in &rules.horizontal {
-                    slide.add_line([to_x(rule.start), to_y(rule.across), to_length(rule.end - rule.start), 0]);
-                }
-                for rule in &rules.vertical {
-                    slide.add_line([to_x(rule.across), to_y(rule.end), 0, to_length(rule.end - rule.start)]);
-                }
-                for line in segment_lines(&text) {
-                    for segment in &line.segments {
-                        let [left, bottom, right, top] = segment.rect;
-                        let height = (top - bottom).max(segment.font_size * 1.2);
-                        slide.add_text_box(&segment.text, &font_family(&segment.font_name), segment.font_size * fit as f32, segment.bold, segment.italic, [to_x(left), to_y(top), to_length(right - left), to_length(height)]);
-                    }
+                let layers = layered_page(document, page_index, settings.picture_dpi)?;
+                let (bytes, extension) = encode_picture(&layers.background)?;
+                let name = format!("image{}.{extension}", media_files.len() + 1);
+                media_files.push((name.clone(), bytes));
+                slide.add_picture(name, &format!("Page {}", page_index + 1), [to_x(0.0), to_y(page_height), to_length(page_width), to_length(page_height)]);
+                for frame in &layers.frames {
+                    let frame = frame.scaled(fit as f32);
+                    // The frame is measured from the page's top left; the
+                    // slide places the fitted page at its offset.
+                    let left = ((f64::from(frame.left) + offset_x) * emu_per_point).round() as i64;
+                    let top = ((f64::from(frame.baseline_from_top - frame.largest_font_size * BASELINE_DROP_IN_FONT_SIZES) + offset_y) * emu_per_point).round() as i64;
+                    slide.add_text_frame(&frame, left, top, emu_per_point);
                 }
             }
         }
@@ -345,4 +376,19 @@ fn theme_xml() -> String {
         font("majorFont"),
         font("minorFont")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slides_take_the_size_most_pages_share() {
+        let portrait = (612.0, 792.0);
+        let landscape = (792.0, 612.0);
+        assert_eq!(most_common_size(&[landscape, portrait, portrait, landscape, portrait]), Some(portrait));
+        // A tie goes to the earliest page's size.
+        assert_eq!(most_common_size(&[landscape, portrait]), Some(landscape));
+        assert_eq!(most_common_size(&[]), None);
+    }
 }
