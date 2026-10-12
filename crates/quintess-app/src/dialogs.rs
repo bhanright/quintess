@@ -847,6 +847,16 @@ fn form_merge_body(ui: &mut egui::Ui, merge: &mut FormMergeDialog, tab: &mut Doc
 }
 
 /// Standard OK / Cancel row; returns true when OK was pressed.
+/// Whether Enter was pressed in a single-line text field this frame.
+///
+/// Checking only `lost_focus()` misses it in dialogs that call
+/// `request_focus()` every frame: the field gives up focus on Enter and takes
+/// it straight back, so it never reports losing it. Enter while the field
+/// still has focus counts too.
+pub(crate) fn pressed_enter_in(ui: &egui::Ui, response: &egui::Response) -> bool {
+    (response.has_focus() || response.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter))
+}
+
 pub(crate) fn buttons(ui: &mut egui::Ui, ok_label: &str, outcome: &mut DialogOutcome) -> bool {
     ui.separator();
     let mut ok = false;
@@ -1178,7 +1188,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 ui.checkbox(match_case, "Match case");
                 ui.checkbox(use_regex, "Regular expression");
             });
-            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let pressed_enter = pressed_enter_in(ui, &response);
             if buttons(ui, "Search", outcome) || pressed_enter {
                 let folder = folder.clone().ok_or_else(|| anyhow::anyhow!("choose a folder to search"))?;
                 if text.trim().is_empty() {
@@ -1481,7 +1491,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             if !error.is_empty() {
                 ui.colored_label(egui::Color32::from_rgb(200, 60, 60), error.as_str());
             }
-            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let pressed_enter = pressed_enter_in(ui, &response);
             if buttons(ui, "Open", outcome) || pressed_enter {
                 outcome.requests.push(AppRequest::UnlockAndOpen { path: path.clone(), bytes: bytes.clone(), password: password.clone() });
                 outcome.keep_open = false;
@@ -1517,7 +1527,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             if !error.is_empty() {
                 ui.colored_label(egui::Color32::from_rgb(200, 60, 60), error.as_str());
             }
-            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let pressed_enter = pressed_enter_in(ui, &response);
             if buttons(ui, "Compare", outcome) || pressed_enter {
                 outcome.requests.push(AppRequest::CompareWithPassword { path: path.clone(), password: password.clone() });
                 outcome.keep_open = false;
@@ -1531,7 +1541,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
             if !error.is_empty() {
                 ui.colored_label(egui::Color32::from_rgb(200, 60, 60), error.as_str());
             }
-            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let pressed_enter = pressed_enter_in(ui, &response);
             if buttons(ui, "Remove protection", outcome) || pressed_enter {
                 outcome.requests.push(AppRequest::RemoveProtection { owner_password: password.clone() });
                 outcome.keep_open = false;
@@ -2497,7 +2507,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
         Dialog::GoToPage { text } => {
             let response = ui.add(egui::TextEdit::singleline(text).hint_text(format!("1 to {}, or a page label", tab.pages.len())));
             response.request_focus();
-            let pressed_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let pressed_enter = pressed_enter_in(ui, &response);
             if buttons(ui, "Go", outcome) || pressed_enter {
                 let wanted = text.trim();
                 let index = tab.labels.iter().position(|label| label == wanted).or_else(|| wanted.parse::<usize>().ok().map(|n| n.saturating_sub(1)));
@@ -2819,4 +2829,33 @@ fn end_of_reading_order(pdf: &mut Pdf) -> anyhow::Result<(quintess_core::tag_tre
         [document] if document.standard_type == "Document" => (document.id, document.children.len()),
         _ => (root, tree.children.len()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pressed_enter_in;
+
+    fn enter_key(pressed: bool) -> egui::Event {
+        egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE }
+    }
+
+    /// The Go to page dialog asks for focus every frame. Enter there used to
+    /// do nothing, because the field never reported losing focus.
+    #[test]
+    fn enter_submits_a_field_that_keeps_asking_for_focus() {
+        let context = egui::Context::default();
+        let mut text = String::from("12");
+        let mut submitted = Vec::new();
+        let frames = [vec![], vec![], vec![enter_key(true)], vec![enter_key(false)]];
+        for events in frames {
+            let input = egui::RawInput { events, ..Default::default() };
+            let mut output = context.run_ui(input, |ui| {
+                let response = ui.add(egui::TextEdit::singleline(&mut text));
+                response.request_focus();
+                submitted.push(pressed_enter_in(ui, &response));
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(submitted, [false, false, true, false]);
+    }
 }

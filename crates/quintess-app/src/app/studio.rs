@@ -180,23 +180,28 @@ impl QuintessApp {
                     .stroke(Stroke::new(1.0, if selected { colors.border } else { Color32::TRANSPARENT }))
                     .corner_radius(8)
                     .inner_margin(Margin { left: 10, right: 4, top: 3, bottom: 3 });
-                let response = frame
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            if tab.dirty {
-                                let (dot, _) = ui.allocate_exact_size(vec2(6.0, 6.0), Sense::hover());
-                                ui.painter().circle_filled(dot.center(), 3.0, colors.accent);
-                            }
-                            ui.label(RichText::new(tab.title.trim_end_matches(".pdf")).color(if selected { colors.text } else { colors.text_muted }));
-                            let close_text = theme::icon_text(ui.ctx(), icon::CLOSE, "×", 9.0).color(colors.text_faint);
-                            if ui.add(egui::Button::new(close_text).frame(false).min_size(vec2(18.0, 18.0))).on_hover_text("Close (Ctrl+W)").clicked() {
-                                close = Some(index);
-                            }
+                // The tab's click area is registered before its contents, so the
+                // close button inside sits on top of it and gets its own clicks.
+                // (Sensing clicks on the finished frame put the area above the
+                // button, and the × did nothing.)
+                let response = ui
+                    .scope_builder(egui::UiBuilder::new().sense(Sense::click()), |ui| {
+                        frame.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                if tab.dirty {
+                                    let (dot, _) = ui.allocate_exact_size(vec2(6.0, 6.0), Sense::hover());
+                                    ui.painter().circle_filled(dot.center(), 3.0, colors.accent);
+                                }
+                                ui.label(RichText::new(tab.title.trim_end_matches(".pdf")).color(if selected { colors.text } else { colors.text_muted }));
+                                let close_text = theme::icon_text(ui.ctx(), icon::CLOSE, "×", 9.0).color(colors.text_faint);
+                                if ui.add(egui::Button::new(close_text).frame(false).min_size(vec2(18.0, 18.0))).on_hover_text("Close (Ctrl+W)").clicked() {
+                                    close = Some(index);
+                                }
+                            });
                         });
                     })
                     .response
-                    .interact(Sense::click())
                     .on_hover_text(tab.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default());
                 if response.clicked() {
                     select = Some(index);
@@ -445,5 +450,56 @@ impl QuintessApp {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Pos2, Rect, Sense};
+
+    /// One tab pill as the tab strip draws it: a clickable area holding a
+    /// close button. Returns whether the tab and the button were clicked, and
+    /// where the button is.
+    fn tab_pill(ui: &mut egui::Ui) -> (bool, bool, Rect) {
+        let mut close_clicked = false;
+        let mut close_rect = Rect::NOTHING;
+        let tab = ui
+            .scope_builder(egui::UiBuilder::new().sense(Sense::click()), |ui| {
+                egui::Frame::new().inner_margin(8).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Document");
+                        let close = ui.add(egui::Button::new("×").frame(false));
+                        close_clicked = close.clicked();
+                        close_rect = close.rect;
+                    });
+                });
+            })
+            .response;
+        (tab.clicked(), close_clicked, close_rect)
+    }
+
+    /// The × on a tab did nothing: the tab's click area sat on top of it.
+    #[test]
+    fn the_close_button_gets_its_click_and_the_tab_does_not() {
+        let context = egui::Context::default();
+        let mut close_rect = Rect::NOTHING;
+        let mut results = Vec::new();
+        for step in 0..4 {
+            let target = close_rect.center();
+            let events = match step {
+                1 => vec![egui::Event::PointerMoved(target)],
+                2 => vec![egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+                3 => vec![egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { events, screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0))), ..Default::default() };
+            let mut output = context.run_ui(input, |ui| {
+                let (tab_clicked, close_clicked, rect) = tab_pill(ui);
+                close_rect = rect;
+                results.push((tab_clicked, close_clicked));
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(results.last(), Some(&(false, true)));
     }
 }

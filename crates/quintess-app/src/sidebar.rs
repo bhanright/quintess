@@ -476,7 +476,7 @@ fn search(ui: &mut egui::Ui, tab: &mut DocumentTab) {
         ui.checkbox(&mut tab.search.whole_words, "Whole words");
         ui.checkbox(&mut tab.search.use_regex, "Regular expression");
     });
-    if (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ui.button("Search").clicked() {
+    if (crate::dialogs::pressed_enter_in(ui, &response)) || ui.button("Search").clicked() {
         tab.run_search();
     }
     ui.weak(&tab.search.message);
