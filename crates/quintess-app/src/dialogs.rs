@@ -2794,9 +2794,12 @@ impl ConvertDialog {
         if self.provider == Some(Provider::MicrosoftOffice) {
             ui.checkbox(&mut self.allow_office, "Let Quintess open this document in Microsoft Office to convert it");
         }
-        // Only where it's true: a web page comes from the internet, and
-        // Microsoft Office uses the network as it normally would.
-        if !self.web_page && self.provider != Some(Provider::MicrosoftOffice) {
+        // Only where Quintess makes it true: the built-in converter never
+        // uses the network, and LibreOffice and the browsers run with it
+        // blocked. A web page comes from the internet, Microsoft Office uses
+        // the network as it normally would, and WordCraft runs as it is.
+        let kept_offline = matches!(self.provider, Some(Provider::BuiltIn | Provider::LibreOffice | Provider::Edge | Provider::Chromium));
+        if !self.web_page && kept_offline {
             ui.weak("Conversion is handled offline.");
         }
     }

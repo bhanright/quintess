@@ -112,6 +112,16 @@ pub fn find_libreoffice(search: &SearchLocations) -> Option<FoundProgram> {
     Some(FoundProgram { path, version })
 }
 
+/// WordCraft's command-line converter, `wordcraft-cli`, from the PATH or
+/// its install folder.
+pub fn find_wordcraft(search: &SearchLocations) -> Option<FoundProgram> {
+    let installed = if cfg!(windows) { search.installed(&[r"WordCraft\wordcraft-cli.exe"]) } else { search.installed(&["Applications/WordCraft.app/Contents/MacOS/wordcraft-cli", "usr/bin/wordcraft-cli", "usr/local/bin/wordcraft-cli"]) };
+    let path = search.on_path(&["wordcraft-cli"]).or(installed)?;
+    // "wordcraft-cli 0.5.0" → "0.5.0"
+    let version = quick_output(&path, &["--version"]).and_then(|text| text.split_whitespace().last().map(str::to_string));
+    Some(FoundProgram { path, version })
+}
+
 /// LibreOffice writes its version beside the program; `--version` is the
 /// fallback (it prints nothing on Windows, where soffice.exe has no console).
 fn libreoffice_version(path: &Path) -> Option<String> {
@@ -524,6 +534,24 @@ pub fn convert_with_libreoffice(program: &FoundProgram, input: &Path, timeout: D
     let output = run_supervised(&program.path, &arguments, &workspace.path, timeout, cancellation, diagnostics, &|| {})?;
     let pdf_path = output_folder.join(Path::new(&safe_copy_name(input)).with_extension("pdf"));
     read_pdf_output(&pdf_path, &output, "LibreOffice")
+}
+
+// ---------------------------------------------------------------------------
+// WordCraft
+// ---------------------------------------------------------------------------
+
+pub fn convert_with_wordcraft(program: &FoundProgram, input: &Path, timeout: Duration, cancellation: &Cancellation, diagnostics: &mut Vec<String>) -> Result<Vec<u8>> {
+    let workspace = Workspace::new()?;
+    let input_folder = workspace.folder("input")?;
+    let output_folder = workspace.folder("output")?;
+    // Copied in, like LibreOffice's input, so nothing is written beside the
+    // person's file.
+    let copy = input_folder.join(safe_copy_name(input));
+    std::fs::copy(input, &copy).with_context(|| format!("could not read {}", input.display()))?;
+    let pdf_path = output_folder.join("document.pdf");
+    let arguments: Vec<OsString> = vec!["convert".into(), copy.into_os_string(), pdf_path.clone().into_os_string()];
+    let output = run_supervised(&program.path, &arguments, &workspace.path, timeout, cancellation, diagnostics, &|| {})?;
+    read_pdf_output(&pdf_path, &output, "WordCraft")
 }
 
 // ---------------------------------------------------------------------------

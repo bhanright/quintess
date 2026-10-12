@@ -797,7 +797,7 @@ enum CreateSource {
         file: PathBuf,
         #[arg(short, long)]
         output: PathBuf,
-        /// builtin (always available, offline), libreoffice, office,
+        /// builtin (always available, offline), libreoffice, wordcraft, office,
         /// browser (Edge, Chrome or Chromium), or best (the most faithful one
         /// installed; Office only with --allow-office).
         #[arg(long, default_value = "builtin")]
@@ -1790,12 +1790,13 @@ fn provider_choice(name: &str) -> Result<ProviderChoice> {
     Ok(match name.to_ascii_lowercase().as_str() {
         "builtin" | "built-in" => ProviderChoice::Use(Provider::BuiltIn),
         "libreoffice" => ProviderChoice::Use(Provider::LibreOffice),
+        "wordcraft" => ProviderChoice::Use(Provider::WordCraft),
         "office" | "microsoft-office" => ProviderChoice::Use(Provider::MicrosoftOffice),
         "browser" => ProviderChoice::AnyBrowser,
         "edge" => ProviderChoice::Use(Provider::Edge),
         "chrome" | "chromium" => ProviderChoice::Use(Provider::Chromium),
         "best" => ProviderChoice::BestAvailable,
-        other => bail!("unknown provider \"{other}\" (try builtin, libreoffice, office, browser or best)"),
+        other => bail!("unknown provider \"{other}\" (try builtin, libreoffice, wordcraft, office, browser or best)"),
     })
 }
 

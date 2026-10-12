@@ -8,9 +8,9 @@
 //!   ("built-in layout", approximate). OpenDocument text, simple HTML,
 //!   Markdown and plain text become a reflowed "simplified document";
 //!   spreadsheets and CSV files become a "table export" of their values.
-//! - **LibreOffice**, **Microsoft Office** (Windows, only with explicit
-//!   permission) and a **browser** (Edge, Chrome or Chromium) give higher
-//!   fidelity when installed. They run as separate programs in a private
+//! - **LibreOffice**, **WordCraft**, **Microsoft Office** (Windows, only
+//!   with explicit permission) and a **browser** (Edge, Chrome or Chromium)
+//!   give higher fidelity when installed. They run as separate programs in a private
 //!   temporary folder with a time limit (see `external`).
 //!
 //! Nothing is substituted behind the caller's back: the caller names a
@@ -46,6 +46,9 @@ pub enum Provider {
     BuiltIn,
     /// LibreOffice, run headless with a private profile.
     LibreOffice,
+    /// WordCraft's command-line converter, `wordcraft-cli`, for word
+    /// processing documents.
+    WordCraft,
     /// Word, Excel or PowerPoint through automation (Windows only, and only
     /// when the caller explicitly allows it).
     MicrosoftOffice,
@@ -57,12 +60,13 @@ pub enum Provider {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 5] = [Provider::BuiltIn, Provider::LibreOffice, Provider::MicrosoftOffice, Provider::Edge, Provider::Chromium];
+    pub const ALL: [Provider; 6] = [Provider::BuiltIn, Provider::LibreOffice, Provider::WordCraft, Provider::MicrosoftOffice, Provider::Edge, Provider::Chromium];
 
     pub fn name(self) -> &'static str {
         match self {
             Provider::BuiltIn => "Built-in",
             Provider::LibreOffice => "LibreOffice",
+            Provider::WordCraft => "WordCraft",
             Provider::MicrosoftOffice => "Microsoft Office",
             Provider::Edge => "Microsoft Edge",
             Provider::Chromium => "Chrome or Chromium",
@@ -83,6 +87,8 @@ impl Provider {
                 LegacyWord | Presentation => false,
             },
             Provider::LibreOffice => !matches!(format, Image | Markdown),
+            // What `wordcraft-cli convert` reads: docx, doc, odt, rtf, html, md and txt.
+            Provider::WordCraft => matches!(format, WordDocument | LegacyWord | OpenDocumentText | Html | PlainText | Markdown),
             Provider::MicrosoftOffice => matches!(format, WordDocument | LegacyWord | OpenDocumentText | Spreadsheet | Csv | Presentation),
             Provider::Edge | Provider::Chromium => matches!(format, Html),
         }
@@ -157,7 +163,8 @@ impl InputFormat {
     pub fn preference(self) -> &'static [Provider] {
         use Provider::*;
         match self {
-            InputFormat::WordDocument | InputFormat::LegacyWord | InputFormat::OpenDocumentText | InputFormat::Spreadsheet | InputFormat::Presentation => &[MicrosoftOffice, LibreOffice, BuiltIn],
+            InputFormat::WordDocument | InputFormat::LegacyWord | InputFormat::OpenDocumentText => &[MicrosoftOffice, LibreOffice, WordCraft, BuiltIn],
+            InputFormat::Spreadsheet | InputFormat::Presentation => &[MicrosoftOffice, LibreOffice, BuiltIn],
             InputFormat::Html => &[Edge, Chromium, BuiltIn],
             // Plain data and text gain nothing from an office suite.
             InputFormat::Csv | InputFormat::PlainText | InputFormat::Markdown | InputFormat::Image => &[BuiltIn],
@@ -238,6 +245,15 @@ pub fn available_providers_in(search: &SearchLocations) -> Vec<ProviderInfo> {
         version: libreoffice.as_ref().and_then(|found| found.version.clone()),
         location: libreoffice.map(|found| found.path),
         note: "Word, OpenDocument, RTF, spreadsheets, presentations and web pages; higher fidelity".to_string(),
+    });
+    let wordcraft = external::find_wordcraft(search);
+    providers.push(ProviderInfo {
+        provider: Provider::WordCraft,
+        available: wordcraft.is_some(),
+        engine: "WordCraft".to_string(),
+        version: wordcraft.as_ref().and_then(|found| found.version.clone()),
+        location: wordcraft.map(|found| found.path),
+        note: "Word, OpenDocument text, RTF, web pages, Markdown and text; higher fidelity".to_string(),
     });
     let office = external::find_office(search);
     let office_note = match &office {
@@ -394,6 +410,11 @@ pub fn convert_file(input: &Path, options: &ConversionOptions, cancellation: &Ca
             let pdf = external::convert_with_libreoffice(&program, input, options.timeout, cancellation, &mut diagnostics)?;
             let warnings = vec!["LibreOffice ran with the network blocked, so any pictures the document links to on the web are missing.".to_string()];
             (pdf, info.engine.clone(), info.version.clone(), Fidelity::HigherFidelity, warnings)
+        }
+        Provider::WordCraft => {
+            let program = external::FoundProgram { path: info.location.clone().expect("found programs have a location"), version: info.version.clone() };
+            let pdf = external::convert_with_wordcraft(&program, input, options.timeout, cancellation, &mut diagnostics)?;
+            (pdf, info.engine.clone(), info.version.clone(), Fidelity::HigherFidelity, Vec::new())
         }
         Provider::MicrosoftOffice => {
             let application = match format {

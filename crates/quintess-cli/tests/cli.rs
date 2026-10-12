@@ -257,11 +257,11 @@ fn create_from_converts_with_the_built_in_converter_and_says_so() {
 #[test]
 fn converters_lists_every_provider() {
     let output = ok(&["converters"]);
-    for name in ["Built-in", "LibreOffice", "Microsoft Office", "Microsoft Edge", "Chrome or Chromium"] {
+    for name in ["Built-in", "LibreOffice", "WordCraft", "Microsoft Office", "Microsoft Edge", "Chrome or Chromium"] {
         assert!(output.contains(name), "{name} missing from:\n{output}");
     }
     let json: serde_json::Value = serde_json::from_str(&ok(&["converters", "--json"])).unwrap();
-    assert_eq!(json.as_array().unwrap().len(), 5);
+    assert_eq!(json.as_array().unwrap().len(), quintess_core::conversion::Provider::ALL.len());
 }
 
 #[test]
