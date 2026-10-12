@@ -362,3 +362,88 @@ fn threads_are_listed_with_their_text() {
     assert_eq!(json[0]["title"], "Notice story");
     assert!(json[0]["text"].as_str().unwrap().contains("Notice"));
 }
+
+/// A letter whose AES-256 encryption dictionary lost its owner key (/OE):
+/// Quintess's editor refuses it, PDFium (needing only the user key) reads it.
+fn letter_the_editor_refuses(folder: &Path) -> PathBuf {
+    let protected = folder.join("protected.pdf");
+    ok(&["protect", path(&letter(folder)), "--owner-password", "owner", "-o", path(&protected)]);
+    let mut bytes = std::fs::read(&protected).unwrap();
+    let at = bytes.windows(3).position(|window| window == b"/OE").expect("the encryption dictionary has an owner key");
+    bytes[at..at + 3].copy_from_slice(b"/XO");
+    let damaged = folder.join("damaged.pdf");
+    std::fs::write(&damaged, &bytes).unwrap();
+    assert!(quintess_core::Pdf::from_bytes(&bytes, None).is_err(), "this sample stopped being refused by the editor; the read-only tests need a new one");
+    damaged
+}
+
+/// A page tree whose /Kids array lacks its closing bracket: the editor finds
+/// no pages, PDFium shows the one page.
+fn file_the_editor_misreads(folder: &Path) -> PathBuf {
+    let content = b"BT /F1 24 Tf 72 700 Td (Damaged but readable) Tj ET";
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        [format!("<< /Length {} >>\nstream\n", content.len()).into_bytes(), content.to_vec(), b"\nendstream".to_vec()].concat(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let mut file = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, body) in objects.iter().enumerate() {
+        offsets.push(file.len());
+        file.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+        file.extend_from_slice(body);
+        file.extend_from_slice(b"\nendobj\n");
+    }
+    let cross_reference = file.len();
+    file.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for offset in offsets {
+        file.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    file.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{cross_reference}\n%%EOF\n", objects.len() + 1).as_bytes());
+    let misread = folder.join("misread.pdf");
+    std::fs::write(&misread, &file).unwrap();
+    misread
+}
+
+#[test]
+fn reading_commands_fall_back_to_pdfium_and_editing_commands_say_why_they_cannot() {
+    let folder = folder("read_only");
+    let damaged = letter_the_editor_refuses(&folder);
+    let info = quintess(&["info", path(&damaged)]);
+    assert!(info.status.success(), "{}", String::from_utf8_lossy(&info.stderr));
+    let (stdout, stderr) = (String::from_utf8_lossy(&info.stdout), String::from_utf8_lossy(&info.stderr));
+    assert!(stdout.contains("Pages       1") && stdout.contains("not possible"), "{stdout}");
+    assert!(stderr.contains("can't edit this file"), "{stderr}");
+    let json: serde_json::Value = serde_json::from_str(&ok(&["info", path(&damaged), "--json"])).unwrap();
+    assert_eq!((json["pages"].as_u64(), json["read_only"].as_bool()), (Some(1), Some(true)));
+    assert!(ok(&["text", path(&damaged)]).contains("conference room"));
+    assert!(ok(&["search", path(&damaged), "conference room"]).contains("1 matches"));
+    let pictures = folder.join("pictures");
+    ok(&["render", path(&damaged), "--dpi", "36", "--output-folder", path(&pictures)]);
+    assert!(pictures.join("damaged-page-001.png").exists());
+    let rotate = quintess(&["rotate", path(&damaged), "90", "-o", path(&folder.join("rotated.pdf"))]);
+    assert!(!rotate.status.success());
+    assert!(String::from_utf8_lossy(&rotate.stderr).contains("Quintess can't edit this file"), "{}", String::from_utf8_lossy(&rotate.stderr));
+    // Its protection is damaged, which PDFium keeps: no copy is written.
+    let repair = quintess(&["repair", path(&damaged)]);
+    assert!(!repair.status.success());
+    assert!(String::from_utf8_lossy(&repair.stderr).contains("nothing was written"), "{}", String::from_utf8_lossy(&repair.stderr));
+    assert!(!folder.join("damaged-repaired.pdf").exists());
+}
+
+#[test]
+fn repair_rewrites_a_misread_file_with_pdfium() {
+    let folder = folder("repair");
+    let misread = file_the_editor_misreads(&folder);
+    // The editor finds no pages here; info shows PDFium's reading instead.
+    assert!(ok(&["info", path(&misread)]).contains("Pages       1"));
+    let written = ok(&["repair", path(&misread)]);
+    assert!(written.contains("1 page"), "{written}");
+    let repaired = folder.join("misread-repaired.pdf");
+    let pdf = quintess_core::Pdf::open(&repaired, None).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    assert!(ok(&["text", path(&repaired)]).contains("Damaged but readable"));
+    assert!(!quintess(&["repair", path(&misread), "-o", path(&misread)]).status.success(), "never over the original");
+}

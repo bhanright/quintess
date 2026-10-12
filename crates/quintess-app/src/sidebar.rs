@@ -112,6 +112,13 @@ pub fn show(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
         });
         ui.separator();
     }
+    // Comments, fields, attached files, layers and tags are read through the
+    // editable model, which a document open for reading only doesn't have.
+    let needs_editable_model = matches!(state.page, SidebarPage::Comments | SidebarPage::Fields | SidebarPage::Attachments | SidebarPage::Layers | SidebarPage::Tags);
+    if tab.is_read_only() && needs_editable_model {
+        ui.weak("Not available for this file: it is open for reading only, because it is damaged in a way Quintess can't edit. Pages, bookmarks and search work.");
+        return actions;
+    }
     match state.page {
         SidebarPage::Thumbnails => thumbnails(ui, tab, worker, night_mode),
         SidebarPage::Bookmarks => bookmarks(ui, tab, state, &mut actions),
@@ -168,9 +175,12 @@ fn bookmarks(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState,
     // width makes the row wider than the panel, and the panel then grows
     // to fit it on every frame.
     let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    // A document open for reading only shows its bookmarks (read by PDFium)
+    // but can't take new ones or changes.
+    let editable = !tab.is_read_only();
     ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let add = ui.button("Add").on_hover_text("Bookmark the current page");
-        ui.add(egui::TextEdit::singleline(&mut state.new_bookmark_title).hint_text("New bookmark title").desired_width(ui.available_width()));
+        let add = ui.add_enabled(editable, egui::Button::new("Add")).on_hover_text("Bookmark the current page").on_disabled_hover_text(crate::tab::UNAVAILABLE_WHILE_READ_ONLY);
+        ui.add_enabled(editable, egui::TextEdit::singleline(&mut state.new_bookmark_title).hint_text("New bookmark title").desired_width(ui.available_width()));
         if add.clicked() && !state.new_bookmark_title.trim().is_empty() {
             let mut entries = tab.bookmarks.clone();
             let entry = BookmarkEntry { title: state.new_bookmark_title.trim().to_string(), page: tab.current_page as u32 + 1, children: Vec::new() };
@@ -184,11 +194,13 @@ fn bookmarks(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState,
         ui.weak("This document has no bookmarks.");
         return;
     }
-    ui.weak("Right-click a bookmark to rename, move or delete it.");
+    if editable {
+        ui.weak("Right-click a bookmark to rename, move or delete it.");
+    }
     let mut jump = None;
     let mut change: Option<(Vec<usize>, BookmarkChange)> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        bookmark_level(ui, &tab.bookmarks, &mut Vec::new(), &mut state.renaming_bookmark, &mut jump, &mut change);
+        bookmark_level(ui, &tab.bookmarks, &mut Vec::new(), &mut state.renaming_bookmark, &mut jump, &mut change, editable);
     });
     if let Some(page) = jump.filter(|p| *p > 0) {
         go_to_page(tab, page as usize - 1);
@@ -215,8 +227,9 @@ enum BookmarkChange {
     Delete { keep_children: bool },
 }
 
-/// One level of the bookmark tree, each with its right-click menu.
-fn bookmark_level(ui: &mut egui::Ui, entries: &[BookmarkEntry], path: &mut Vec<usize>, renaming: &mut Option<(Vec<usize>, String)>, jump: &mut Option<u32>, change: &mut Option<(Vec<usize>, BookmarkChange)>) {
+/// One level of the bookmark tree, each with its right-click menu (when
+/// the document is `editable`).
+fn bookmark_level(ui: &mut egui::Ui, entries: &[BookmarkEntry], path: &mut Vec<usize>, renaming: &mut Option<(Vec<usize>, String)>, jump: &mut Option<u32>, change: &mut Option<(Vec<usize>, BookmarkChange)>, editable: bool) {
     for (index, entry) in entries.iter().enumerate() {
         path.push(index);
         if let Some((renamed_path, title)) = renaming.as_mut().filter(|(renamed_path, _)| renamed_path == path) {
@@ -234,10 +247,14 @@ fn bookmark_level(ui: &mut egui::Ui, entries: &[BookmarkEntry], path: &mut Vec<u
             let response = if entry.children.is_empty() {
                 ui.selectable_label(false, label)
             } else {
-                egui::CollapsingHeader::new(label).id_salt(path.clone()).default_open(path.len() < 2).show(ui, |ui| bookmark_level(ui, &entry.children, path, renaming, jump, change)).header_response
+                egui::CollapsingHeader::new(label).id_salt(path.clone()).default_open(path.len() < 2).show(ui, |ui| bookmark_level(ui, &entry.children, path, renaming, jump, change, editable)).header_response
             };
             if response.clicked() {
                 *jump = Some(entry.page);
+            }
+            if !editable {
+                path.pop();
+                continue;
             }
             let (first, last) = (index == 0, index + 1 == entries.len());
             response.context_menu(|ui| {

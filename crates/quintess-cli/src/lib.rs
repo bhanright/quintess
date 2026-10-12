@@ -717,6 +717,16 @@ enum Command {
         #[arg(short, long)]
         output_folder: Option<PathBuf>,
     },
+    /// Make an editable copy of a damaged file: PDFium reads it and writes
+    /// it out again. Anything PDFium can't read is missing from the copy.
+    Repair {
+        #[command(flatten)]
+        input: Input,
+        /// The copy to write; defaults to "<name>-repaired.pdf" beside the
+        /// input, which is never overwritten.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     #[command(flatten)]
     More(more::MoreCommand),
     #[command(flatten)]
@@ -1019,8 +1029,14 @@ fn open(input: &Input) -> Result<Pdf> {
             return Pdf::from_bytes_with_identity(&bytes, &identity).with_context(|| format!("could not open {}", input.input.display()));
         }
     }
-    Pdf::open(&input.input, input.password.as_deref())
+    Pdf::open(&input.input, input.password.as_deref()).map_err(|error| {
+        // Said plainly when PDFium can still read the file: only editing is out.
+        if input.open_document().is_ok() { error.context(READ_ONLY_FILE) } else { error }
+    })
 }
+
+/// Why an editing command fails on a file PDFium reads but the editor can't.
+const READ_ONLY_FILE: &str = "Quintess can't edit this file: it is damaged in a way its editor can't read, though PDFium can still display it. Commands that only read (info, text, render, search, images, qr) work, and `quintess repair` may make an editable copy";
 
 /// What an edit does to the document, for saving it rightly.
 pub(crate) type Edit = quintess_core::document::EditKind;
@@ -1557,10 +1573,22 @@ fn run(cli: Cli) -> Result<()> {
             let document = input.open_document()?;
             write_or_print(&engine::extract_text(&document)?, &output)?;
         }
+        Command::Repair { input, output } => {
+            let (bytes, password) = input.readable()?;
+            let target = output.unwrap_or_else(|| input.input.with_file_name(format!("{}-repaired.pdf", stem(&input.input))));
+            if target == input.input {
+                bail!("the repaired copy can't be written over the file it was made from; choose another name with -o");
+            }
+            // A copy the editor still can't read is no repair: then nothing is written.
+            let copy = engine::repair_with_pdfium(bytes, password.as_deref()).context("nothing was written")?;
+            write_file_safely(&target, &copy.bytes)?;
+            println!("wrote {} ({} page{}, rewritten by PDFium; check it against the original, since anything PDFium couldn't read is missing)", target.display(), copy.pages, if copy.pages == 1 { "" } else { "s" });
+        }
         Command::Render { input, pages, dpi, format, grayscale, output_folder } => {
-            let pdf = open(&input)?;
-            let chosen = pages_of(&pdf, &pages)?;
             let document = input.open_document()?;
+            // Pages are counted by PDFium, which draws them, so a file the
+            // editor can't read still renders.
+            let chosen = parse_page_ranges(&pages, document.pages().len() as u32)?;
             let folder = folder_or_parent(&output_folder, &input.input)?;
             let extension = if format.eq_ignore_ascii_case("jpg") || format.eq_ignore_ascii_case("jpeg") { "jpg" } else { "png" };
             for page in chosen {
@@ -1608,7 +1636,22 @@ fn info(input: &Input, json: bool) -> Result<()> {
         }
         return Ok(());
     }
-    let pdf = open(input)?;
+    let pdf = match open(input) {
+        Ok(pdf) => pdf,
+        // A file only PDFium can read still has pages, properties and bookmarks to show.
+        Err(error) => match input.open_document() {
+            Ok(document) => return info_from_pdfium(input, &bytes, &document, &error.root_cause().to_string(), json),
+            Err(_) => return Err(error),
+        },
+    };
+    // A damaged file the editor reads wrongly finds fewer pages (often none)
+    // than PDFium draws; then PDFium's reading is the one to show, as the app does.
+    if let Ok(document) = input.open_document() {
+        let (pages_read, pages_drawn) = (pdf.page_count() as usize, document.pages().len() as usize);
+        if pages_drawn > 0 && pages_read != pages_drawn {
+            return info_from_pdfium(input, &bytes, &document, &format!("its editor reads {pages_read} pages where PDFium reads {pages_drawn}"), json);
+        }
+    }
     let sizes = pages::page_sizes(&pdf)?;
     let document_info = metadata::read_info(&pdf);
     let bookmarks = read_bookmarks(&pdf).map(|b| flatten_bookmarks(&b).len()).unwrap_or(0);
@@ -1662,6 +1705,48 @@ fn info(input: &Input, json: bool) -> Result<()> {
     println!("Bookmarks   {bookmarks}");
     println!("Form fields {fields}");
     println!("Comments    {comments}");
+    Ok(())
+}
+
+/// `info` for a file the editor can't read but PDFium can: what PDFium
+/// tells (pages, sizes, properties, bookmarks, labels), with a note that
+/// the file can't be edited. Comments and form fields are read by the
+/// editor, so they aren't counted.
+fn info_from_pdfium(input: &Input, bytes: &[u8], document: &quintess_core::pdfium_render::prelude::PdfDocument, editor_error: &str, json: bool) -> Result<()> {
+    let sizes = engine::page_sizes(document);
+    let document_info = engine::document_info(document);
+    let bookmarks = flatten_bookmarks(&engine::outline(document)).len();
+    let version = engine::file_version(document).unwrap_or_else(|| "unknown".into());
+    if json {
+        let summary = serde_json::json!({
+            "file": input.input,
+            "bytes": bytes.len(),
+            "version": version,
+            "pages": sizes.len(),
+            "page_sizes_points": sizes,
+            "properties": document_info,
+            "bookmarks": bookmarks,
+            "page_labels": engine::page_labels(document),
+            "read_only": true,
+            "editor_error": editor_error,
+        });
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+        return Ok(());
+    }
+    eprintln!("note: Quintess can't edit this file ({editor_error}); this is what PDFium, which displays it, reads. `quintess repair` may make an editable copy.");
+    println!("File        {} ({:.1} KB, PDF {version})", input.input.display(), bytes.len() as f64 / 1024.0);
+    println!("Pages       {}", sizes.len());
+    if let Some((width, height)) = sizes.first() {
+        let same = sizes.iter().all(|s| (s.0 - width).abs() < 1.0 && (s.1 - height).abs() < 1.0);
+        println!("Page size   {:.1} x {:.1} in ({:.0} x {:.0} pt){}", width / 72.0, height / 72.0, width, height, if same { "" } else { ", mixed sizes" });
+    }
+    for (label, value) in [("Title", &document_info.title), ("Author", &document_info.author), ("Subject", &document_info.subject), ("Keywords", &document_info.keywords), ("Creator", &document_info.creator), ("Producer", &document_info.producer), ("Created", &document_info.creation_date), ("Modified", &document_info.modification_date)] {
+        if let Some(value) = value.as_deref().filter(|v| !v.is_empty()) {
+            println!("{label:<11} {value}");
+        }
+    }
+    println!("Bookmarks   {bookmarks}");
+    println!("Editing     not possible (open for reading only)");
     Ok(())
 }
 

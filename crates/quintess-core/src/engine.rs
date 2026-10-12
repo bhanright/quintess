@@ -92,6 +92,179 @@ pub fn open_document(bytes: Vec<u8>, password: Option<&str>) -> Result<PdfDocume
     pdfium()?.load_pdf_from_byte_vec(bytes, password).map_err(|error| anyhow!("PDFium could not open the document: {error}"))
 }
 
+/// A damaged document as PDFium rewrote it, which the editable model reads.
+pub struct RepairedCopy {
+    pub bytes: Vec<u8>,
+    /// Pages in the copy, the same as PDFium finds in the original.
+    pub pages: u32,
+}
+
+/// Repair by rewriting with PDFium: PDFium's own copy of the document,
+/// written out whole (`FPDF_SaveAsCopy`), checked to open in the editable
+/// model with every page PDFium shows.
+///
+/// PDFium reads damaged files that the editable model can't, or reads
+/// wrongly: it rebuilds a broken cross-reference table, tolerates
+/// malformed objects and uses what it could read. Writing that
+/// understanding back out gives a conventionally structured file, which
+/// the editor can usually open. It is PDFium's reading of the file, not
+/// the file: anything PDFium skipped is gone. A password-protected file
+/// stays protected the same way (PDFium keeps its encryption dictionary),
+/// so damage there remains; removing protection is left to Remove
+/// protection, which checks the owner password.
+pub fn repair_with_pdfium(bytes: Vec<u8>, password: Option<&str>) -> Result<RepairedCopy> {
+    let document = open_document(bytes, password)?;
+    let pages_drawn = document.pages().len() as u32;
+    let copy = document.save_to_bytes().map_err(|error| anyhow!("PDFium could not write its copy of the document: {error}"))?;
+    drop(document);
+    let pdf = crate::Pdf::from_bytes(&copy, password).map_err(|error| anyhow!("PDFium rewrote the file, but Quintess still can't edit its copy ({error:#})"))?;
+    if pdf.page_count() != pages_drawn {
+        return Err(anyhow!("PDFium rewrote the file, but Quintess's editor finds {} pages in the copy where PDFium shows {pages_drawn}, so the copy is no better than the original", pdf.page_count()));
+    }
+    Ok(RepairedCopy { bytes: copy, pages: pages_drawn })
+}
+
+/// Where a page sits in its own coordinate space, as PDFium reads it: the
+/// visible box (`[left, bottom, right, top]`, the crop box, else the media
+/// box) and the rotation in degrees (0, 90, 180 or 270).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PageBox {
+    pub bounds: [f32; 4],
+    pub rotation: i64,
+}
+
+/// Every page's visible box and rotation, for documents only PDFium can
+/// read (the editable model gives the same from the file's own entries).
+pub fn page_boxes(document: &PdfDocument) -> Vec<PageBox> {
+    document
+        .pages()
+        .iter()
+        .map(|page| {
+            let rotation = page.rotation().map(|rotation| rotation.as_degrees() as i64).unwrap_or(0);
+            let as_array = |rect: PdfRect| [rect.left().value, rect.bottom().value, rect.right().value, rect.top().value];
+            let usable = |bounds: &[f32; 4]| bounds.iter().all(|value| value.is_finite()) && bounds[2] > bounds[0] && bounds[3] > bounds[1];
+            let declared = page.boundaries().crop().ok().map(|found| as_array(found.bounds)).filter(usable).or_else(|| page.boundaries().media().ok().map(|found| as_array(found.bounds)).filter(usable));
+            // PDFium's width and height are as displayed; the box is not.
+            let (width, height) = (page.width().value, page.height().value);
+            let unrotated = if rotation % 180 == 0 { (width, height) } else { (height, width) };
+            PageBox { bounds: declared.unwrap_or([0.0, 0.0, unrotated.0, unrotated.1]), rotation }
+        })
+        .collect()
+}
+
+/// Each page's label ("iv", "A-3"), or its number when the document gives
+/// it none.
+pub fn page_labels(document: &PdfDocument) -> Vec<String> {
+    document.pages().iter().enumerate().map(|(index, page)| page.label().filter(|label| !label.is_empty()).map(str::to_string).unwrap_or_else(|| (index + 1).to_string())).collect()
+}
+
+/// The most bookmarks [`outline`] reads, and how deep: a damaged outline
+/// can loop back on itself, and PDFium follows it wherever it points.
+const OUTLINE_ENTRY_LIMIT: usize = 10_000;
+const OUTLINE_DEPTH_LIMIT: usize = 64;
+
+/// The document's bookmarks as PDFium reads them, as a tree.
+pub fn outline(document: &PdfDocument) -> Vec<crate::bookmarks::BookmarkEntry> {
+    fn level(first: Option<PdfBookmark>, depth: usize, budget: &mut usize) -> Vec<crate::bookmarks::BookmarkEntry> {
+        let mut entries = Vec::new();
+        let mut cursor = first;
+        while let Some(bookmark) = cursor {
+            if *budget == 0 {
+                break;
+            }
+            *budget -= 1;
+            // A destination PDFium can't place on a page reads as 0, as the editable model's bookmarks do.
+            let page = target_page_index(bookmark.destination(), bookmark.action()).map_or(0, |index| index.max(-1) as i64 + 1) as u32;
+            let children = if depth < OUTLINE_DEPTH_LIMIT { level(bookmark.first_child(), depth + 1, budget) } else { Vec::new() };
+            entries.push(crate::bookmarks::BookmarkEntry { title: bookmark.title().unwrap_or_default(), page, children });
+            cursor = bookmark.next_sibling();
+        }
+        entries
+    }
+    let mut budget = OUTLINE_ENTRY_LIMIT;
+    level(document.bookmarks().root(), 0, &mut budget)
+}
+
+/// Where a link on a page leads.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub enum LinkTarget {
+    /// A web address or other URI.
+    Address(String),
+    /// A page of this document, 0-based.
+    Page(usize),
+}
+
+/// A link on a page: its area in page space and where it leads.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PageLink {
+    pub rect: [f32; 4],
+    pub target: LinkTarget,
+}
+
+/// The links on a page that lead somewhere PDFium can tell: web addresses
+/// and pages of this document.
+pub fn page_links(document: &PdfDocument, page_index: usize) -> Result<Vec<PageLink>> {
+    let page = document.pages().get(page_index as i32)?;
+    let mut found = Vec::new();
+    for link in page.links().iter() {
+        let Ok(rect) = link.rect() else { continue };
+        let address = link.action().and_then(|action| action.as_uri_action().and_then(|uri| uri.uri().ok()));
+        let target = match address {
+            Some(address) if !address.is_empty() => LinkTarget::Address(address),
+            _ => match target_page_index(link.destination(), link.action()) {
+                Some(index) if index >= 0 => LinkTarget::Page(index as usize),
+                _ => continue,
+            },
+        };
+        found.push(PageLink { rect: [rect.left().value, rect.bottom().value, rect.right().value, rect.top().value], target });
+    }
+    Ok(found)
+}
+
+/// The 0-based page a bookmark or link leads to: its own destination, else
+/// that of its go-to action.
+fn target_page_index(destination: Option<PdfDestination>, action: Option<PdfAction>) -> Option<i32> {
+    if let Some(index) = destination.and_then(|destination| destination.page_index().ok()) {
+        return Some(index);
+    }
+    let action = action?;
+    let local = action.as_local_destination_action()?;
+    local.destination().ok()?.page_index().ok()
+}
+
+/// The document's properties (title, author and so on) as PDFium reads them.
+pub fn document_info(document: &PdfDocument) -> crate::metadata::DocumentInfo {
+    let metadata = document.metadata();
+    let value = |tag: PdfDocumentMetadataTagType| metadata.get(tag).map(|found| found.value().to_string()).filter(|text| !text.is_empty());
+    crate::metadata::DocumentInfo {
+        title: value(PdfDocumentMetadataTagType::Title),
+        author: value(PdfDocumentMetadataTagType::Author),
+        subject: value(PdfDocumentMetadataTagType::Subject),
+        keywords: value(PdfDocumentMetadataTagType::Keywords),
+        creator: value(PdfDocumentMetadataTagType::Creator),
+        producer: value(PdfDocumentMetadataTagType::Producer),
+        creation_date: value(PdfDocumentMetadataTagType::CreationDate),
+        modification_date: value(PdfDocumentMetadataTagType::ModificationDate),
+    }
+}
+
+/// The PDF version the file declares, such as "1.7", as PDFium reads it.
+pub fn file_version(document: &PdfDocument) -> Option<String> {
+    let text = match document.version() {
+        PdfDocumentVersion::Pdf1_0 => "1.0",
+        PdfDocumentVersion::Pdf1_1 => "1.1",
+        PdfDocumentVersion::Pdf1_2 => "1.2",
+        PdfDocumentVersion::Pdf1_3 => "1.3",
+        PdfDocumentVersion::Pdf1_4 => "1.4",
+        PdfDocumentVersion::Pdf1_5 => "1.5",
+        PdfDocumentVersion::Pdf1_6 => "1.6",
+        PdfDocumentVersion::Pdf1_7 => "1.7",
+        PdfDocumentVersion::Pdf2_0 => "2.0",
+        _ => return None,
+    };
+    Some(text.to_string())
+}
+
 /// Rendering choices for one page.
 #[derive(Clone, Debug)]
 pub struct RenderOptions {

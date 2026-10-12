@@ -79,6 +79,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "remove-blank",
     "render",
     "reorder",
+    "repair",
     "resize",
     "reverse",
     "rotate",

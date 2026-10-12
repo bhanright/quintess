@@ -87,6 +87,13 @@ impl Tool {
         }
     }
 
+    /// Tools that change the document (every one but selecting, moving the
+    /// view and inspecting): they are disabled on a document open for
+    /// reading only. Measuring counts, since a measurement is a comment.
+    pub fn changes_document(self) -> bool {
+        !matches!(self, Tool::Select | Tool::Hand | Tool::Inspect)
+    }
+
     /// Tools that work on runs of text rather than drawn shapes.
     fn selects_text(self) -> bool {
         matches!(self, Tool::Select | Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly | Tool::RedactText)
