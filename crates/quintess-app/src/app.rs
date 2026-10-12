@@ -584,6 +584,17 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             Ok(bytes) => bytes,
             Err(error) => return self.error(format!("Could not read {}: {error}", path.display())),
         };
+        // A Word document, a picture or another kind of file opened as if it
+        // were a PDF: the PDF reader can't read it and takes it for an
+        // encrypted file, so it would ask for a password the file doesn't
+        // have. Offer to convert what can be converted.
+        if !quintess_core::document::has_pdf_header(&bytes) && !opens_without_password(&bytes) {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            return match quintess_core::conversion::InputFormat::from_path(&path) {
+                Some(format) => self.dialogs.push(Dialog::Convert(Box::new(dialogs::ConvertDialog::for_file_that_is_not_a_pdf(path, format)))),
+                None => self.error(format!("{name} isn't a PDF, and it isn't a kind of file Quintess can convert to one.")),
+            };
+        }
         let report = quintess_core::security::inspect_security(&bytes);
         if report.uses_certificates {
             let remembered = self.settings.signing_certificate_file.clone();

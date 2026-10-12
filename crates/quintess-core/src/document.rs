@@ -876,6 +876,12 @@ pub fn bytes_after_edit(pdf: &mut Pdf, original: &[u8], password: Option<&str>, 
 /// Writes a file without risking the old one: the bytes go to a temporary
 /// file beside it, which then replaces it, so a crash or power cut midway
 /// leaves either the old file or the new one, never half of each.
+/// Whether the bytes start like a PDF: the "%PDF-" header within the first
+/// 1,024 bytes, where readers look for it.
+pub fn has_pdf_header(bytes: &[u8]) -> bool {
+    bytes[..bytes.len().min(1024 + 4)].windows(5).any(|window| window == b"%PDF-")
+}
+
 pub fn write_file_safely(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
@@ -968,4 +974,20 @@ fn encrypt_again(plain: &[u8], encryption: &lopdf::EncryptionState, certificate_
     // Encrypted objects are written as they are (no object streams).
     doc.save_to(&mut bytes)?;
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::has_pdf_header;
+
+    #[test]
+    fn tells_a_pdf_from_other_files() {
+        assert!(has_pdf_header(b"%PDF-1.7\n..."));
+        // Readers accept a little junk before the header.
+        assert!(has_pdf_header(&[b"\xEF\xBB\xBF".as_slice(), b"%PDF-1.4"].concat()));
+        // A .docx is a zip file.
+        assert!(!has_pdf_header(b"PK\x03\x04\x14\x00\x06\x00"));
+        assert!(!has_pdf_header(b""));
+        assert!(!has_pdf_header(&[vec![b' '; 2000], b"%PDF-1.4".to_vec()].concat()));
+    }
 }

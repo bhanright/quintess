@@ -2694,13 +2694,24 @@ pub struct ConvertDialog {
     /// Office opens the document in Word, Excel or PowerPoint; only with
     /// the person's say-so, each time.
     pub allow_office: bool,
+    /// Why the dialog opened on its own, shown above everything else.
+    pub reason: Option<String>,
 }
 
 impl ConvertDialog {
     pub fn new(web_page: bool, file: Option<std::path::PathBuf>) -> Self {
         let providers = quintess_core::conversion::available_providers();
-        let mut dialog = ConvertDialog { web_page, file, address: String::new(), providers, provider: None, allow_office: false };
+        let mut dialog = ConvertDialog { web_page, file, address: String::new(), providers, provider: None, allow_office: false, reason: None };
         dialog.provider = dialog.preferred_provider();
+        dialog
+    }
+
+    /// For a file someone tried to open as a PDF that is another kind of
+    /// document: converting it is how to open it.
+    pub fn for_file_that_is_not_a_pdf(file: std::path::PathBuf, format: quintess_core::conversion::InputFormat) -> Self {
+        let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut dialog = ConvertDialog::new(false, Some(file));
+        dialog.reason = Some(format!("{name} is a {}, not a PDF. Convert it to a PDF to open it.", format.description()));
         dialog
     }
 
@@ -2737,6 +2748,10 @@ impl ConvertDialog {
     fn show(&mut self, ui: &mut egui::Ui) {
         use quintess_core::conversion::Provider;
         ui.set_min_width(480.0);
+        if let Some(reason) = &self.reason {
+            ui.label(reason.as_str());
+            ui.add_space(6.0);
+        }
         if self.web_page {
             ui.label("Web address");
             ui.add(egui::TextEdit::singleline(&mut self.address).desired_width(f32::INFINITY).hint_text("https://"));
