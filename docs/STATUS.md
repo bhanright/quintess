@@ -695,7 +695,19 @@ et.rs`): .pfx/.p12
   attachments of a read-only file (lopdf reads those; PDFium could list
   attachments), and its links open only web addresses and pages.
 
-## Ideas for next
+## To do
 
-1. Compile the installer (needs Inno Setup 6); William wanted to discuss
-   changes first (2026-10-10).
+1. EPUB and MOBI support (William, 2026-10-13). Open them by converting to
+   PDF (EPUB is zipped XHTML, so it can go through WordCraft's HTML import or
+   the built-in typesetter; MOBI/AZW3 needs a PalmDOC/KF8 reader first), and
+   possibly export to EPUB from the text structure in convert.rs. Scope to be
+   settled with William.
+2. Guard against PDFium hangs (separate process or interruptible
+   rendering); William planned it for the week after 2026-10-12.
+3. Remove the Oxi Word engine (feature `word-layout`) once WordCraft has
+   done well for a release; it shrinks the download.
+4. Move the WordCraft pin past v0.6.1 when a release has Word's table-row
+   splitting across pages (on its main branch as of 2026-10-12).
+5. GridCraft gaps: password-protected workbooks don't convert; non-Latin
+   text in chart titles and text boxes isn't checked and prints as "?".
+6. Offered, not yet decided: a warning when a file has damaged streams.
