@@ -193,7 +193,9 @@ impl QuintessApp {
                                     let (dot, _) = ui.allocate_exact_size(vec2(6.0, 6.0), Sense::hover());
                                     ui.painter().circle_filled(dot.center(), 3.0, colors.accent);
                                 }
-                                ui.label(RichText::new(tab.title.trim_end_matches(".pdf")).color(if selected { colors.text } else { colors.text_muted }));
+                                // Not selectable: a selectable label takes the click
+                                // to select its text, and the tab never switched.
+                                ui.add(egui::Label::new(RichText::new(tab.title.trim_end_matches(".pdf")).color(if selected { colors.text } else { colors.text_muted })).selectable(false));
                                 let close_text = theme::icon_text(ui.ctx(), icon::CLOSE, "×", 9.0).color(colors.text_faint);
                                 if ui.add(egui::Button::new(close_text).frame(false).min_size(vec2(18.0, 18.0))).on_hover_text("Close (Ctrl+W)").clicked() {
                                     close = Some(index);
@@ -457,49 +459,70 @@ impl QuintessApp {
 mod tests {
     use egui::{Pos2, Rect, Sense};
 
-    /// One tab pill as the tab strip draws it: a clickable area holding a
-    /// close button. Returns whether the tab and the button were clicked, and
-    /// where the button is.
-    fn tab_pill(ui: &mut egui::Ui) -> (bool, bool, Rect) {
-        let mut close_clicked = false;
-        let mut close_rect = Rect::NOTHING;
+    /// What one click on a tab pill did, and where its parts are.
+    struct PillClick {
+        tab_clicked: bool,
+        close_clicked: bool,
+        title: Rect,
+        close: Rect,
+    }
+
+    impl Default for PillClick {
+        fn default() -> Self {
+            PillClick { tab_clicked: false, close_clicked: false, title: Rect::NOTHING, close: Rect::NOTHING }
+        }
+    }
+
+    /// One tab pill as the tab strip draws it: a clickable area holding the
+    /// title and a close button.
+    fn tab_pill(ui: &mut egui::Ui) -> PillClick {
+        let mut pill = PillClick::default();
         let tab = ui
             .scope_builder(egui::UiBuilder::new().sense(Sense::click()), |ui| {
                 egui::Frame::new().inner_margin(8).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label("Document");
+                        pill.title = ui.add(egui::Label::new("Document").selectable(false)).rect;
                         let close = ui.add(egui::Button::new("×").frame(false));
-                        close_clicked = close.clicked();
-                        close_rect = close.rect;
+                        pill.close_clicked = close.clicked();
+                        pill.close = close.rect;
                     });
                 });
             })
             .response;
-        (tab.clicked(), close_clicked, close_rect)
+        pill.tab_clicked = tab.clicked();
+        pill
+    }
+
+    /// Clicks the point `target` picks on the pill and returns whether the
+    /// tab and the close button took the click.
+    fn click_pill(target: impl Fn(&PillClick) -> Pos2) -> (bool, bool) {
+        let context = egui::Context::default();
+        let mut last = PillClick::default();
+        for step in 0..4 {
+            let point = target(&last);
+            let events = match step {
+                1 => vec![egui::Event::PointerMoved(point)],
+                2 => vec![egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+                3 => vec![egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { events, screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0))), ..Default::default() };
+            let mut output = context.run_ui(input, |ui| last = tab_pill(ui));
+            output.textures_delta.clear();
+        }
+        (last.tab_clicked, last.close_clicked)
     }
 
     /// The × on a tab did nothing: the tab's click area sat on top of it.
     #[test]
     fn the_close_button_gets_its_click_and_the_tab_does_not() {
-        let context = egui::Context::default();
-        let mut close_rect = Rect::NOTHING;
-        let mut results = Vec::new();
-        for step in 0..4 {
-            let target = close_rect.center();
-            let events = match step {
-                1 => vec![egui::Event::PointerMoved(target)],
-                2 => vec![egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
-                3 => vec![egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
-                _ => vec![],
-            };
-            let input = egui::RawInput { events, screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0))), ..Default::default() };
-            let mut output = context.run_ui(input, |ui| {
-                let (tab_clicked, close_clicked, rect) = tab_pill(ui);
-                close_rect = rect;
-                results.push((tab_clicked, close_clicked));
-            });
-            output.textures_delta.clear();
-        }
-        assert_eq!(results.last(), Some(&(false, true)));
+        assert_eq!(click_pill(|pill| pill.close.center()), (false, true));
+    }
+
+    /// Clicking a tab's title selected the title's text instead of switching
+    /// to the tab.
+    #[test]
+    fn clicking_the_title_switches_to_the_tab() {
+        assert_eq!(click_pill(|pill| pill.title.center()), (true, false));
     }
 }
