@@ -34,7 +34,7 @@
 #endif
 
 #define AppName "Quintess"
-#define AppVersion "0.4.3"
+#define AppVersion "0.4.4"
 #define TargetFolder (GetEnv("QUINTESS_BUILD") != "" ? GetEnv("QUINTESS_BUILD") : "..\target")
 #define ModelsFolder "..\vendor\ocrs-models"
 #if Arch == "x64"
