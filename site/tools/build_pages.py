@@ -39,9 +39,13 @@ TEMPLATE = """<!doctype html>
 <link rel="manifest" href="/site.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Quintess">
-<meta property="og:title" content="{title}">
+<meta property="og:locale" content="en_US">
+{og_url}<meta property="og:title" content="{title}">
 <meta property="og:description" content="{description}">
 <meta property="og:image" content="https://quintess.cc/assets/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Quintess logo beside the line: A free PDF editor for Windows, Mac and Linux.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
@@ -71,6 +75,7 @@ TEMPLATE = """<!doctype html>
     <a class="brand" href="/"><img src="/assets/img/mark.png" alt="" width="18" height="22"><span>quintess</span></a>
     <nav aria-label="Footer">
       <a href="/guide/">User guide</a>
+      <a href="/benchmarks/">Benchmarks</a>
       <a href="/privacy/">Site privacy</a>
       <a href="https://github.com/bhanright/quintess/blob/main/LICENSE-MIT">License</a>
       <a href="https://github.com/bhanright/quintess">GitHub</a>
@@ -89,6 +94,7 @@ def page(title: str, description: str, body: str, path: str | None, head_extra: 
         title=html.escape(title),
         description=html.escape(description),
         canonical=f'<link rel="canonical" href="{ORIGIN}{path}">\n' if path else "",
+        og_url=f'<meta property="og:url" content="{ORIGIN}{path}">\n' if path else "",
         robots="" if path else '<meta name="robots" content="noindex">\n',
         head_extra=head_extra,
         guide_current=' aria-current="page"' if guide else "",
@@ -213,7 +219,7 @@ def build_guide() -> str:
 """
     return page(
         "Quintess user guide: editing, redaction, signatures, forms and more",
-        "How to use every feature of Quintess, the free PDF editor for Windows and Linux: editing text and pictures, spelling, redaction, signatures, forms, OCR, conversion, printing and the command line.",
+        "How to use every feature of Quintess, the free PDF editor for Windows, Mac and Linux: editing text and pictures, spelling, redaction, signatures, forms, OCR, conversion, printing and the command line.",
         content,
         "/guide/",
         head_extra=breadcrumbs,
