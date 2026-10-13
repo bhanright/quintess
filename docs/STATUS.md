@@ -700,8 +700,8 @@ et.rs`): .pfx/.p12
 1. EPUB and MOBI support (William, 2026-10-13). Open them by converting to
    PDF (EPUB is zipped XHTML, so it can go through WordCraft's HTML import or
    the built-in typesetter; MOBI/AZW3 needs a PalmDOC/KF8 reader first), and
-   possibly export to EPUB from the text structure in convert.rs. Scope to be
-   settled with William.
+   export PDFs to EPUB. Plan and effort estimate: docs/EBOOKS.md (four
+   questions for William at its end).
 2. Guard against PDFium hangs (separate process or interruptible
    rendering); William planned it for the week after 2026-10-12.
 3. Remove the Oxi Word engine (feature `word-layout`) once WordCraft has
