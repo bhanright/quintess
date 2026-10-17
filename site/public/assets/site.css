@@ -1,5 +1,4 @@
-/* Quintess site. A printer's proof sheet: crop marks, folios, section marks
-   and folded corners that echo the logo. Dark ink, one violet, a little cyan. */
+/* Quintess: straightforward type, real product imagery and a violet accent. */
 
 @font-face {
   font-family: "Archivo";
@@ -23,8 +22,8 @@
   --line-strong: rgba(236, 235, 242, 0.16);
   --text: #ecebf2;
   --muted: #a2a1b0;
-  --faint: #6c6b7a;
-  --violet: #7c5cff;
+  --faint: #9493a3;
+  --violet: #7048e8;
   --violet-hi: #9b82ff;
   --violet-soft: rgba(124, 92, 255, 0.14);
   --cyan: #22d3ee;
@@ -480,3 +479,76 @@ main { position: relative; z-index: 2; }
 .download-card .dl-card { --card-ground: var(--ink); --card-well: var(--ink-3); }
 /* Commands show every character as typed: no "--" drawn as a dash. */
 .dl-card code, .dl-cmd { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+
+/* Product-first layout. Keep the page quiet so the app is the visual focus. */
+.grid-lines, .crosshair, .readout, .proof::before { display: none; }
+.top { background: var(--ink); backdrop-filter: none; }
+.top .button-small { margin-left: auto; min-height: 40px; }
+.button { clip-path: none; border-radius: 4px; font-stretch: 100%; }
+.button::after { display: none; }
+.button:hover { --bg: #6239d4; transform: none; }
+.hero {
+  padding-top: 56px;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  grid-template-areas: "head shot" "copy shot";
+  gap: 24px 48px;
+}
+.hero .display { font-size: clamp(38px, 4.2vw, 56px); line-height: 1.06; font-stretch: 100%; font-weight: 720; letter-spacing: -.035em; }
+.kicker { border: 0; padding: 0; font-family: var(--body); font-size: 13px; line-height: 1.5; margin-bottom: 16px; }
+.hero .lede { margin-bottom: 22px; font-size: 18px; line-height: 1.65; }
+.hero-copy { padding-top: 0; }
+.hero-shot { margin-top: 8px; }
+.hero-media { padding: 0; border-radius: 5px; overflow: hidden; }
+.hero-shot figcaption { font-family: var(--body); font-size: 13px; color: var(--muted); max-width: 54ch; }
+.hero-trust, .hero-release, .smartscreen { font-size: 13px; line-height: 1.65; color: var(--muted); margin: 16px 0 0; max-width: 50ch; }
+.hero-trust a, .hero-release a, .smartscreen a { text-underline-offset: 3px; }
+.dl-others { font-size: 14px; margin-top: 10px; }
+.dl-meta { margin-top: 6px; }
+.section { padding-top: 64px; }
+.sec-head { display: block; margin-bottom: 24px; }
+.display-2 { font-stretch: 100%; font-weight: 650; font-size: clamp(28px, 3vw, 38px); line-height: 1.2; }
+.sec-intro { max-width: 65ch; margin: 0 0 28px; }
+.sec-no, .sec-folio { display: none; }
+.cell { border: 0; background: transparent; padding: 0; clip-path: none; }
+.cell::after { display: none; }
+.cell-in { padding: 0; background: transparent; clip-path: none; }
+.cell h3 { font-stretch: 100%; font-size: 20px; font-weight: 650; }
+.cell-copy { font-size: 16px; color: var(--muted); }
+.task-grid { gap: 36px; }
+.task-grid .text-link { display: inline-block; margin-top: 14px; font-size: 14px; }
+#different .diff-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 64px; }
+.bench { border: 0; border-top: 1px solid var(--line); padding: 24px 0 0; background: transparent; }
+.bench-title { font-stretch: 100%; font-size: 24px; font-weight: 650; }
+.download { padding-top: 64px; }
+.download > h2 { margin-bottom: 24px; }
+.download-card { padding: 0; border: 0; background: transparent; gap: 16px; }
+.release-trust { grid-column: 1 / -1; margin: 0 0 12px; font-size: 14px; color: var(--muted); max-width: 76ch; }
+.download-card .dl-card { --card-ground: var(--ink-2); }
+.dl-lede { margin-bottom: 0; }
+.dl-cards.live .dl-card:not(.open) .dl-head { min-height: 112px; }
+.dl-head { gap: 12px; padding: 18px; }
+.dl-top { display: none; }
+.dl-cards.live .dl-card:not(.open) .dl-top { display: flex; }
+.dl-icon { width: 22px; height: 22px; }
+.dl-file { min-height: 44px; line-height: 1.4; align-items: center; flex-wrap: wrap; border-radius: 3px; }
+.recommended { font-size: 11px; font-weight: 400; }
+.dl-tag { background: transparent; color: var(--violet-hi); padding: 0; font-family: var(--body); letter-spacing: 0; }
+@media (max-width: 1060px) {
+  .hero { grid-template-columns: 1fr; grid-template-areas: "head" "copy" "shot"; gap: 20px; }
+  .hero-shot { max-width: 760px; margin-top: 16px; }
+}
+@media (max-width: 720px) {
+  .hero { padding-top: 32px; gap: 16px; }
+  .hero .display { font-size: clamp(31px, 9.7vw, 38px); }
+  .hero .lede { font-size: 17px; line-height: 1.55; }
+  .hero-release { margin-top: 12px; }
+  .hero .dl-primary .button { font-size: 16px; padding: 14px 18px; }
+  .task-grid, #different .diff-grid { grid-template-columns: 1fr; gap: 26px; }
+  .task-grid .cell + .cell { border-top: 1px solid var(--line); padding-top: 24px; }
+  .section, .download { padding-top: 44px; }
+  .dl-cards { grid-template-columns: 1fr; }
+  .dl-cards.live .dl-card:not(.open) { grid-column: 1 / -1; }
+  .dl-cards.live .dl-card:not(.open) .dl-head { min-height: 0; flex-direction: row; align-items: center; gap: 14px; }
+  .dl-cards.live .dl-card:not(.open) .dl-top { order: 2; }
+  .dl-cards.live .dl-card:not(.open) .dl-icon { display: none; }
+}

@@ -53,17 +53,16 @@ TEMPLATE = """<!doctype html>
 {head_extra}</head>
 <body class="subpage">
 <a class="skip" href="#main">Skip to content</a>
-<div class="grid-lines" aria-hidden="true"></div>
 <header class="top">
   <div class="top-in">
     <a class="brand" href="/" aria-label="Quintess home"><img src="/assets/img/mark.png" alt="" width="20" height="24"><span>quintess</span></a>
     <nav class="nav" aria-label="Main">
+      <a href="/#everyday">Features</a>
       <a href="/#speed">Speed</a>
-      <a href="/#different">What's different</a>
+      <a href="/#different">Extras</a>
       <a href="/guide/"{guide_current}>Guide</a>
       <a href="https://github.com/bhanright/quintess" data-track="github">GitHub</a>
     </nav>
-    <span class="readout" aria-hidden="true"></span>
     <a class="button button-small" href="/#download">Download</a>
   </div>
   <div class="progress" aria-hidden="true"><span></span></div>

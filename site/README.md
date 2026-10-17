@@ -25,6 +25,15 @@ Local secrets go in `.dev.vars` (`STATS_PASSWORD=...`, `VISITOR_SECRET=...`).
 After changing `site.css` or `site.js`, run `python tools/build_pages.py`: it
 stamps their links with a hash so browsers fetch the new copy.
 
+The homepage preview is an actual capture of Quintess 0.4.4. To refresh it,
+build the release app and run `site/tools/capture_preview.ps1` from the
+repository root. It creates a sample PDF from `site/tools/preview-notes.md`,
+captures the app with its text editor open, and exits. It requires Python
+with Pillow; pass `-Python <path>` if Python is not on your PATH. Update the homepage's
+caption and alternative text to the version captured. The benchmark section
+is labeled separately with the version actually measured; do not relabel
+historical results when publishing a new app release.
+
 ## Deploying
 
 ```

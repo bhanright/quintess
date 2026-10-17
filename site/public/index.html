@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quintess: faster than Acrobat, and free · PDF editor for Windows, Mac and Linux</title>
-<meta name="description" content="Quintess opens long PDFs in a fraction of Acrobat's time, with a quarter of the memory. Free and open source for Windows, Mac and Linux, with no account or subscription.">
+<title>Quintess · Free PDF editor for Windows, Mac and Linux</title>
+<meta name="description" content="Edit PDF text and pictures, organize pages, fill forms and sign documents. Free and open source for Windows, Mac and Linux. No account or subscription.">
 <link rel="canonical" href="https://quintess.cc/">
 <meta name="theme-color" content="#0a0a0f">
 <meta name="color-scheme" content="dark">
@@ -14,15 +14,15 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Quintess">
 <meta property="og:url" content="https://quintess.cc/">
-<meta property="og:title" content="Quintess: faster than Acrobat, and free · PDF editor for Windows, Mac and Linux">
-<meta property="og:description" content="Quintess opens long PDFs in a fraction of Acrobat's time, with a quarter of the memory. Free and open source for Windows, Mac and Linux, with no account or subscription.">
+<meta property="og:title" content="Quintess · Free PDF editor for Windows, Mac and Linux">
+<meta property="og:description" content="Edit PDF text and pictures, organize pages, fill forms and sign documents. Free and open source for Windows, Mac and Linux. No account or subscription.">
 <meta property="og:image" content="https://quintess.cc/assets/img/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="The Quintess logo beside the line: A free PDF editor for Windows, Mac and Linux.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/site.css?v=e28d6aa55a">
+<link rel="stylesheet" href="/assets/site.css?v=68e4262598">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -31,7 +31,7 @@
       "@type": "SoftwareApplication",
       "@id": "https://quintess.cc/#app",
       "name": "Quintess",
-      "description": "Quintess opens long PDFs in a fraction of Acrobat's time, with a quarter of the memory. Free and open source for Windows, Mac and Linux, with no account or subscription.",
+      "description": "Edit PDF text and pictures, organize pages, fill forms and sign documents. Free and open source for Windows, Mac and Linux. No account or subscription.",
       "applicationCategory": "BusinessApplication",
       "applicationSubCategory": "PDF editor",
       "operatingSystem": "Windows 10, Windows 11, macOS, Linux",
@@ -43,11 +43,11 @@
       "license": "https://github.com/bhanright/quintess/blob/main/LICENSE-MIT",
       "isAccessibleForFree": true,
       "image": "https://quintess.cc/assets/img/icon-512.png",
-      "screenshot": "https://quintess.cc/assets/img/app-wrap.png",
+      "screenshot": "https://quintess.cc/assets/img/app-edit.png",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "author": { "@type": "Person", "name": "William Hanright", "url": "https://github.com/bhanright" },
       "codeRepository": "https://github.com/bhanright/quintess",
-      "featureList": ["Runs on Linux as well as Windows", "No account and no subscription", "Text wrap around pictures", "Redaction with a check for leftover text", "Fill a form from every row of a spreadsheet", "Watched folders that process PDFs automatically", "Edit PDF text and pictures"]
+      "featureList": ["Edit PDF text and pictures", "Organize, merge and split pages", "Fill forms and sign documents", "Windows, Mac and Linux", "No account and no subscription", "Text wrap around pictures", "Redaction with a check for leftover text", "Fill a form from every row of a spreadsheet", "Watched folders that process PDFs automatically"]
     },
     {
       "@type": "WebSite",
@@ -62,8 +62,6 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
-<div class="grid-lines" aria-hidden="true"></div>
-<div class="crosshair" aria-hidden="true"><span class="crosshair-x"></span><span class="crosshair-y"></span></div>
 
 
 <header class="top">
@@ -73,12 +71,12 @@
       <span>quintess</span>
     </a>
     <nav class="nav" aria-label="Main">
+      <a href="#everyday">Features</a>
       <a href="#speed">Speed</a>
-      <a href="#different">What's different</a>
+      <a href="#different">Extras</a>
       <a href="/guide/">Guide</a>
       <a href="https://github.com/bhanright/quintess" data-track="github">GitHub</a>
     </nav>
-    <span class="readout" aria-hidden="true"><span data-readout>x 0000 · y 0000 pt</span></span>
     <a class="button button-small" href="#download">Download</a>
   </div>
   <div class="progress" aria-hidden="true"><span></span></div>
@@ -89,19 +87,11 @@
 <!-- HERO -->
 <section class="hero" aria-labelledby="hero-title">
   <div class="hero-head">
-    <p class="kicker"><span class="dot"></span><span>v<span data-version>0.4.4</span> · free · open source · Windows · Mac · Linux</span></p>
-    <h1 id="hero-title" class="display">Faster than Acrobat.<br>Free.</h1>
-  </div>
-  <div class="hero-lead">
-    <p class="lede">Quintess opens a 624-page PDF in 0.8 seconds; Adobe Acrobat takes 9.2. It uses a quarter of the memory, and it's free and open source for Windows, Mac and Linux, with no account or subscription.</p>
-    <ul class="figures">
-      <li><b class="figure-num">0.8 s <i>vs</i> 9.2 s</b><span class="figure-label mono">to open a 624-page document</span></li>
-      <li><b class="figure-num">144 MB <i>vs</i> 591 MB</b><span class="figure-label mono">memory once it's open</span></li>
-      <li><b class="figure-num">$0</b><span class="figure-label mono">no subscription, no account</span></li>
-    </ul>
-    <p class="figures-link"><a class="text-link" href="/benchmarks/">How we measured →</a></p>
+    <p class="kicker"><span>v<span data-version>0.4.4</span> · free · open source · Windows · Mac · Linux</span></p>
+    <h1 id="hero-title" class="display">A free PDF editor<br>for your desktop.</h1>
   </div>
   <div class="hero-copy">
+    <p class="lede">Edit text and pictures, organize pages, fill forms and sign PDFs. Quintess is free and open source for Windows, Mac and Linux. No account. No subscription.</p>
     <div class="dl-primary dl" data-asset="windows" data-primary-download>
       <a class="button" href="https://github.com/bhanright/quintess/releases/download/v0.4.4/Quintess-0.4.4-setup.exe" data-download="windows" data-track="download">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
@@ -109,48 +99,52 @@
       </a>
       <p class="dl-meta"><span class="dl-note" data-primary-note>Windows 10/11 · x86_64 · installs for your user account</span><span class="fine mono keep-case" data-asset-line>Quintess-0.4.4-setup.exe</span></p>
     </div>
-    <p class="dl-others"><a href="#download">Mac, Linux, Windows on ARM, and how to install ↓</a></p>
-    <div class="cta">
-      <a class="button button-ghost" href="https://github.com/bhanright/quintess" data-track="github">View the source</a>
-    </div>
-    <ul class="hero-links">
-      <li><a href="/guide/#installing-on-windows">Installing on Windows</a></li>
-      <li><a href="/guide/#installing-on-macos">Installing on a Mac</a></li>
-      <li><a href="/guide/#installing-on-linux">Installing on Linux</a></li>
-      <li><a href="https://github.com/bhanright/quintess/releases" data-track="github">Release notes</a></li>
-    </ul>
-    <p class="smartscreen">Quintess isn't code-signed yet. Windows may show a SmartScreen warning, and a Mac asks you to choose Open Anyway in System Settings › Privacy &amp; Security the first time. <a href="#install-notes">Why, and what to do</a>.</p>
-  </div>
+    <p class="dl-others"><a href="#download">Other systems and installation help</a></p>
+    <p class="hero-trust">Your PDFs stay on your computer. Editing, OCR and redaction work offline. <a href="#faq">Privacy questions →</a></p>
+    <p class="smartscreen">Windows and Mac downloads aren't code-signed yet. <a href="#install-notes">Read the first-install guidance</a>.</p>
+    <p class="hero-release">By <a href="https://github.com/bhanright">William Hanright</a> · <a href="https://github.com/bhanright/quintess/releases" data-track="github">Release notes</a> · <a href="https://github.com/bhanright/quintess" data-track="github">Source code</a></p>
   </div>
 
   <figure class="hero-shot">
     <div class="hero-media">
       <picture>
-        <source srcset="/assets/img/app-wrap.webp" type="image/webp">
-        <img src="/assets/img/app-wrap.png" width="1280" height="860" alt="Quintess on Windows with a newsletter open. A round picture is selected, and its paragraphs wrap tightly around the circle; the picture toolbar shows Wrap text switched on.">
+        <source srcset="/assets/img/app-edit.webp" type="image/webp">
+        <img src="/assets/img/app-edit.png" width="1280" height="860" fetchpriority="high" alt="Quintess 0.4.4 on Windows editing workshop notes. A paragraph in the PDF is selected, with text formatting, alignment and layout controls above it.">
       </picture>
     </div>
-    <figcaption class="mono">Quintess 0.2.0 on Windows. Tight text wrap: the lines follow the picture's outline, and move with it.</figcaption>
+    <figcaption class="preview-caption">Editing a paragraph in Quintess 0.4.4 on Windows. Select text to change its wording, formatting or alignment. Your original file is unchanged until you save.</figcaption>
   </figure>
 </section>
 
 
+<!-- EVERYDAY -->
+<section class="section everyday" id="everyday" aria-labelledby="everyday-title">
+  <header class="sec-head">
+    <h2 id="everyday-title" class="display-2">The everyday PDF jobs.</h2>
+  </header>
+  <p class="sec-intro">From a quick correction to a signed form, the tools you need are in one app.</p>
+  <div class="diff-grid task-grid">
+    <article class="cell"><div class="cell-in"><h3>Edit text and pictures.</h3><p class="cell-copy">Correct a paragraph, replace an image, or adjust the layout without recreating your document.</p><a class="text-link" href="/guide/#editing-text">See how to edit →</a></div></article>
+    <article class="cell"><div class="cell-in"><h3>Put pages in order.</h3><p class="cell-copy">Reorder, rotate or remove pages. Combine documents or split out just the pages you need.</p><a class="text-link" href="/guide/#pages">Explore page tools →</a></div></article>
+    <article class="cell"><div class="cell-in"><h3>Fill forms and sign.</h3><p class="cell-copy">Complete a PDF form and add your signature. Create reusable forms for the next time.</p><a class="text-link" href="/guide/#forms">Work with forms →</a></div></article>
+  </div>
+  <p class="diff-more">Also includes comments, OCR, redaction and conversion. <a class="text-link" href="/guide/">Explore the user guide →</a></p>
+</section>
+
 <!-- SPEED -->
 <section class="section" id="speed" aria-labelledby="speed-title">
   <header class="sec-head">
-    <span class="sec-no mono" aria-hidden="true">§01</span>
-    <h2 id="speed-title" class="display-2">The numbers.</h2>
-    <span class="sec-folio mono" aria-hidden="true">p. 02</span>
+    <h2 id="speed-title" class="display-2">Opening speed and memory.</h2>
   </header>
-  <p class="sec-intro">Measured on the same Windows PC, opening two long documents. Quintess shows the first page in about 0.3 seconds; the times below run until each program stops working on its own.</p>
+  <p class="sec-intro">In the 0.2.0 tests, Quintess showed the first page in about 0.3 seconds. The comparison below measures how long background work continued after opening, and the memory used at that point.</p>
   <div class="bench proof">
     <h3 class="bench-title">Opening two long PDFs.</h3>
-    <p class="bench-intro">We measured Quintess 0.2.0 and Adobe Acrobat 26.2 on the same Windows PC, on October 11, 2026.</p>
+    <p class="bench-intro">Historical benchmark: Quintess 0.2.0 vs Adobe Acrobat 26.2, measured October 11, 2026. Downloads now offer v<span data-version>0.4.4</span>; these figures have not been remeasured for that release.</p>
     <div class="bars" aria-hidden="true">
       <div class="bar-group">
         <p class="bar-doc">624-page text document</p>
         <div class="bar-metric">
-          <p class="bar-name mono">time to ready</p>
+          <p class="bar-name mono">time to settle</p>
           <div class="bar-row us"><span class="bar-who mono">Quintess</span><span class="bar-track"><span class="bar-fill" style="--w:8.7%"></span></span><span class="bar-val mono">0.8 s</span></div>
           <div class="bar-row"><span class="bar-who mono">Acrobat</span><span class="bar-track"><span class="bar-fill" style="--w:100.0%"></span></span><span class="bar-val mono">9.2 s</span></div>
         </div>
@@ -163,7 +157,7 @@
       <div class="bar-group">
         <p class="bar-doc">150-page scanned document</p>
         <div class="bar-metric">
-          <p class="bar-name mono">time to ready</p>
+          <p class="bar-name mono">time to settle</p>
           <div class="bar-row us"><span class="bar-who mono">Quintess</span><span class="bar-track"><span class="bar-fill" style="--w:29.3%"></span></span><span class="bar-val mono">2.7 s</span></div>
           <div class="bar-row"><span class="bar-who mono">Acrobat</span><span class="bar-track"><span class="bar-fill" style="--w:97.8%"></span></span><span class="bar-val mono">9.0 s</span></div>
         </div>
@@ -177,15 +171,15 @@
     <div class="versus-scroll">
     <table class="bench-table">
       <thead>
-        <tr><th scope="col">Document</th><th scope="col" class="us num">Quintess: ready to use</th><th scope="col" class="num">Acrobat: ready to use</th><th scope="col" class="us num">Quintess memory</th><th scope="col" class="num">Acrobat memory</th></tr>
+        <tr><th scope="col">Document</th><th scope="col" class="us num">Quintess: time to settle</th><th scope="col" class="num">Acrobat: time to settle</th><th scope="col" class="us num">Quintess memory</th><th scope="col" class="num">Acrobat memory</th></tr>
       </thead>
       <tbody>
-        <tr><th scope="row">624-page text document</th><td class="us num" data-label="Quintess: ready to use" data-bench="text-quintess-time">0.8 s</td><td class="num" data-label="Acrobat: ready to use" data-bench="text-acrobat-time">9.2 s</td><td class="us num" data-label="Quintess memory" data-bench="text-quintess-memory">144 MB</td><td class="num" data-label="Acrobat memory" data-bench="text-acrobat-memory">591 MB</td></tr>
-        <tr><th scope="row">150-page scanned document</th><td class="us num" data-label="Quintess: ready to use" data-bench="scan-quintess-time">2.7 s</td><td class="num" data-label="Acrobat: ready to use" data-bench="scan-acrobat-time">9.0 s</td><td class="us num" data-label="Quintess memory" data-bench="scan-quintess-memory">387 MB</td><td class="num" data-label="Acrobat memory" data-bench="scan-acrobat-memory">807 MB</td></tr>
+        <tr><th scope="row">624-page text document</th><td class="us num" data-label="Quintess: time to settle" data-bench="text-quintess-time">0.8 s</td><td class="num" data-label="Acrobat: time to settle" data-bench="text-acrobat-time">9.2 s</td><td class="us num" data-label="Quintess memory" data-bench="text-quintess-memory">144 MB</td><td class="num" data-label="Acrobat memory" data-bench="text-acrobat-memory">591 MB</td></tr>
+        <tr><th scope="row">150-page scanned document</th><td class="us num" data-label="Quintess: time to settle" data-bench="scan-quintess-time">2.7 s</td><td class="num" data-label="Acrobat: time to settle" data-bench="scan-acrobat-time">9.0 s</td><td class="us num" data-label="Quintess memory" data-bench="scan-quintess-memory">387 MB</td><td class="num" data-label="Acrobat memory" data-bench="scan-acrobat-memory">807 MB</td></tr>
       </tbody>
     </table>
     </div>
-    <p class="bench-caption">These results cover two files on one PC. They do not measure rendering every page or scrolling through the whole document. Results vary with the file, hardware and settings.</p>
+    <p class="bench-caption">Warm-run medians for two files on one Windows PC. Time to settle means background CPU activity quieted after opening; it does not measure editing, scrolling or rendering every page. Results vary with the file, hardware and settings.</p>
     <a class="text-link" href="/benchmarks/">Test files, setup and results →</a>
     <p class="bench-attrib">Adobe and Acrobat are either registered trademarks or trademarks of Adobe in the United States and/or other countries. Quintess is not affiliated with or endorsed by Adobe.</p>
   </div>
@@ -195,28 +189,24 @@
 <!-- DIFFERENT -->
 <section class="section" id="different" aria-labelledby="different-title">
   <header class="sec-head">
-    <span class="sec-no mono" aria-hidden="true">§02</span>
-    <h2 id="different-title" class="display-2">What Acrobat doesn't do.</h2>
-    <span class="sec-folio mono" aria-hidden="true">p. 03</span>
+    <h2 id="different-title" class="display-2">A few useful extras.</h2>
   </header>
   <div class="diff-grid">
-    <article class="cell proof"><div class="cell-in"><h3>Linux.</h3><p class="cell-copy">A .deb for Ubuntu and Debian and a tarball for other distributions. Acrobat has no Linux version.</p></div></article>
+    <article class="cell proof"><div class="cell-in"><h3>A native Linux app.</h3><p class="cell-copy">Choose a .deb for Ubuntu or Debian, an AppImage, a Flatpak or a tarball. The same editor runs on Windows and Mac too.</p></div></article>
     <article class="cell proof"><div class="cell-in"><h3>No account. No subscription.</h3><p class="cell-copy">Download it and use it. There's nothing to sign in to or renew, and your documents stay on your computer.</p></div></article>
     <article class="cell proof"><div class="cell-in"><h3>Text that wraps around pictures.</h3><p class="cell-copy">Square, tight or top-and-bottom wrapping, as in Word. Move the picture and the paragraph follows.</p></div></article>
     <article class="cell proof"><div class="cell-in"><h3>Redactions you can check.</h3><p class="cell-copy">After redacting, Quintess searches the page text, metadata, comments, form data and attachments it can read for any word that should be gone.</p></div></article>
     <article class="cell proof"><div class="cell-in"><h3>One form, every row of a spreadsheet.</h3><p class="cell-copy">Fill a PDF form from a CSV or Excel file and get one filled copy per row, named the way you choose.</p></div></article>
     <article class="cell proof"><div class="cell-in"><h3>Folders that process themselves.</h3><p class="cell-copy">Record a set of steps, then watch a folder: every PDF dropped in gets them. Or script it all from the command line.</p></div></article>
   </div>
-  <p class="diff-more">Everything else you'd expect from a PDF editor is there too: editing text, comments, forms, signatures, OCR, conversion and more. See the <a class="text-link" href="/guide/">user guide</a>.</p>
+  <p class="diff-more">The <a class="text-link" href="/guide/">user guide</a> covers each workflow and the differences between platforms.</p>
 </section>
 
 
 <!-- FAQ -->
 <section class="section" id="faq" aria-labelledby="faq-title">
   <header class="sec-head">
-    <span class="sec-no mono" aria-hidden="true">§03</span>
     <h2 id="faq-title" class="display-2">Questions.</h2>
-    <span class="sec-folio mono" aria-hidden="true">p. 04</span>
   </header>
   <div class="faq">
     <details>
@@ -258,9 +248,10 @@
 
 <!-- DOWNLOAD -->
 <section class="download" id="download" aria-labelledby="download-title">
-  <h2 id="download-title" class="giant" aria-label="Get Quintess"><span>quintess</span><i class="giant-caret" aria-hidden="true"></i></h2>
+  <h2 id="download-title" class="display-2">Get Quintess.</h2>
   <div class="download-card proof">
-    <p class="dl-lede">Choose your system to see its downloads and how to install them.</p>
+    <p class="dl-lede">Free, with no account or subscription. Choose your computer’s system below.</p>
+    <p class="release-trust">Official downloads from <a href="https://github.com/bhanright/quintess/releases" data-track="github">William Hanright’s Quintess releases on GitHub</a>. Version <span data-version>0.4.4</span><span data-release-date></span>. Checksums are listed with each package. Windows and Mac installers are not code-signed.</p>
     <div class="dl-cards" id="dl">
       <div class="dl-card windows" data-system="windows">
         <div class="dl-inner">
@@ -276,8 +267,8 @@
           </button>
           <div class="dl-body" id="dl-windows">
             <div class="dl-files">
-              <a class="dl-file first" href="https://github.com/bhanright/quintess/releases/download/v0.4.4/Quintess-0.4.4-setup.exe" data-asset="windows" data-download="windows" data-track="download">Installer (x64) <small data-asset-size></small></a>
-              <a class="dl-file" href="https://github.com/bhanright/quintess/releases/download/v0.4.4/Quintess-0.4.4-arm64-setup.exe" data-asset="windows_arm64" data-download="windows_arm64" data-track="download">Installer (ARM64) <small data-asset-size></small></a>
+              <a class="dl-file first" href="https://github.com/bhanright/quintess/releases/download/v0.4.4/Quintess-0.4.4-setup.exe" data-asset="windows" data-download="windows" data-track="download">Installer (x64) <span class="recommended" data-recommended="windows">For most PCs</span> <small data-asset-size></small></a>
+              <a class="dl-file" href="https://github.com/bhanright/quintess/releases/download/v0.4.4/Quintess-0.4.4-arm64-setup.exe" data-asset="windows_arm64" data-download="windows_arm64" data-track="download">Installer (ARM64) <span class="recommended" data-recommended="windows_arm64" hidden>Recommended for your PC</span> <small data-asset-size></small></a>
             </div>
             <p>Run the installer: it sets Quintess up for your user account, with no administrator rights, and adds it to the Start menu and to your PATH. It isn't code-signed yet, so Windows shows a SmartScreen warning. If you trust the download, choose “More info”, then “Run anyway”.</p>
             <ul class="dl-notes">
@@ -373,6 +364,6 @@
   </div>
 </footer>
 
-<script src="/assets/site.js?v=2e0064f4c0" defer></script>
+<script src="/assets/site.js?v=da306749e0" defer></script>
 </body>
 </html>
