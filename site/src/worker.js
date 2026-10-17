@@ -58,6 +58,12 @@ function withHeaders(response, url) {
   } else if (url.pathname.startsWith("/assets/")) {
     // site.css and site.js are linked with a version stamp, so they can be kept long.
     headers.set("Cache-Control", url.searchParams.has("v") ? "public, max-age=31536000, immutable" : "public, max-age=3600");
+  } else if (url.pathname === "/sitemap.xml" || url.pathname === "/sitemap.txt" || url.pathname === "/robots.txt") {
+    // For search engines: the character set stated, and no-transform so
+    // Cloudflare sends them uncompressed. Google's Search Console reported
+    // the brotli-compressed sitemap, sent without a character set, as unreadable.
+    headers.set("Content-Type", url.pathname === "/sitemap.xml" ? "application/xml; charset=utf-8" : "text/plain; charset=utf-8");
+    headers.set("Cache-Control", "public, max-age=3600, no-transform");
   } else if (type.includes("text/html")) {
     // Pages are checked for changes on every visit (cheap, with ETags).
     headers.set("Cache-Control", "public, max-age=0, must-revalidate");

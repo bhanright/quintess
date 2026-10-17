@@ -6,6 +6,7 @@ Builds the website's generated pages from one template:
     benchmarks/index.html  the speed and memory comparison (docs/BENCHMARKS.md)
     404.html            the page-not-found page
     sitemap.xml         every page, with the date it last changed
+    sitemap.txt         the same pages, one address per line
 
     python site/tools/build_pages.py
 
@@ -287,7 +288,8 @@ def last_changed(*paths: pathlib.Path) -> str:
     return max(dates) if dates else datetime.date.today().isoformat()
 
 
-def build_sitemap() -> str:
+def sitemap_entries() -> list[tuple[str, str, str]]:
+    """Every page: its path, the date it last changed and its priority."""
     entries = [
         ("/", last_changed(PUBLIC / "index.html"), "1.0"),
         ("/guide/", last_changed(REPOSITORY / "docs" / "USER_GUIDE.md"), "0.8"),
@@ -295,8 +297,19 @@ def build_sitemap() -> str:
     ]
     if (REPOSITORY / "docs" / "BENCHMARKS.md").exists():
         entries.append(("/benchmarks/", last_changed(REPOSITORY / "docs" / "BENCHMARKS.md"), "0.4"))
+    return entries
+
+
+def build_sitemap() -> str:
+    entries = sitemap_entries()
     urls = "\n".join(f"  <url><loc>{ORIGIN}{path}</loc><lastmod>{date}</lastmod><priority>{priority}</priority></url>" for path, date, priority in entries)
     return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}\n</urlset>\n'
+
+
+def build_text_sitemap() -> str:
+    """The same pages as a plain text sitemap, one address per line, which
+    search engines also accept and which leaves nothing to misparse."""
+    return "".join(f"{ORIGIN}{path}\n" for path, _, _ in sitemap_entries())
 
 
 def write(path: pathlib.Path, text: str) -> None:
@@ -325,6 +338,7 @@ def main() -> None:
         write(PUBLIC / "benchmarks" / "index.html", benchmarks)
     write(PUBLIC / "404.html", build_not_found())
     write(PUBLIC / "sitemap.xml", build_sitemap())
+    write(PUBLIC / "sitemap.txt", build_text_sitemap())
     stamp_assets()
     print("built guide, privacy, 404 and sitemap; stamped asset links")
 
