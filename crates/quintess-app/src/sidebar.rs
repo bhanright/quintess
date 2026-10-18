@@ -31,6 +31,8 @@ pub enum SidebarAction {
     DeleteAnnotation((u32, u16)),
     EditAnnotation((u32, u16), String),
     ReplyToAnnotation((u32, u16), String),
+    /// A text box or callout's new border color, fill or border width.
+    RestyleAnnotation { id: (u32, u16), is_callout: bool, style: quintess_core::annotations::FreeTextStyle },
     FillField(String, String),
     SetBookmarks(Vec<BookmarkEntry>),
     AddAttachment,
@@ -315,7 +317,8 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
                         let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
                         ui.painter().rect_filled(rect, 2.0, Color32::from_rgb((color[0] * 255.0) as u8, (color[1] * 255.0) as u8, (color[2] * 255.0) as u8));
                     }
-                    ui.label(RichText::new(friendly_kind(&comment.subtype)).strong());
+                    let kind = if comment.is_callout { "Callout" } else { friendly_kind(&comment.subtype) };
+                    ui.label(RichText::new(kind).strong());
                     ui.weak(&comment.author);
                 });
                 if state.editing_comment == Some(comment.id) {
@@ -334,6 +337,13 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
                 }
                 for reply in tab.annotations.iter().filter(|a| a.reply_to == Some(comment.id)) {
                     ui.label(RichText::new(format!("↳ {}: {}", reply.author, reply.contents)).italics());
+                }
+                if selected && comment.free_text_style.is_some() {
+                    ui.horizontal(|ui| {
+                        if let Some(style) = free_text_style_controls(ui, tab, &comment) {
+                            actions.push(SidebarAction::RestyleAnnotation { id: comment.id, is_callout: comment.is_callout, style });
+                        }
+                    });
                 }
                 if selected {
                     // Button first, then the field in the width that's left (see bookmarks).
@@ -363,6 +373,41 @@ fn comments(ui: &mut egui::Ui, tab: &mut DocumentTab, state: &mut SidebarState, 
             });
         }
     });
+}
+
+/// Controls for restyling a text box or callout: border color, fill (on or
+/// off, and its color) and border width. They change a draft kept in egui's
+/// memory, and the new style is returned once no mouse button is held, so
+/// dragging the width or a color makes one undoable edit, not one per frame.
+pub fn free_text_style_controls(ui: &mut egui::Ui, tab: &DocumentTab, annotation: &quintess_core::annotations::AnnotationSummary) -> Option<quintess_core::annotations::FreeTextStyle> {
+    use quintess_core::annotations::FreeTextStyle;
+    let stored = annotation.free_text_style?;
+    let draft_id = egui::Id::new(("free text style draft", tab.id, annotation.id));
+    // The draft remembers the stored style it started from; when that changes
+    // (an undo, or the edit just made) the draft starts over from the file.
+    let (_, mut draft) = ui.data(|data| data.get_temp::<(FreeTextStyle, FreeTextStyle)>(draft_id)).filter(|(started_from, _)| *started_from == stored).unwrap_or((stored, stored));
+    ui.color_edit_button_rgb(&mut draft.color).on_hover_text("Border and text color");
+    let filled = draft.fill.is_some();
+    let toggled = if crate::theme::is_studio(ui.ctx()) {
+        crate::theme::text_toggle_button(ui, "Fill", filled, "Fill the box").clicked()
+    } else {
+        let mut checked = filled;
+        ui.checkbox(&mut checked, "Fill").on_hover_text("Fill the box").changed()
+    };
+    if toggled {
+        draft.fill = if filled { None } else { Some(crate::viewer::DEFAULT_FILL_COLOR) };
+    }
+    if let Some(fill) = draft.fill.as_mut() {
+        ui.color_edit_button_rgb(fill).on_hover_text("Fill color");
+    }
+    ui.add(egui::DragValue::new(&mut draft.border_width).range(0.0..=crate::viewer::MAXIMUM_LINE_WIDTH).speed(0.1).suffix(" pt")).on_hover_text("Border width (0 for none)");
+    let settled = !ui.input(|input| input.pointer.any_down());
+    let changed = draft != stored && settled;
+    // Once applied, the draft counts as stored, so it isn't applied twice
+    // while the document catches up.
+    let started_from = if changed { draft } else { stored };
+    ui.data_mut(|data| data.insert_temp(draft_id, (started_from, draft)));
+    changed.then_some(draft)
 }
 
 /// A comment's kind in words, for every annotation type the PDF standard

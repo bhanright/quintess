@@ -378,6 +378,7 @@ impl Dialog {
             Dialog::Text(pending) => match pending.purpose {
                 crate::viewer::TextPurpose::Note => "Note",
                 crate::viewer::TextPurpose::TextBox => "Text box",
+                crate::viewer::TextPurpose::Callout => "Callout",
                 crate::viewer::TextPurpose::LinkAddress => "Link",
                 crate::viewer::TextPurpose::FieldName(_) => "New form field",
                 crate::viewer::TextPurpose::PageText => "Add text to the page",
@@ -1626,7 +1627,7 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                 _ => "Type the text",
             };
             ui.weak(hint);
-            let multiline = matches!(pending.purpose, crate::viewer::TextPurpose::Note | crate::viewer::TextPurpose::TextBox | crate::viewer::TextPurpose::PageText);
+            let multiline = matches!(pending.purpose, crate::viewer::TextPurpose::Note | crate::viewer::TextPurpose::TextBox | crate::viewer::TextPurpose::Callout | crate::viewer::TextPurpose::PageText);
             let response = if multiline {
                 crate::spell::text_field(ui, &mut pending.text, true, 4, f32::INFINITY, "")
             } else {

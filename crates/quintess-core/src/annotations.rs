@@ -30,8 +30,12 @@ pub enum AnnotationKind {
     Squiggly { rects: Vec<[f32; 4]> },
     /// A sticky note at a point.
     Note { x: f32, y: f32 },
-    /// Text drawn directly on the page in a box.
+    /// Text drawn directly on the page in a box. A border width of 0 draws
+    /// no border.
     TextBox { rect: [f32; 4], font_size: f32, fill: Option<Color>, border_width: f32 },
+    /// A text box with a leader line pointing at a spot on the page: the
+    /// box is `rect`, the arrowhead sits at `pointer`.
+    Callout { rect: [f32; 4], pointer: (f32, f32), font_size: f32, fill: Option<Color>, border_width: f32 },
     Rectangle { rect: [f32; 4], fill: Option<Color>, border_width: f32 },
     Ellipse { rect: [f32; 4], fill: Option<Color>, border_width: f32 },
     Line { start: (f32, f32), end: (f32, f32), arrow_at_end: bool, border_width: f32 },
@@ -251,39 +255,16 @@ pub fn add_annotation(pdf: &mut Pdf, page_number: u32, annotation: &NewAnnotatio
             );
             ("Text", rect, content, transparency_resources(opacity, false))
         }
-        AnnotationKind::TextBox { rect, font_size, fill, border_width } => {
-            let mut setter = TextSetter::for_texts(StandardFont::Helvetica, [annotation.contents.as_str()]);
-            dict.set("DA", text_string(&format!("/Helv {} Tf {}", number(*font_size), rgb(color, false))));
-            dict.set("BS", dictionary! { "W" => *border_width });
-            let [left, bottom, right, top] = *rect;
-            let mut content = String::from("/G0 gs ");
-            if let Some(fill) = fill {
-                content.push_str(&format!("{} {} {} {} {} re f ", rgb(*fill, false), number(left), number(bottom), number(right - left), number(top - bottom)));
-                dict.set("IC", color_object(*fill));
-            }
-            if *border_width > 0.0 {
-                let inset = border_width / 2.0;
-                content.push_str(&format!(
-                    "{} {} w {} {} {} {} re S ",
-                    rgb(color, true), number(*border_width), number(left + inset), number(bottom + inset), number(right - left - border_width), number(top - bottom - border_width)
-                ));
-            }
-            let padding = 2.0 + border_width;
-            let lines = wrap_text_by(&annotation.contents, right - left - padding * 2.0, |piece| setter.width(piece, *font_size));
-            content.push_str(&format!("BT {} ", rgb(color, false)));
-            let mut y = top - padding - font_size * 0.9;
-            for line in lines {
-                if y < bottom + padding * 0.5 {
-                    break;
-                }
-                content.push_str(&format!("1 0 0 1 {} {} Tm ", number(left + padding), number(y)));
-                content.push_str(&setter.show(&mut pdf.doc, &line, *font_size));
-                y -= font_size * 1.2;
-            }
-            content.push_str("ET");
-            let mut resources = transparency_resources(opacity, false);
-            resources.set("Font", setter.finish(&mut pdf.doc)?);
-            ("FreeText", *rect, content, resources)
+        AnnotationKind::TextBox { rect, font_size, fill, border_width } | AnnotationKind::Callout { rect, font_size, fill, border_width, .. } => {
+            let leader = match &annotation.kind {
+                AnnotationKind::Callout { pointer, .. } => Some(LeaderLine::from_pointer_to_box(*pointer, *rect)),
+                _ => None,
+            };
+            let shape = FreeTextShape { box_rect: *rect, leader };
+            let style = FreeTextStyle { color, fill: *fill, border_width: *border_width, font_size: *font_size };
+            let drawing = draw_free_text(pdf, &shape, &style, &annotation.contents, opacity)?;
+            write_free_text_entries(&mut dict, &shape, &style, drawing.rect);
+            ("FreeText", drawing.rect, drawing.content, drawing.resources)
         }
         AnnotationKind::Rectangle { rect, fill, border_width } | AnnotationKind::Ellipse { rect, fill, border_width } => {
             let is_ellipse = matches!(annotation.kind, AnnotationKind::Ellipse { .. });
@@ -486,7 +467,7 @@ pub fn add_annotation(pdf: &mut Pdf, page_number: u32, annotation: &NewAnnotatio
     }
     let annotation_id = pdf.doc.add_object(dict);
     // Notes and markups get a pop-up window for their comment text.
-    if !annotation.contents.is_empty() && !matches!(annotation.kind, AnnotationKind::TextBox { .. } | AnnotationKind::Link { .. }) {
+    if !annotation.contents.is_empty() && !matches!(annotation.kind, AnnotationKind::TextBox { .. } | AnnotationKind::Callout { .. } | AnnotationKind::Link { .. }) {
         let [_, _, right, top] = rect;
         let popup_id = pdf.doc.add_object(dictionary! {
             "Type" => "Annot",
@@ -502,6 +483,307 @@ pub fn add_annotation(pdf: &mut Pdf, page_number: u32, annotation: &NewAnnotatio
         append_to_annots(pdf, page_id, annotation_id)?;
     }
     Ok(annotation_id)
+}
+
+/// How a text box or callout looks: everything restyling can change.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FreeTextStyle {
+    /// The color of the text, the border and a callout's leader line.
+    pub color: Color,
+    /// The color inside the box, or `None` to let the page show through.
+    pub fill: Option<Color>,
+    /// The thickness of the border and leader line, in points; 0 draws no border.
+    pub border_width: f32,
+    /// The text size, in points.
+    pub font_size: f32,
+}
+
+/// Space between the border and the text, in points, on top of the
+/// border's own width.
+const FREE_TEXT_PADDING: f32 = 2.0;
+/// Baseline-to-baseline distance as a multiple of the font size.
+const FREE_TEXT_LINE_SPACING: f32 = 1.2;
+/// The widest a callout's text runs before it wraps, in points.
+pub const CALLOUT_WRAP_WIDTH: f32 = 180.0;
+/// A callout without a border still needs a leader line people can see.
+const BORDERLESS_LEADER_WIDTH: f32 = 1.0;
+/// The longest straight run (the knee) where the leader line leaves the box, in points.
+const LEADER_KNEE_LENGTH: f32 = 12.0;
+
+impl FreeTextStyle {
+    fn leader_width(&self) -> f32 {
+        if self.border_width > 0.0 { self.border_width } else { BORDERLESS_LEADER_WIDTH }
+    }
+
+    /// The length of each side of the open arrowhead, in points.
+    fn arrowhead_length(&self) -> f32 {
+        6.0 + self.leader_width() * 2.0
+    }
+
+    /// Space from the box's edge to its text, in points.
+    fn padding(&self) -> f32 {
+        FREE_TEXT_PADDING + self.border_width
+    }
+}
+
+/// A callout's leader line: from the spot called out, through a bend (the
+/// knee), to the point where it meets the box. Stored in that order as the
+/// annotation's /CL entry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LeaderLine {
+    pointer: (f32, f32),
+    knee: (f32, f32),
+    attach: (f32, f32),
+}
+
+impl LeaderLine {
+    /// The line from `pointer` to the middle of the box side facing it,
+    /// leaving that side squarely for a short run before it turns.
+    fn from_pointer_to_box(pointer: (f32, f32), [left, bottom, right, top]: [f32; 4]) -> Self {
+        let (x, y) = pointer;
+        // How far the pointer lies beyond each side; the side it is farthest
+        // beyond is the one facing it.
+        let beyond = [(left - x, Side::Left), (x - right, Side::Right), (bottom - y, Side::Bottom), (y - top, Side::Top)];
+        let (distance, side) = beyond.into_iter().fold((f32::MIN, Side::Left), |best, candidate| if candidate.0 > best.0 { candidate } else { best });
+        let middle = ((left + right) / 2.0, (bottom + top) / 2.0);
+        let (attach, outward) = match side {
+            Side::Left => ((left, middle.1), (-1.0, 0.0)),
+            Side::Right => ((right, middle.1), (1.0, 0.0)),
+            Side::Bottom => ((middle.0, bottom), (0.0, -1.0)),
+            Side::Top => ((middle.0, top), (0.0, 1.0)),
+        };
+        // Never more than halfway to the pointer, so the line doesn't double
+        // back on itself; nothing when the pointer is inside the box.
+        let run = (distance * 0.5).clamp(0.0, LEADER_KNEE_LENGTH);
+        let knee = (attach.0 + outward.0 * run, attach.1 + outward.1 * run);
+        Self { pointer, knee, attach }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Side {
+    Left,
+    Right,
+    Bottom,
+    Top,
+}
+
+/// Where a text box or callout sits: its box and, for a callout, its leader line.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FreeTextShape {
+    box_rect: [f32; 4],
+    leader: Option<LeaderLine>,
+}
+
+/// A text box or callout's appearance, ready to store.
+struct FreeTextDrawing {
+    /// The annotation rectangle: the box, grown to take in a leader line.
+    rect: [f32; 4],
+    content: String,
+    resources: Dictionary,
+}
+
+/// Draws a text box or callout: the leader line with its arrowhead, the
+/// fill, the border and the wrapped text. Creating and restyling both draw
+/// through here, so the two always look alike.
+fn draw_free_text(pdf: &mut Pdf, shape: &FreeTextShape, style: &FreeTextStyle, contents: &str, opacity: f32) -> Result<FreeTextDrawing> {
+    let FreeTextStyle { color, fill, border_width, font_size } = *style;
+    let [left, bottom, right, top] = shape.box_rect;
+    let mut rect = shape.box_rect;
+    let mut content = String::from("/G0 gs ");
+    if let Some(LeaderLine { pointer, knee, attach }) = shape.leader {
+        // The line goes first, so the box is drawn over its end.
+        let width = style.leader_width();
+        let head = style.arrowhead_length();
+        content.push_str(&format!(
+            "q {} {} w 1 J 1 j {} {} m {} {} l {} {} l S ",
+            rgb(color, true), number(width), number(attach.0), number(attach.1), number(knee.0), number(knee.1), number(pointer.0), number(pointer.1)
+        ));
+        // An open arrowhead at the pointer, along the line's last stretch.
+        let from = if (knee.0 - pointer.0).hypot(knee.1 - pointer.1) > 0.01 { knee } else { attach };
+        let angle = (pointer.1 - from.1).atan2(pointer.0 - from.0);
+        let wing = |offset: f32| (pointer.0 - head * (angle + offset).cos(), pointer.1 - head * (angle + offset).sin());
+        let (first_x, first_y) = wing(0.45);
+        let (second_x, second_y) = wing(-0.45);
+        content.push_str(&format!("{} {} m {} {} l {} {} l S Q ", number(first_x), number(first_y), number(pointer.0), number(pointer.1), number(second_x), number(second_y)));
+        rect = union_rect(&[shape.box_rect, points_rect([pointer, knee].into_iter(), head + width)]);
+    }
+    if let Some(fill) = fill {
+        content.push_str(&format!("{} {} {} {} {} re f ", rgb(fill, false), number(left), number(bottom), number(right - left), number(top - bottom)));
+    }
+    if border_width > 0.0 {
+        // Stroked inside the box, so the border's outer edge is the box's edge.
+        let inset = border_width / 2.0;
+        content.push_str(&format!(
+            "{} {} w {} {} {} {} re S ",
+            rgb(color, true), number(border_width), number(left + inset), number(bottom + inset), number(right - left - border_width), number(top - bottom - border_width)
+        ));
+    }
+    let mut setter = TextSetter::for_texts(StandardFont::Helvetica, [contents]);
+    let padding = style.padding();
+    let lines = wrap_text_by(contents, right - left - padding * 2.0, |piece| setter.width(piece, font_size));
+    content.push_str(&format!("BT {} ", rgb(color, false)));
+    let mut baseline = top - padding - font_size * 0.9;
+    for line in lines {
+        if baseline < bottom + padding * 0.5 {
+            break;
+        }
+        content.push_str(&format!("1 0 0 1 {} {} Tm ", number(left + padding), number(baseline)));
+        content.push_str(&setter.show(&mut pdf.doc, &line, font_size));
+        baseline -= font_size * FREE_TEXT_LINE_SPACING;
+    }
+    content.push_str("ET");
+    let mut resources = transparency_resources(opacity, false);
+    resources.set("Font", setter.finish(&mut pdf.doc)?);
+    Ok(FreeTextDrawing { rect, content, resources })
+}
+
+/// Writes a text box or callout's style and geometry the standard way, so
+/// other readers can redraw or edit it: the color (/C), text style (/DA),
+/// border (/BS), fill (/IC) and, for a callout, its line (/IT, /CL, /LE)
+/// and where the box sits inside the larger rectangle (/RD).
+fn write_free_text_entries(dict: &mut Dictionary, shape: &FreeTextShape, style: &FreeTextStyle, rect: [f32; 4]) {
+    dict.set("C", color_object(style.color));
+    dict.set("DA", text_string(&format!("/Helv {} Tf {}", number(style.font_size), rgb(style.color, false))));
+    dict.set("BS", dictionary! { "W" => style.border_width });
+    match style.fill {
+        Some(fill) => dict.set("IC", color_object(fill)),
+        None => {
+            dict.remove(b"IC");
+        }
+    }
+    if let Some(LeaderLine { pointer, knee, attach }) = shape.leader {
+        dict.set("IT", "FreeTextCallout");
+        dict.set("CL", [pointer.0, pointer.1, knee.0, knee.1, attach.0, attach.1].iter().map(|&value| Object::Real(value)).collect::<Vec<_>>());
+        dict.set("LE", "OpenArrow");
+    }
+    let [box_left, box_bottom, box_right, box_top] = shape.box_rect;
+    let [left, bottom, right, top] = rect;
+    // RD lists the margins in the order left, top, right, bottom.
+    let margins = [box_left - left, top - box_top, right - box_right, box_bottom - bottom];
+    if margins.iter().any(|&margin| margin > 0.0) {
+        dict.set("RD", margins.iter().map(|&value| Object::Real(value)).collect::<Vec<_>>());
+    } else {
+        dict.remove(b"RD");
+    }
+}
+
+/// A text box or callout as stored in the file.
+struct StoredFreeText {
+    shape: FreeTextShape,
+    style: FreeTextStyle,
+    contents: String,
+    opacity: f32,
+}
+
+/// Numbers in an array entry (empty when the entry is missing or not an array).
+fn numbers_in(pdf: &Pdf, dict: &Dictionary, key: &[u8]) -> Vec<f32> {
+    dict.get(key).ok().and_then(|value| pdf.resolve(value).as_array().ok()).map(|items| items.iter().filter_map(|item| pdf.resolve(item).as_float().ok()).collect()).unwrap_or_default()
+}
+
+/// A color array of any of the standard lengths as red, green and blue:
+/// none (transparent), one gray, three RGB or four CMYK numbers.
+fn color_from_numbers(numbers: &[f32]) -> Option<Color> {
+    match *numbers {
+        [gray] => Some([gray; 3]),
+        [red, green, blue] => Some([red, green, blue]),
+        [cyan, magenta, yellow, black] => Some([(1.0 - cyan) * (1.0 - black), (1.0 - magenta) * (1.0 - black), (1.0 - yellow) * (1.0 - black)]),
+        _ => None,
+    }
+}
+
+/// The text size named in a default appearance string such as
+/// "/Helv 12 Tf 0 g"; 0 (meaning "fit to the box") and a missing size read as 12.
+fn font_size_from_default_appearance(appearance: &str) -> f32 {
+    let words: Vec<&str> = appearance.split_whitespace().collect();
+    words.iter().position(|word| *word == "Tf").filter(|&index| index > 0).and_then(|index| words[index - 1].parse::<f32>().ok()).filter(|size| *size > 0.0).unwrap_or(12.0)
+}
+
+/// Reads a text box or callout back: where it sits, how it looks and its text.
+fn read_free_text(pdf: &Pdf, annotation_id: ObjectId) -> Result<StoredFreeText> {
+    let dict = pdf.doc.get_dictionary(annotation_id)?;
+    let subtype = dict.get(b"Subtype").ok().and_then(|s| s.as_name().ok()).unwrap_or_default();
+    if subtype != b"FreeText" {
+        bail!("only text boxes and callouts can be restyled");
+    }
+    let stored = rectangle_from_object(&pdf.doc, dict.get(b"Rect")?)?;
+    let rect = [stored[0].min(stored[2]), stored[1].min(stored[3]), stored[0].max(stored[2]), stored[1].max(stored[3])];
+    let margins = match numbers_in(pdf, dict, b"RD")[..] {
+        [left, top, right, bottom] => [left, top, right, bottom],
+        _ => [0.0; 4],
+    };
+    let box_rect = [rect[0] + margins[0], rect[1] + margins[3], rect[2] - margins[2], rect[3] - margins[1]];
+    // A /CL of four numbers has no knee: the line runs straight to the box.
+    let leader = match numbers_in(pdf, dict, b"CL")[..] {
+        [pointer_x, pointer_y, knee_x, knee_y, attach_x, attach_y] => Some(LeaderLine { pointer: (pointer_x, pointer_y), knee: (knee_x, knee_y), attach: (attach_x, attach_y) }),
+        [pointer_x, pointer_y, attach_x, attach_y] => Some(LeaderLine { pointer: (pointer_x, pointer_y), knee: (attach_x, attach_y), attach: (attach_x, attach_y) }),
+        _ => None,
+    };
+    let border_style_width = dict.get(b"BS").ok().and_then(|bs| pdf.resolve(bs).as_dict().ok()).and_then(|bs| bs.get(b"W").ok()).and_then(|w| pdf.resolve(w).as_float().ok());
+    // Without /BS, the older /Border array's third number; readers default to 1.
+    let border_width = border_style_width.or_else(|| numbers_in(pdf, dict, b"Border").get(2).copied()).unwrap_or(1.0).max(0.0);
+    let text = |key: &[u8]| dict.get(key).ok().map(|value| pdf.resolve(value)).and_then(object_to_text).unwrap_or_default();
+    let style = FreeTextStyle {
+        color: color_from_numbers(&numbers_in(pdf, dict, b"C")).unwrap_or([0.0; 3]),
+        fill: color_from_numbers(&numbers_in(pdf, dict, b"IC")),
+        border_width,
+        font_size: font_size_from_default_appearance(&text(b"DA")),
+    };
+    let opacity = dict.get(b"CA").ok().and_then(|value| pdf.resolve(value).as_float().ok()).unwrap_or(1.0).clamp(0.0, 1.0);
+    Ok(StoredFreeText { shape: FreeTextShape { box_rect, leader }, style, contents: text(b"Contents"), opacity })
+}
+
+/// How a text box or callout currently looks.
+pub fn free_text_style(pdf: &Pdf, annotation_id: ObjectId) -> Result<FreeTextStyle> {
+    Ok(read_free_text(pdf, annotation_id)?.style)
+}
+
+/// Gives an existing text box or callout a new color, fill, border width
+/// and text size, keeping its text, its box where it is and a callout's
+/// line pointing at the same spot. The appearance is drawn again.
+pub fn restyle_free_text(pdf: &mut Pdf, annotation_id: ObjectId, style: &FreeTextStyle) -> Result<()> {
+    let stored = read_free_text(pdf, annotation_id)?;
+    redraw_free_text(pdf, annotation_id, &stored, style)
+}
+
+/// Draws a stored text box or callout again in `style` and writes the
+/// result back into its dictionary.
+fn redraw_free_text(pdf: &mut Pdf, annotation_id: ObjectId, stored: &StoredFreeText, style: &FreeTextStyle) -> Result<()> {
+    let font_size = if style.font_size > 0.0 { style.font_size } else { stored.style.font_size };
+    let style = FreeTextStyle { border_width: style.border_width.max(0.0), font_size, ..*style };
+    let drawing = draw_free_text(pdf, &stored.shape, &style, &stored.contents, stored.opacity)?;
+    let appearance_id = appearance(pdf, drawing.rect, drawing.content, drawing.resources);
+    let dict = pdf.doc.get_dictionary_mut(annotation_id)?;
+    write_free_text_entries(dict, &stored.shape, &style, drawing.rect);
+    dict.set("Rect", rectangle_to_object(drawing.rect));
+    dict.set("AP", dictionary! { "N" => appearance_id });
+    dict.set("M", text_string(&pdf_date_now()));
+    Ok(())
+}
+
+/// Where a callout's box goes once its text is known. The box's corner
+/// nearest the pointer sits at `corner` (where the drag ended), so the box
+/// opens away from the spot called out; it is sized to the text wrapped at
+/// [`CALLOUT_WRAP_WIDTH`], and slid back inside `page_bounds` when it would
+/// run off the page.
+pub fn callout_box(pointer: (f32, f32), corner: (f32, f32), contents: &str, style: &FreeTextStyle, page_bounds: [f32; 4]) -> [f32; 4] {
+    let setter = TextSetter::for_texts(StandardFont::Helvetica, [contents]);
+    let width_of = |piece: &str| setter.width(piece, style.font_size);
+    let lines = wrap_text_by(contents, CALLOUT_WRAP_WIDTH, width_of);
+    let widest = lines.iter().map(|line| width_of(line)).fold(0.0, f32::max);
+    // Room for a couple of characters even when empty, and a point to spare
+    // so drawing wraps the text exactly as it was measured here.
+    let text_width = widest.max(style.font_size * 2.0) + 1.0;
+    let padding = style.padding();
+    let width = text_width + padding * 2.0;
+    let height = lines.len().max(1) as f32 * style.font_size * FREE_TEXT_LINE_SPACING + padding * 2.0;
+    let left = if corner.0 >= pointer.0 { corner.0 } else { corner.0 - width };
+    let bottom = if corner.1 >= pointer.1 { corner.1 } else { corner.1 - height };
+    // Kept on the page; when it is too big to fit, its top-left corner stays on.
+    let [page_left, page_bottom, page_right, page_top] = page_bounds;
+    let left = left.min(page_right - width).max(page_left);
+    let bottom = bottom.max(page_bottom).min(page_top - height);
+    [left, bottom, left + width, bottom + height]
 }
 
 fn unique_name() -> String {
@@ -543,6 +825,12 @@ pub struct AnnotationSummary {
     pub link_target: Option<String>,
     /// For text markups: the boxes it covers.
     pub quad_rects: Vec<[f32; 4]>,
+    /// For text boxes and callouts: how they look, for restyling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_text_style: Option<FreeTextStyle>,
+    /// A text box with a leader line (/IT /FreeTextCallout).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_callout: bool,
 }
 
 /// Every annotation in the document except pop-up windows.
@@ -584,7 +872,6 @@ pub fn list_annotations(pdf: &Pdf) -> Vec<AnnotationSummary> {
             found.push(AnnotationSummary {
                 page: index as u32 + 1,
                 id,
-                subtype,
                 rect: dict.get(b"Rect").ok().and_then(|r| rectangle_from_object(&pdf.doc, r).ok()).unwrap_or([0.0; 4]),
                 contents: text(b"Contents"),
                 author: text(b"T"),
@@ -593,6 +880,9 @@ pub fn list_annotations(pdf: &Pdf) -> Vec<AnnotationSummary> {
                 reply_to: dict.get(b"IRT").ok().and_then(|r| r.as_reference().ok()),
                 link_target,
                 quad_rects,
+                free_text_style: if subtype == "FreeText" { read_free_text(pdf, id).ok().map(|stored| stored.style) } else { None },
+                is_callout: dict.get(b"IT").ok().and_then(|intent| intent.as_name().ok()) == Some(b"FreeTextCallout".as_slice()),
+                subtype,
             });
         }
     }
@@ -622,11 +912,20 @@ pub fn delete_annotation(pdf: &mut Pdf, annotation_id: ObjectId) -> Result<()> {
     Ok(())
 }
 
-/// Changes the comment text of an annotation.
+/// Changes the comment text of an annotation. A text box or callout shows
+/// its text on the page, so it is drawn again with the new text.
 pub fn set_annotation_contents(pdf: &mut Pdf, annotation_id: ObjectId, contents: &str) -> Result<()> {
     let dict = pdf.doc.get_dictionary_mut(annotation_id)?;
     dict.set("Contents", text_string(contents));
     dict.set("M", text_string(&pdf_date_now()));
+    let is_free_text = dict.get(b"Subtype").ok().and_then(|s| s.as_name().ok()) == Some(b"FreeText".as_slice());
+    if is_free_text {
+        // Readers that understand rich text (/RC) prefer it to /Contents, so
+        // the old rich text would keep showing the old words.
+        dict.remove(b"RC");
+        let stored = read_free_text(pdf, annotation_id)?;
+        redraw_free_text(pdf, annotation_id, &stored, &stored.style)?;
+    }
     Ok(())
 }
 

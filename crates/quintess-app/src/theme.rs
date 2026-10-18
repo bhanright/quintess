@@ -426,6 +426,8 @@ pub mod icon {
     pub const STRIKETHROUGH: char = '\u{EDE0}';
     pub const NOTE: char = '\u{E70B}';
     pub const TEXT_BOX: char = '\u{E8D2}';
+    /// A speech bubble: the Comments panel's glyph.
+    pub const CALLOUT: char = '\u{E90A}';
     pub const RECTANGLE: char = '\u{E739}';
     pub const ELLIPSE: char = '\u{EA3A}';
     pub const LINE: char = '\u{E738}';
@@ -471,6 +473,15 @@ pub fn icon_button(ui: &mut egui::Ui, glyph: char, fallback: &str, selected: boo
 pub fn toggle_button(ui: &mut egui::Ui, glyph: char, fallback: &str, on: bool, hint: &str) -> egui::Response {
     let colors = palette(ui.ctx());
     let text = icon_text(ui.ctx(), glyph, fallback, 15.0).color(if on { colors.accent_hover } else { colors.text });
+    let button = egui::Button::new(text).min_size(vec2(32.0, 30.0)).corner_radius(8).fill(if on { colors.accent_soft } else { Color32::TRANSPARENT }).stroke(Stroke::NONE);
+    ui.add(button).on_hover_text(hint)
+}
+
+/// A toggle labeled with a word rather than an icon, sized and tinted like
+/// [`toggle_button`] so it sits in the dock beside the icons.
+pub fn text_toggle_button(ui: &mut egui::Ui, label: &str, on: bool, hint: &str) -> egui::Response {
+    let colors = palette(ui.ctx());
+    let text = RichText::new(label).color(if on { colors.accent_hover } else { colors.text });
     let button = egui::Button::new(text).min_size(vec2(32.0, 30.0)).corner_radius(8).fill(if on { colors.accent_soft } else { Color32::TRANSPARENT }).stroke(Stroke::NONE);
     ui.add(button).on_hover_text(hint)
 }

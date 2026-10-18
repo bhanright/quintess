@@ -404,13 +404,26 @@ The dock holds the common markup tools; **More tools** in the dock, or **Tools �
 - **Highlight**, **Underline**, **Strikethrough** and **Squiggly**: drag across text.
 - **Note**: click to place a sticky note.
 - **Text box**, **Rectangle**, **Ellipse**, **Line**, **Arrow**: drag to draw.
+- **Callout** (under **More tools**): a text box with a line pointing at something. Press on the spot you want to point at, drag to where the text should go, let go, and type the text. The box opens away from the spot, with its nearest corner where you let go, and is sized to the text (long text wraps at about 2.5 inches); it stays on the page. Clicking instead of dragging puts the box a little below and to the right of the spot.
 - **Draw**: freehand ink.
 
 The **Color** and **Line width** controls appear in the dock while a markup tool is selected. To delete a comment on the page, click it and press **Delete**.
 
+## Fill and border
+
+Text boxes, callouts, rectangles and ellipses have a border and can have a fill:
+
+- The width control sets the **border width**. For these tools it goes down to 0, which leaves the border off (a callout keeps a thin line to the spot it points at). Lines, arrows and drawings never go below half a point, since a thinner line wouldn't show.
+- **Fill** turns the fill on or off, and the color button beside it picks the fill color. In Studio they sit in the dock next to the width; in Classic, in the toolbar.
+- The **Color** is the border's, the text's and a callout's line color.
+
+## Changing a text box or callout
+
+To restyle a text box or callout that's already on the page, select it: click it with **Select**, or click it in the sidebar's **Comments** section. Its border color, **Fill** (and fill color) and border width then appear in the dock and in the comment's card. Each change is one step you can undo. The text and position stay as they were. Editing the text with **Edit** in the Comments section redraws the box with the new words.
+
 ## Reviewing comments
 
-The sidebar's **Comments** section lists comments by page. Each has **Go to**, **Edit** and **Delete**. Select a comment to **Reply**. **Tools ▸ Comment ▸ Copy comment summary** copies all comments as text, and **File ▸ Export ▸ Comment summary…** saves them to a file.
+The sidebar's **Comments** section lists comments by page. Each has **Go to**, **Edit** and **Delete**. Select a comment to **Reply**, or to restyle a text box or callout. **Tools ▸ Comment ▸ Copy comment summary** copies all comments as text, and **File ▸ Export ▸ Comment summary…** saves them to a file.
 
 ## Stamps and links
 

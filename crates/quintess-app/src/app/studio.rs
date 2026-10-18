@@ -23,7 +23,8 @@ const DOCK_TOOLS: [(Tool, char, &str); 12] = [
     (Tool::Inspect, icon::INSPECT, "ⓘ"),
 ];
 
-const MORE_TOOLS: [(Tool, char, &str); 12] = [
+const MORE_TOOLS: [(Tool, char, &str); 13] = [
+    (Tool::Callout, icon::CALLOUT, "T↗"),
     (Tool::Underline, icon::UNDERLINE, "U"),
     (Tool::StrikeOut, icon::STRIKETHROUGH, "S"),
     (Tool::Squiggly, icon::UNDERLINE, "~"),
@@ -38,9 +39,12 @@ const MORE_TOOLS: [(Tool, char, &str); 12] = [
     (Tool::CheckBox, icon::CHECKBOX, "☐"),
 ];
 
+/// The width of the dock's color buttons, in points (egui's default is 40).
+const DOCK_SWATCH_WIDTH: f32 = 24.0;
+
 /// Tools whose marks take the color and line width.
 fn uses_markup_settings(tool: Tool) -> bool {
-    matches!(tool, Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly | Tool::Note | Tool::TextBox | Tool::Rectangle | Tool::Ellipse | Tool::Line | Tool::Arrow | Tool::Ink | Tool::Stamp)
+    matches!(tool, Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly | Tool::Note | Tool::TextBox | Tool::Callout | Tool::Rectangle | Tool::Ellipse | Tool::Line | Tool::Arrow | Tool::Ink | Tool::Stamp)
 }
 
 /// The logo's mark as a texture, decoded once and kept in egui's memory.
@@ -274,10 +278,26 @@ impl QuintessApp {
                                     });
                                 }
                             });
+                            // Narrow color swatches, so the dock still fits the
+                            // default window with the fill controls showing.
+                            ui.spacing_mut().interact_size.x = DOCK_SWATCH_WIDTH;
                             if uses_markup_settings(self.tool) {
                                 divider(ui, &colors);
                                 ui.color_edit_button_rgb(&mut self.tool_settings.color).on_hover_text("Color");
-                                ui.add(egui::DragValue::new(&mut self.tool_settings.stroke_width).range(0.5..=12.0).speed(0.1).suffix(" pt")).on_hover_text("Line width");
+                                ui.add(viewer::line_width_field(&mut self.tool_settings.stroke_width, self.tool)).on_hover_text(self.tool.width_hint());
+                                if self.tool.draws_a_bordered_box() {
+                                    let filled = self.tool_settings.fill.is_some();
+                                    if theme::text_toggle_button(ui, "Fill", filled, "Fill shapes, text boxes and callouts").clicked() {
+                                        self.tool_settings.fill = if filled { None } else { Some(viewer::DEFAULT_FILL_COLOR) };
+                                    }
+                                    if let Some(fill) = self.tool_settings.fill.as_mut() {
+                                        ui.color_edit_button_rgb(fill).on_hover_text("Fill color");
+                                    }
+                                }
+                            }
+                            // A text box or callout picked with Select can be restyled here.
+                            if self.tool == Tool::Select {
+                                self.dock_free_text_style(ui, &colors);
                             }
                             divider(ui, &colors);
                             if theme::icon_button(ui, icon::ORGANIZE, "▦", self.organizer, "Organize pages").clicked() {
@@ -286,6 +306,20 @@ impl QuintessApp {
                         });
                     });
             });
+    }
+
+    /// Border color, fill and border width for the selected text box or
+    /// callout; each change is one undoable edit.
+    fn dock_free_text_style(&mut self, ui: &mut egui::Ui, colors: &Palette) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.is_read_only() {
+            return;
+        }
+        let Some(annotation) = tab.selected_annotation.and_then(|selected| tab.annotations.iter().find(|a| a.id == selected && a.free_text_style.is_some())).cloned() else { return };
+        divider(ui, colors);
+        if let Some(style) = crate::sidebar::free_text_style_controls(ui, tab, &annotation) {
+            self.restyle_free_text(annotation.id, annotation.is_callout, style);
+        }
     }
 
     /// Page and zoom controls at the start of the dock.

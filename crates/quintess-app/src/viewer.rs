@@ -6,7 +6,7 @@
 //! that the app applies after drawing, as single undoable steps.
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
-use quintess_core::annotations::{AnnotationKind, LinkTarget, NewAnnotation};
+use quintess_core::annotations::{AnnotationKind, FreeTextStyle, LinkTarget, NewAnnotation, callout_box};
 use quintess_core::forms::{FieldInfo, FieldType, NewField, NewFieldKind};
 
 use quintess_core::edit_text::{Alignment, EditableLine, EditableParagraph, LineStyle, Overflow, ParagraphReport, ParagraphStyle};
@@ -29,6 +29,9 @@ pub enum Tool {
     Squiggly,
     Note,
     TextBox,
+    /// A text box with a line pointing at a spot: press on the spot, drag to
+    /// where the box goes.
+    Callout,
     Rectangle,
     Ellipse,
     Line,
@@ -66,6 +69,7 @@ impl Tool {
             Tool::Squiggly => "Squiggly",
             Tool::Note => "Note",
             Tool::TextBox => "Text box",
+            Tool::Callout => "Callout",
             Tool::Rectangle => "Rectangle",
             Tool::Ellipse => "Ellipse",
             Tool::Line => "Line",
@@ -99,10 +103,44 @@ impl Tool {
         matches!(self, Tool::Select | Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly | Tool::RedactText)
     }
 
-    /// Tools that draw a rectangle by dragging.
-    fn drags_a_box(self) -> bool {
-        matches!(self, Tool::TextBox | Tool::Rectangle | Tool::Ellipse | Tool::Link | Tool::RedactArea | Tool::TextField | Tool::CheckBox | Tool::SignatureField | Tool::Line | Tool::Arrow | Tool::Sign | Tool::TagArea)
+    /// Tools whose marks are boxes with a border: they can be filled, and a
+    /// border width of 0 leaves the border off.
+    pub fn draws_a_bordered_box(self) -> bool {
+        matches!(self, Tool::TextBox | Tool::Callout | Tool::Rectangle | Tool::Ellipse)
     }
+
+    /// The widths the line width setting offers for this tool, in points.
+    /// Boxes can do without a border; a line, arrow or drawing of width 0
+    /// would draw nothing.
+    pub fn width_range(self) -> std::ops::RangeInclusive<f32> {
+        if self.draws_a_bordered_box() { 0.0..=MAXIMUM_LINE_WIDTH } else { MINIMUM_LINE_WIDTH..=MAXIMUM_LINE_WIDTH }
+    }
+
+    /// The line width setting's hover text for this tool.
+    pub fn width_hint(self) -> &'static str {
+        if self.draws_a_bordered_box() { "Border width (0 for none)" } else { "Line width" }
+    }
+
+    /// Tools that draw a rectangle (or a line) by dragging.
+    fn drags_a_box(self) -> bool {
+        matches!(self, Tool::TextBox | Tool::Callout | Tool::Rectangle | Tool::Ellipse | Tool::Link | Tool::RedactArea | Tool::TextField | Tool::CheckBox | Tool::SignatureField | Tool::Line | Tool::Arrow | Tool::Sign | Tool::TagArea)
+    }
+}
+
+/// The thinnest line the markup tools draw, in points.
+pub const MINIMUM_LINE_WIDTH: f32 = 0.5;
+/// The thickest line or border the markup tools draw, in points.
+pub const MAXIMUM_LINE_WIDTH: f32 = 12.0;
+
+/// A new fill starts pale yellow, like a sticky note, so text on it stays readable.
+pub const DEFAULT_FILL_COLOR: [f32; 3] = [1.0, 1.0, 0.85];
+
+/// The line width setting as a field, in points; its range depends on the tool.
+pub fn line_width_field(width: &mut f32, tool: Tool) -> egui::DragValue<'_> {
+    // Not clamped when shown: switching from a box (which may have no
+    // border) to a line tool leaves the setting as it was, and lines never
+    // draw thinner than the minimum anyway (`ToolSettings::line_width`).
+    egui::DragValue::new(width).range(tool.width_range()).clamp_existing_to_range(false).speed(0.1).suffix(" pt")
 }
 
 /// Choices that apply to new markup.
@@ -117,6 +155,20 @@ pub struct ToolSettings {
     pub measure: crate::measure_tool::MeasureSettings,
     /// Memory for page pictures (Preferences), in megabytes.
     pub page_memory_megabytes: u32,
+}
+
+impl ToolSettings {
+    /// The width for marks that are only a line (lines, arrows, drawings,
+    /// measurements). The setting may be 0, which boxes take as "no border",
+    /// but a line that thin would not show.
+    pub fn line_width(&self) -> f32 {
+        self.stroke_width.max(MINIMUM_LINE_WIDTH)
+    }
+
+    /// How a new text box or callout looks.
+    pub fn free_text_style(&self) -> FreeTextStyle {
+        FreeTextStyle { color: self.color, fill: self.fill, border_width: self.stroke_width.max(0.0), font_size: self.font_size }
+    }
 }
 
 impl Default for ToolSettings {
@@ -174,12 +226,26 @@ pub struct PendingText {
     pub purpose: TextPurpose,
     pub rect: [f32; 4],
     pub text: String,
+    /// For a callout: where it points and where its box goes.
+    pub callout: Option<CalloutPlacement>,
+}
+
+/// Where a callout points and where its box goes, while its text is typed.
+#[derive(Clone, Copy)]
+pub struct CalloutPlacement {
+    /// The spot called out, where the drag started (page space).
+    pub pointer: (f32, f32),
+    /// Where the drag ended: the box's corner nearest the pointer goes here.
+    pub corner: (f32, f32),
+    /// The page's visible box, which the callout's box stays inside.
+    pub page_bounds: [f32; 4],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TextPurpose {
     Note,
     TextBox,
+    Callout,
     LinkAddress,
     FieldName(FieldKindChoice),
     /// New text drawn into the page itself (not a comment).
@@ -669,7 +735,7 @@ fn draw_overlays(ui: &mut egui::Ui, tab: &DocumentTab, page_index: usize, geomet
         if drag_page == page_index && (tool.drags_a_box() || !tool.selects_text()) && tool != Tool::Ink {
             let rect = [start.0.min(now.0), start.1.min(now.1), start.0.max(now.0), start.1.max(now.1)];
             let shown = screen_rect_of(geometry, page_rect, zoom, rect);
-            if matches!(tool, Tool::Line | Tool::Arrow) {
+            if matches!(tool, Tool::Line | Tool::Arrow | Tool::Callout) {
                 let a = geometry.page_to_top_left(start.0, start.1);
                 let b = geometry.page_to_top_left(now.0, now.1);
                 painter.line_segment([page_rect.min + vec2(a.0, a.1) * zoom, page_rect.min + vec2(b.0, b.1) * zoom], Stroke::new(2.0, crate::theme::highlight()));
@@ -1133,10 +1199,10 @@ fn click(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &
                         _ => TextEditing::start(line),
                     });
                 }
-                None => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::PageText, rect: [point.0, point.1, point.0, point.1], text: String::new() })),
+                None => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::PageText, rect: [point.0, point.1, point.0, point.1], text: String::new(), callout: None })),
             }
         }
-        Tool::Note => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::Note, rect: [point.0, point.1, point.0, point.1], text: String::new() })),
+        Tool::Note => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::Note, rect: [point.0, point.1, point.0, point.1], text: String::new(), callout: None })),
         Tool::Stamp => {
             let width = 150.0;
             let height = 50.0;
@@ -1146,10 +1212,27 @@ fn click(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, settings: &
             annotation.author = settings.author.clone();
             actions.push(ViewerAction::AddAnnotation { page, annotation });
         }
-        Tool::TextBox => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::TextBox, rect: [point.0, point.1 - 40.0, point.0 + 200.0, point.1], text: String::new() })),
-        Tool::CheckBox => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::CheckBox), rect: [point.0, point.1 - 14.0, point.0 + 14.0, point.1], text: String::new() })),
+        Tool::TextBox => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::TextBox, rect: [point.0, point.1 - 40.0, point.0 + 200.0, point.1], text: String::new(), callout: None })),
+        Tool::CheckBox => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::CheckBox), rect: [point.0, point.1 - 14.0, point.0 + 14.0, point.1], text: String::new(), callout: None })),
+        Tool::Callout => {
+            // A click without a drag puts the box a little below and to the right.
+            let corner = (point.0 + CALLOUT_CLICK_OFFSET, point.1 - CALLOUT_CLICK_OFFSET);
+            ask_for_callout_text(tab, page_index, point, corner, actions);
+        }
         _ => {}
     }
+}
+
+/// How far from a clicked spot a callout's box goes when the callout tool
+/// is clicked rather than dragged, in points across and down.
+const CALLOUT_CLICK_OFFSET: f32 = 36.0;
+
+/// Asks for a callout's text; the box is placed once the text is known.
+fn ask_for_callout_text(tab: &DocumentTab, page_index: usize, pointer: (f32, f32), corner: (f32, f32), actions: &mut Vec<ViewerAction>) {
+    let Some(geometry) = tab.pages.get(page_index) else { return };
+    let callout = Some(CalloutPlacement { pointer, corner, page_bounds: geometry.bounds });
+    let page = page_index as u32 + 1;
+    actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::Callout, rect: [corner.0, corner.1, corner.0, corner.1], text: String::new(), callout }));
 }
 
 fn area(rect: [f32; 4]) -> f32 {
@@ -1224,22 +1307,24 @@ fn finish_drag(tab: &mut DocumentTab, state: &mut ViewerState, tool: Tool, setti
         }
         Tool::Rectangle if big_enough => annotation_of(AnnotationKind::Rectangle { rect, fill: settings.fill, border_width: settings.stroke_width }),
         Tool::Ellipse if big_enough => annotation_of(AnnotationKind::Ellipse { rect, fill: settings.fill, border_width: settings.stroke_width }),
-        Tool::Line | Tool::Arrow if (end.0 - start.0).hypot(end.1 - start.1) > 3.0 => annotation_of(AnnotationKind::Line { start, end, arrow_at_end: tool == Tool::Arrow, border_width: settings.stroke_width }),
+        Tool::Line | Tool::Arrow if (end.0 - start.0).hypot(end.1 - start.1) > 3.0 => annotation_of(AnnotationKind::Line { start, end, arrow_at_end: tool == Tool::Arrow, border_width: settings.line_width() }),
         Tool::RedactArea if big_enough => annotation_of(AnnotationKind::RedactionMark { rects: vec![rect] }),
         Tool::Ink => {
             let stroke = std::mem::take(&mut state.ink_stroke);
             state.ink_page = None;
             if !stroke.is_empty() {
-                annotation_of(AnnotationKind::Ink { strokes: vec![stroke], border_width: settings.stroke_width });
+                annotation_of(AnnotationKind::Ink { strokes: vec![stroke], border_width: settings.line_width() });
             }
         }
-        Tool::TextBox if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::TextBox, rect, text: String::new() })),
-        Tool::Link if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::LinkAddress, rect, text: "https://".into() })),
-        Tool::TextField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Text), rect, text: String::new() })),
-        Tool::CheckBox if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::CheckBox), rect, text: String::new() })),
+        Tool::TextBox if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::TextBox, rect, text: String::new(), callout: None })),
+        // Pressed on the spot to call out, released where the box goes.
+        Tool::Callout if (end.0 - start.0).hypot(end.1 - start.1) > 3.0 => ask_for_callout_text(tab, page_index, start, end, actions),
+        Tool::Link if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::LinkAddress, rect, text: "https://".into(), callout: None })),
+        Tool::TextField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Text), rect, text: String::new(), callout: None })),
+        Tool::CheckBox if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::CheckBox), rect, text: String::new(), callout: None })),
         Tool::Sign if big_enough => actions.push(ViewerAction::Sign { page, rect }),
         Tool::TagArea if big_enough => actions.push(ViewerAction::TagArea { page, rect }),
-        Tool::SignatureField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Signature), rect, text: String::new() })),
+        Tool::SignatureField if big_enough => actions.push(ViewerAction::AskForText(PendingText { page, purpose: TextPurpose::FieldName(FieldKindChoice::Signature), rect, text: String::new(), callout: None })),
         _ => {}
     }
 }
@@ -1257,7 +1342,17 @@ pub fn complete_pending_text(pending: &PendingText, settings: &ToolSettings) -> 
     };
     Some(match pending.purpose {
         TextPurpose::Note => ViewerAction::AddAnnotation { page, annotation: with_settings(AnnotationKind::Note { x: pending.rect[0], y: pending.rect[3] }, &pending.text) },
-        TextPurpose::TextBox => ViewerAction::AddAnnotation { page, annotation: with_settings(AnnotationKind::TextBox { rect: pending.rect, font_size: settings.font_size, fill: settings.fill, border_width: if settings.stroke_width > 0.0 { 1.0 } else { 0.0 } }, &pending.text) },
+        TextPurpose::TextBox => ViewerAction::AddAnnotation { page, annotation: with_settings(AnnotationKind::TextBox { rect: pending.rect, font_size: settings.font_size, fill: settings.fill, border_width: settings.stroke_width.max(0.0) }, &pending.text) },
+        TextPurpose::Callout => {
+            let placement = pending.callout?;
+            if pending.text.trim().is_empty() {
+                return None;
+            }
+            let style = settings.free_text_style();
+            let rect = callout_box(placement.pointer, placement.corner, &pending.text, &style, placement.page_bounds);
+            let kind = AnnotationKind::Callout { rect, pointer: placement.pointer, font_size: style.font_size, fill: style.fill, border_width: style.border_width };
+            ViewerAction::AddAnnotation { page, annotation: with_settings(kind, &pending.text) }
+        }
         TextPurpose::LinkAddress => {
             let text = pending.text.trim();
             let target = match text.strip_prefix("page ").or_else(|| text.strip_prefix('#')).and_then(|n| n.trim().parse::<u32>().ok()) {
@@ -1569,5 +1664,60 @@ mod tests {
         assert_eq!(filtered_keystroke(&tab, "amount", "1234", "1x34"), "1234", "a letter typed over a selection is refused");
         assert_eq!(filtered_keystroke(&tab, "amount", "1234", "1534"), "1534", "a digit typed over a selection");
         assert_eq!(filtered_keystroke(&tab, "amount", "1234", "14"), "14", "deleting is allowed");
+    }
+
+    fn pending(purpose: TextPurpose, text: &str, callout: Option<CalloutPlacement>) -> PendingText {
+        PendingText { page: 1, purpose, rect: [72.0, 600.0, 300.0, 660.0], text: text.into(), callout }
+    }
+
+    /// The text box always got a 1 pt border, whatever the line width said.
+    #[test]
+    fn text_boxes_take_the_line_width_as_their_border() {
+        let settings = ToolSettings { stroke_width: 3.5, fill: Some([0.9, 0.9, 1.0]), ..Default::default() };
+        let Some(ViewerAction::AddAnnotation { annotation, .. }) = complete_pending_text(&pending(TextPurpose::TextBox, "Note", None), &settings) else { panic!("no annotation") };
+        let AnnotationKind::TextBox { border_width, fill, .. } = annotation.kind else { panic!("not a text box") };
+        assert_eq!(border_width, 3.5);
+        assert_eq!(fill, Some([0.9, 0.9, 1.0]));
+        let borderless = ToolSettings { stroke_width: 0.0, ..Default::default() };
+        let Some(ViewerAction::AddAnnotation { annotation, .. }) = complete_pending_text(&pending(TextPurpose::TextBox, "Note", None), &borderless) else { panic!("no annotation") };
+        assert!(matches!(annotation.kind, AnnotationKind::TextBox { border_width, .. } if border_width == 0.0));
+    }
+
+    #[test]
+    fn boxes_may_have_no_border_but_lines_always_show() {
+        for tool in [Tool::TextBox, Tool::Callout, Tool::Rectangle, Tool::Ellipse] {
+            assert_eq!(*tool.width_range().start(), 0.0, "{}", tool.label());
+            assert_eq!(tool.width_hint(), "Border width (0 for none)");
+        }
+        for tool in [Tool::Line, Tool::Arrow, Tool::Ink, Tool::Highlight] {
+            assert_eq!(*tool.width_range().start(), MINIMUM_LINE_WIDTH, "{}", tool.label());
+        }
+        let settings = ToolSettings { stroke_width: 0.0, ..Default::default() };
+        assert_eq!(settings.line_width(), MINIMUM_LINE_WIDTH);
+    }
+
+    /// Press on the spot, drag to where the box goes, type: a callout
+    /// pointing at the press with its box's nearest corner at the release.
+    #[test]
+    fn the_callout_gesture_points_at_the_press_and_puts_the_box_at_the_release() {
+        let bytes = quintess_core::create::text_to_pdf("A figure", &Default::default()).unwrap().to_bytes(&quintess_core::SaveSettings::default()).unwrap();
+        let mut tab = DocumentTab::open(1, None, bytes, None).unwrap();
+        let mut state = ViewerState::default();
+        let settings = ToolSettings { stroke_width: 2.0, fill: Some([1.0, 1.0, 0.85]), ..Default::default() };
+        let mut actions = Vec::new();
+        finish_drag(&mut tab, &mut state, Tool::Callout, &settings, 0, (100.0, 600.0), (200.0, 500.0), &mut actions);
+        let Some(ViewerAction::AskForText(mut asked)) = actions.pop() else { panic!("the callout asks for its text") };
+        assert!(asked.purpose == TextPurpose::Callout);
+        asked.text = "This label is wrong".into();
+        let Some(ViewerAction::AddAnnotation { annotation, .. }) = complete_pending_text(&asked, &settings) else { panic!("no annotation") };
+        let AnnotationKind::Callout { rect, pointer, fill, border_width, .. } = annotation.kind else { panic!("not a callout") };
+        assert_eq!(pointer, (100.0, 600.0));
+        assert_eq!((rect[0], rect[3]), (200.0, 500.0), "the box's top-left corner (nearest the pointer) is at the release: {rect:?}");
+        assert_eq!(fill, Some([1.0, 1.0, 0.85]));
+        assert_eq!(border_width, 2.0);
+        assert_eq!(annotation.contents, "This label is wrong");
+        // Nothing typed, nothing added.
+        asked.text = "  ".into();
+        assert!(complete_pending_text(&asked, &settings).is_none());
     }
 }

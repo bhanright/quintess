@@ -439,6 +439,8 @@ impl DocumentTab {
                     engine::LinkTarget::Page(index) => format!("page {}", index + 1),
                 }),
                 quad_rects: Vec::new(),
+                free_text_style: None,
+                is_callout: false,
             })
             .collect();
         self.fields = Vec::new();

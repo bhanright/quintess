@@ -305,7 +305,7 @@ pub(super) const COMMANDS: &[Command] = &[
 ];
 
 /// Tools offered in the palette, besides the commands.
-const PALETTE_TOOLS: [Tool; 24] = [
+pub(super) const PALETTE_TOOLS: [Tool; 25] = [
     Tool::Select,
     Tool::Inspect,
     Tool::Hand,
@@ -316,6 +316,7 @@ const PALETTE_TOOLS: [Tool; 24] = [
     Tool::Squiggly,
     Tool::Note,
     Tool::TextBox,
+    Tool::Callout,
     Tool::Rectangle,
     Tool::Ellipse,
     Tool::Line,

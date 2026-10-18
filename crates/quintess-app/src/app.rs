@@ -100,7 +100,9 @@ pub struct QuintessApp {
 /// `search=text`, `dialog=name`, `tool=edit-text`, `edit-line=N`,
 /// `command=Reverse order` (any command by its label), `crash` (to test the crash handler),
 /// `edit-field=Field name;typed value` (opens a form field's editor),
-/// `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
+/// `tool=text-box` (any tool by its label, hyphens for spaces), `fill=r;g;b`
+/// (or `fill=none`), `line-width=N`, `select-comment=N` (the Nth comment, as the
+/// Comments panel lists them), `edit-paragraph=N`, `edit-text=new text` (`;` stands for a comma, after
 /// `edit-paragraph`), `show-result`, `wait=seconds` and
 /// `sidebar=comments|fields|bookmarks|search|layers|tags`, `reading-order`,
 /// `tool=edit-objects`, `select-object=x;y` (page points), then
@@ -214,6 +216,32 @@ impl QuintessApp {
                 "tool" if value == "edit-text" => self.tool = Tool::EditText,
                 "tool" if value == "edit-objects" => self.tool = Tool::EditObjects,
                 "tool" if value == "measure" => self.tool = Tool::Measure,
+                "tool" => {
+                    // Any other tool by its label, with hyphens for spaces ("text-box", "callout").
+                    if let Some(tool) = commands::PALETTE_TOOLS.iter().find(|tool| tool.label().to_lowercase().replace(' ', "-") == value) {
+                        self.tool = *tool;
+                    }
+                }
+                "fill" => {
+                    // r;g;b from 0 to 1, or "none"
+                    let channels: Vec<f32> = value.split(';').filter_map(|n| n.parse().ok()).collect();
+                    self.tool_settings.fill = match channels[..] {
+                        [red, green, blue] => Some([red, green, blue]),
+                        _ => None,
+                    };
+                }
+                "line-width" => {
+                    if let Ok(width) = value.parse() {
+                        self.tool_settings.stroke_width = width;
+                    }
+                }
+                "select-comment" => {
+                    // The Nth comment (1-based, in the Comments panel's order).
+                    if let (Some(tab), Ok(number)) = (self.tab(), value.parse::<usize>()) {
+                        let comment = tab.annotations.iter().filter(|a| a.subtype != "Link" && a.subtype != "Widget" && a.reply_to.is_none()).nth(number.saturating_sub(1)).map(|a| a.id);
+                        tab.selected_annotation = comment;
+                    }
+                }
                 "measure-area" => self.tool_settings.measure.kind = quintess_core::measure::MeasureKind::Area,
                 "scale" => {
                     if let Ok(scale) = quintess_core::measure::Scale::parse(value) {
@@ -843,6 +871,12 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
     /// Runs an edit on the active document as one undoable step.
     fn edit(&mut self, label: &str, change: impl FnOnce(&mut Pdf) -> anyhow::Result<()>) {
         self.try_edit(label, change);
+    }
+
+    /// Gives a text box or callout a new border color, fill or border width.
+    fn restyle_free_text(&mut self, id: (u32, u16), is_callout: bool, style: quintess_core::annotations::FreeTextStyle) {
+        let label = if is_callout { "Restyle callout" } else { "Restyle text box" };
+        self.edit(label, |pdf| quintess_core::annotations::restyle_free_text(pdf, id, &style));
     }
 
     /// An edit that removes content for good (see `DocumentTab::apply_removing`).
@@ -1619,7 +1653,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
 
     fn tools_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Comment", |ui| {
-            for tool in [Tool::Highlight, Tool::Underline, Tool::StrikeOut, Tool::Squiggly, Tool::Note, Tool::TextBox, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Arrow, Tool::Ink, Tool::Stamp, Tool::Link] {
+            for tool in [Tool::Highlight, Tool::Underline, Tool::StrikeOut, Tool::Squiggly, Tool::Note, Tool::TextBox, Tool::Callout, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Arrow, Tool::Ink, Tool::Stamp, Tool::Link] {
                 self.tool_menu_button(ui, tool, tool.label());
             }
             ui.separator();
@@ -2082,6 +2116,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                 (Tool::StrikeOut, "S̶"),
                 (Tool::Note, "🗨"),
                 (Tool::TextBox, "T"),
+                (Tool::Callout, "T↗"),
                 (Tool::Rectangle, "▭"),
                 (Tool::Ellipse, "◯"),
                 (Tool::Arrow, "↗"),
@@ -2099,13 +2134,13 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
             }
             ui.separator();
             ui.color_edit_button_rgb(&mut self.tool_settings.color).on_hover_text("Markup color");
-            ui.add(egui::DragValue::new(&mut self.tool_settings.stroke_width).range(0.5..=12.0).speed(0.1).suffix(" pt")).on_hover_text("Line width");
+            ui.add(viewer::line_width_field(&mut self.tool_settings.stroke_width, self.tool)).on_hover_text(self.tool.width_hint());
             let mut filled = self.tool_settings.fill.is_some();
-            if ui.checkbox(&mut filled, "Fill").on_hover_text("Fill shapes and text boxes").changed() {
-                self.tool_settings.fill = filled.then_some([1.0, 1.0, 0.85]);
+            if ui.checkbox(&mut filled, "Fill").on_hover_text("Fill shapes, text boxes and callouts").changed() {
+                self.tool_settings.fill = filled.then_some(viewer::DEFAULT_FILL_COLOR);
             }
             if let Some(fill) = self.tool_settings.fill.as_mut() {
-                ui.color_edit_button_rgb(fill);
+                ui.color_edit_button_rgb(fill).on_hover_text("Fill color");
             }
             ui.separator();
             ui.toggle_value(&mut self.organizer, "▦ Organize").on_hover_text(if read_only { "See the pages side by side (this file is open for reading only, so they can't be rearranged)" } else { "Rearrange, rotate and delete pages" });
@@ -2412,7 +2447,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     let page = page_index as u32 + 1;
                     let chosen = self.tool_settings.measure.scale.clone();
                     let Some(scale) = self.tabs.get(self.active).map(|tab| tab.measuring_scale(page_index, points[0], &chosen)) else { continue };
-                    let annotation = quintess_core::annotations::NewAnnotation::new(quintess_core::annotations::AnnotationKind::Measurement { kind, points, scale, border_width: self.tool_settings.stroke_width.min(2.0) }).with_color(self.tool_settings.color);
+                    let annotation = quintess_core::annotations::NewAnnotation::new(quintess_core::annotations::AnnotationKind::Measurement { kind, points, scale, border_width: self.tool_settings.line_width().min(2.0) }).with_color(self.tool_settings.color);
                     self.edit("Measure", |pdf| quintess_core::annotations::add_annotation(pdf, page, &annotation).map(|_| ()));
                 }
                 ViewerAction::Calibrate { points_length } => self.dialogs.push(Dialog::MeasureScale { text: String::new(), calibrated_points: Some(points_length), length: String::new(), unit: "ft".into() }),
@@ -2437,6 +2472,7 @@ Redaction of scanned pages keeps the rest of the scan.".into(), page: "https://g
                     self.edit_removing("Delete comment", |pdf| delete_annotation(pdf, id));
                 }
                 SidebarAction::EditAnnotation(id, text) => self.edit("Edit comment", |pdf| set_annotation_contents(pdf, id, &text)),
+                SidebarAction::RestyleAnnotation { id, is_callout, style } => self.restyle_free_text(id, is_callout, style),
                 SidebarAction::ReplyToAnnotation(id, text) => {
                     let author = self.tool_settings.author.clone();
                     self.edit("Reply", |pdf| reply_to_annotation(pdf, id, &text, &author).map(|_| ()));
@@ -2896,6 +2932,7 @@ fn annotation_label(kind: &quintess_core::annotations::AnnotationKind) -> &'stat
         Squiggly { .. } => "squiggly underline",
         Note { .. } => "note",
         TextBox { .. } => "text box",
+        Callout { .. } => "callout",
         Rectangle { .. } => "rectangle",
         Ellipse { .. } => "ellipse",
         Line { .. } => "line",

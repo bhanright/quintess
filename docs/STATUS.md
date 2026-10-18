@@ -694,6 +694,32 @@ et.rs`): .pfx/.p12
   self-check `read-only-details`. Not done: comments, form fields and
   attachments of a read-only file (lopdf reads those; PDFium could list
   attachments), and its links open only web addresses and pages.
+- Text boxes and callouts (a user request filed against another PDF
+  editor): fill color and border thickness. `AnnotationKind::Callout` is a
+  standard FreeText callout (/IT /FreeTextCallout, /CL pointer-knee-attach
+  with the attach point mid-side of the box side facing the pointer, /LE
+  /OpenArrow, /RD, /BS, /IC, /DA, /C) with an appearance stream (line and
+  open arrowhead, fill, border, wrapped text). Creation and restyling draw
+  through one builder (`draw_free_text`, `write_free_text_entries`);
+  `restyle_free_text` reads Rect, RD, CL, Contents, DA, IC, BS (or Border),
+  C and CA back and redraws, keeping text, box and pointer;
+  `set_annotation_contents` now redraws FreeText too (and drops /RC).
+  `callout_box` places the box from the gesture (press on the spot, release
+  where the box goes; its nearest corner at the release, wrapped at 180 pt,
+  kept on the page). `AnnotationSummary::free_text_style` and `is_callout`
+  feed the UI. App: text boxes take the line width as their border (it was
+  always 1 pt); the width goes down to 0 for text boxes, callouts,
+  rectangles and ellipses (`Tool::width_range`, "Border width (0 for
+  none)"), lines and ink never below 0.5 (`ToolSettings::line_width`); the
+  Studio dock got the Fill toggle and color; the Callout tool is in Studio's
+  More tools, the Classic tool row, Tools ▸ Comment and the palette; a
+  selected text box or callout shows border color, Fill and width in the
+  dock (Select tool) and its Comments card, each change one undoable edit
+  (applied when the mouse button is up). The CLI has no command that adds
+  comments, so it has no options for this. Tests:
+  `crates/quintess-core/tests/text_boxes_and_callouts.rs` and three in
+  `viewer.rs`; self-check setup options `tool=<label>`, `fill=r;g;b`,
+  `line-width=N`, `select-comment=N`.
 
 ## To do
 
