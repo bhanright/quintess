@@ -80,3 +80,29 @@ fn comparison_finds_text_and_visual_changes() {
     let same = compare::compare(&old_document, &engine::open_document(old, None).unwrap(), 72.0).unwrap();
     assert!(same.is_identical());
 }
+
+/// Photos become A4 pages by default, each turned to match its picture and
+/// the picture fitted inside the margin, instead of pages the size of the
+/// photo (a 4000 × 3000 pixel photo was a page over two feet wide).
+#[test]
+fn images_become_a4_pages_turned_to_match_by_default() {
+    let landscape = folder().join("landscape-photo.png");
+    let portrait = folder().join("portrait-photo.png");
+    image::RgbImage::from_pixel(4000, 3000, image::Rgb([200, 200, 200])).save(&landscape).unwrap();
+    image::RgbImage::from_pixel(3000, 4000, image::Rgb([200, 200, 200])).save(&portrait).unwrap();
+    let mut pdf = images_to_pdf(&[landscape.clone(), portrait], &ImagePageSettings::default()).unwrap();
+    let document = engine::open_document(pdf.to_bytes(&SaveSettings::default()).unwrap(), None).unwrap();
+    let sizes: Vec<(i32, i32)> = engine::page_sizes(&document).iter().map(|(width, height)| (width.round() as i32, height.round() as i32)).collect();
+    assert_eq!(sizes, [(842, 595), (595, 842)]);
+    // A 4:3 picture on landscape A4 is limited by the height: it fills the
+    // page top to bottom inside the quarter-inch margin, centered across.
+    let pictures = quintess_core::images::extract_images(&document, 1).unwrap();
+    let [left, bottom, right, top] = pictures[0].bounds;
+    assert!((bottom - 18.0).abs() < 1.0 && (top - (595.28 - 18.0)).abs() < 1.0, "{bottom} to {top}");
+    assert!((left - (841.89 - right)).abs() < 1.0, "centered: {left} and {right}");
+
+    // Each picture's own size is still available.
+    let mut own_size = images_to_pdf(&[landscape], &ImagePageSettings { page_size: None, margin: 0.0, ..Default::default() }).unwrap();
+    let document = engine::open_document(own_size.to_bytes(&SaveSettings::default()).unwrap(), None).unwrap();
+    assert_eq!(engine::page_sizes(&document)[0], (1920.0, 1440.0));
+}

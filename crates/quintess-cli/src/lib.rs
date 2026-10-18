@@ -751,10 +751,13 @@ enum CreateSource {
     Images {
         #[arg(required = true)]
         images: Vec<PathBuf>,
-        /// A fixed paper size; otherwise pages match the images.
-        #[arg(long)]
-        size: Option<String>,
-        #[arg(long, default_value_t = 0.0)]
+        /// Paper size, each image scaled to fit and the page turned to
+        /// match it (letter, legal, a3, a4, a5...), or "original" for pages
+        /// the size of the images.
+        #[arg(long, default_value = "a4")]
+        size: String,
+        /// Space around each image, in points.
+        #[arg(long, default_value_t = 18.0)]
         margin: f32,
         #[arg(short, long)]
         output: PathBuf,
@@ -1754,7 +1757,8 @@ fn info_from_pdfium(input: &Input, bytes: &[u8], document: &quintess_core::pdfiu
 fn create(source: CreateSource) -> Result<()> {
     match source {
         CreateSource::Images { images, size, margin, output } => {
-            let settings = ImagePageSettings { page_size: size.map(|s| paper(&s, false)).transpose()?, margin, ..Default::default() };
+            let page_size = if size.eq_ignore_ascii_case("original") { None } else { Some(paper(&size, false)?) };
+            let settings = ImagePageSettings { page_size, margin, ..Default::default() };
             save_to(&mut images_to_pdf(&images, &settings)?, &output)?;
         }
         CreateSource::Text { file, size, font: font_name, font_size, output } => {

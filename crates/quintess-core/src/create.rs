@@ -15,8 +15,10 @@ use crate::pages::number;
 /// How each image is laid onto its page.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImagePageSettings {
-    /// A fixed page size in points; `None` makes each page the image's own
-    /// size at `dpi`.
+    /// A fixed page size in points, each image scaled to fit inside the
+    /// margin and centered; `None` makes each page the image's own size at
+    /// `dpi`. A4 by default: photos from phones and cameras would otherwise
+    /// make pages over a yard wide, each a different size.
     pub page_size: Option<(f32, f32)>,
     /// Pixels per inch used when the page takes the image's size.
     pub dpi: f32,
@@ -27,9 +29,25 @@ pub struct ImagePageSettings {
 
 impl Default for ImagePageSettings {
     fn default() -> Self {
-        Self { page_size: None, dpi: 150.0, margin: 0.0, auto_orient: true }
+        // A quarter-inch margin, so a page printed at 100% isn't cropped
+        // by the printer's unprintable edge.
+        Self { page_size: Some(A4_POINTS), dpi: 150.0, margin: 18.0, auto_orient: true }
     }
 }
+
+/// A4 in points, the default page for documents made from images.
+pub const A4_POINTS: (f32, f32) = (595.28, 841.89);
+
+/// Paper sizes offered for documents made from images, by name; `None` is
+/// each image's own size.
+pub const IMAGE_PAGE_SIZES: [(&str, Option<(f32, f32)>); 6] = [
+    ("A4", Some(A4_POINTS)),
+    ("Letter", Some((612.0, 792.0))),
+    ("Legal", Some((612.0, 1008.0))),
+    ("A3", Some((841.89, 1190.55))),
+    ("A5", Some((419.53, 595.28))),
+    ("Each image's own size", None),
+];
 
 /// One page per image file, in order.
 pub fn images_to_pdf(image_paths: &[PathBuf], settings: &ImagePageSettings) -> Result<Pdf> {

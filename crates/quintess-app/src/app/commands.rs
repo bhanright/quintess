@@ -559,10 +559,8 @@ impl QuintessApp {
 
     pub(super) fn create_from_images(&mut self) {
         if let Some(images) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff"]).pick_files() {
-            let result = images_to_pdf(&images, &ImagePageSettings::default()).and_then(|mut pdf| pdf.to_bytes(&SaveSettings::default()));
-            if let Some(bytes) = self.report(result) {
-                self.open_new_document("Images.pdf".into(), bytes);
-            }
+            // A4 first; the dialog offers other paper sizes and the images' own size.
+            self.dialogs.push(Dialog::ImagesToPdf { images, paper: 0, margin: ImagePageSettings::default().margin });
         }
     }
 

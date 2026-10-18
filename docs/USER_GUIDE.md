@@ -225,7 +225,7 @@ All of these are under **File ▸ Create**. Each new PDF opens in a new tab, uns
 ## Blank documents, pictures and text
 
 - **Blank document**: one empty letter-size page.
-- **From images…**: one page per picture (PNG, JPEG, GIF, BMP, WebP or TIFF), sized to the picture.
+- **From images…**: one page per picture (PNG, JPEG, GIF, BMP, WebP or TIFF). Choose the page size: A4 (the default), Letter, Legal, A3, A5, or each picture's own size. On a paper size, each picture is scaled to fit inside the margin (a quarter inch unless you change it), centered, and the page is turned to match the picture, so the pages print at 100% without cropping. Pictures dropped onto the window become A4 pages too. From the command line: `quintess create images *.jpg -o photos.pdf` (`--size letter`, `--size original`, `--margin 0`).
 - **From text or Markdown…**: a plain text file or a Markdown file, typeset with simple styles.
 
 ## Office documents and web pages

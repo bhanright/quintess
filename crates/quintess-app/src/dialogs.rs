@@ -186,6 +186,8 @@ pub enum Dialog {
     About,
     Preferences(quintess_core::settings::Settings),
     Optimize { preset: usize, dpi: f32, quality: u8, grayscale: bool, remove_metadata: bool },
+    /// Make a PDF from pictures: `paper` indexes create::IMAGE_PAGE_SIZES.
+    ImagesToPdf { images: Vec<PathBuf>, paper: usize, margin: f32 },
     /// `steps` describes the chosen action's steps.
     Batch { action: Option<PathBuf>, inputs: Vec<PathBuf>, steps: Vec<String>, run: RunChoices },
     CreateIdentity { name: String, email: String, organization: String },
@@ -393,6 +395,7 @@ impl Dialog {
             Dialog::About => "About Quintess",
             Dialog::Preferences(_) => "Preferences",
             Dialog::Optimize { .. } => "Reduce file size",
+            Dialog::ImagesToPdf { .. } => "Create a PDF from images",
             Dialog::Batch { .. } => "Run an action on files",
             Dialog::CreateIdentity { .. } => "Create a signing identity",
             Dialog::TextResult { title, .. } => title,
@@ -1377,6 +1380,31 @@ fn body(ui: &mut egui::Ui, dialog: &mut Dialog, tab: Option<&mut DocumentTab>, o
                     outcome.keep_open = false;
                 }
             });
+            return Ok(());
+        }
+        Dialog::ImagesToPdf { images, paper, margin } => {
+            use quintess_core::create::IMAGE_PAGE_SIZES;
+            ui.label(format!("{} image{}, one per page.", images.len(), if images.len() == 1 { "" } else { "s" }));
+            egui::ComboBox::from_label("Page size").selected_text(IMAGE_PAGE_SIZES[*paper].0).show_ui(ui, |ui| {
+                for (index, (name, _)) in IMAGE_PAGE_SIZES.iter().enumerate() {
+                    ui.selectable_value(paper, index, *name);
+                }
+            });
+            if IMAGE_PAGE_SIZES[*paper].1.is_some() {
+                ui.horizontal(|ui| {
+                    ui.label("Margin");
+                    ui.add(egui::DragValue::new(margin).range(0.0..=144.0).speed(1.0).suffix(" pt"));
+                });
+                ui.weak("Each image is scaled to fit and centered, and the page is turned to match it.");
+            } else {
+                ui.weak("Each page is the size of its image at 150 DPI.");
+            }
+            if buttons(ui, "Create", outcome) {
+                let settings = quintess_core::create::ImagePageSettings { page_size: IMAGE_PAGE_SIZES[*paper].1, margin: if IMAGE_PAGE_SIZES[*paper].1.is_some() { *margin } else { 0.0 }, ..Default::default() };
+                let mut pdf = quintess_core::create::images_to_pdf(images, &settings)?;
+                outcome.requests.push(AppRequest::OpenDocument { title: "Images.pdf".into(), bytes: pdf.to_bytes(&Default::default())? });
+                outcome.keep_open = false;
+            }
             return Ok(());
         }
         Dialog::Convert(convert) => {
